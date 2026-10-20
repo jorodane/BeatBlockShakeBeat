@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/HUD.h"
 #include "BBSBFieldGesture.h"
+#include "BBSBWeaponAnimation.h"
 #include "Combat/BBSBCombatRules.h"
 #include "BBSBFieldActions.generated.h"
 
@@ -19,9 +20,6 @@ class UPrimitiveComponent;
 class UAudioComponent;
 class USoundWaveProcedural;
 class ABBSBWeaponVerification;
-
-UENUM(BlueprintType)
-enum class EBBSBPrototypeWeapon : uint8 { Legacy, Greatsword, Spear, Hammer, Sword, Dagger, Crescent };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FBBSBFieldGestureEvent, EBBSBFieldGesture, Gesture, int32, MouseChannel, float, Charge);
 
@@ -50,6 +48,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") float BaseDamage = 18.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") FName WeaponName = "Floating baton";
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") EBBSBPrototypeWeapon PrototypeWeapon=EBBSBPrototypeWeapon::Greatsword;
+	/** Assign a different animation set per weapon; keys and timing are editable without C++. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Animations") TMap<EBBSBPrototypeWeapon,TSoftObjectPtr<UBBSBWeaponAnimationSet>> WeaponAnimationSets;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Animations") TObjectPtr<UBBSBWeaponAnimationSet> ActiveWeaponAnimationSet;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") float WeaponChargeSeconds=0;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") int32 SwordComboStep=0;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") float LastWeaponDamage=0;
@@ -64,6 +65,7 @@ public:
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Interaction") bool bWeaponAimLocked=false;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Interaction") FVector LockedAimPoint;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Interaction") TObjectPtr<AActor> LockedAimActor;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Interaction") bool bSpearEmbedded=false;
 	UFUNCTION(BlueprintCallable, Category="BBSB|Weapon") bool SelectPrototypeWeapon(EBBSBPrototypeWeapon Type);
 	void NextPrototypeWeapon();
 	FString PrototypeWeaponLabel() const;
@@ -134,6 +136,9 @@ private:
 		float DamageScale = 1.f;
 		FVector OwnerOrigin = FVector::ZeroVector;
 		FVector Target = FVector::ZeroVector;
+		TWeakObjectPtr<AActor> AimActor;
+		FVector AimLocalPoint = FVector::ZeroVector;
+		bool bRestrictToAimActor=false;
 		FVector Direction = FVector::ForwardVector;
 		bool bPrototype=false;
 		float ExactDamage=0;
@@ -142,6 +147,8 @@ private:
 		bool bHasPrevious=false;
 		int32 ComboStep=1;
 		FTransform StartPose;
+		FBBSBWeaponAnimationClip Motion;
+		bool bAuthoredMotion=false;
 		TSet<TWeakObjectPtr<AActor>> HitActors;
 	};
 	UPROPERTY(Transient) TObjectPtr<ACharacter> Character;
@@ -170,12 +177,15 @@ private:
 	double DaggerAwayUntil[2]={-100,-100};
 	FVector LockedAimLocalPoint, LockedApproach=FVector::ForwardVector;
 	int32 AimLockChannel=-1;
+	bool bAimCameraNearAnchor=false;
+	TWeakObjectPtr<AActor> SpearPiercedActor;
 	double AimLockStartedAt=-100;
 	FTransform AimLockWeaponFrom;
 	FTransform FollowThroughPose[2];
 	double FollowThroughUntil[2]={-100,-100};
 	bool bHasFollowThrough[2]={false,false};
 	FTransform CurrentUpperPose, CurrentLowerPose;
+	float FormProgress=0;
 	FBBSBActionArbiter Arbiter;
 	UPROPERTY(Transient) TObjectPtr<UAnimMontage> ActionMontage;
 	struct FHoverState { TWeakObjectPtr<UPrimitiveComponent> Primitive; bool bDepth=false; int32 Stencil=0; };
@@ -229,6 +239,7 @@ private:
 	FVector FindPrototypeCursorPoint(AActor** TargetActor=nullptr) const;
 	void AcquireWeaponAim(int32 Channel);
 	void ClearWeaponAim();
+	void ReleaseSpearEmbed(bool bReturnToRest=false);
 	void UpdateWeaponAim();
 	FTransform PrototypeAttackPose(const FWeaponAction& Action,float Progress) const;
 	void WeaponOne(); void WeaponTwo(); void WeaponThree(); void WeaponFour(); void WeaponFive(); void WeaponSix();
@@ -295,8 +306,11 @@ public:
 	UPROPERTY(VisibleAnywhere) FVector FrozenTarget;
 	UPROPERTY(VisibleAnywhere) FVector FlightVelocity;
 	UPROPERTY(VisibleAnywhere) float Damage=18;
-	void Launch(ACharacter* Shooter,FVector Target,float Amount,UStaticMesh* Mesh);
+	void Launch(ACharacter* Shooter,FVector Target,float Amount,UStaticMesh* Mesh,UBBSBWeaponAnimationSet* AnimationSet=nullptr);
 private:
 	TWeakObjectPtr<ACharacter> SourceCharacter;
+	UPROPERTY(Transient) TObjectPtr<ULevelSequence> FlightSequence;
+	FVector FlightOrigin;
+	float FlightDistance=0, FlightSeconds=1;
 	float Age=0;
 };

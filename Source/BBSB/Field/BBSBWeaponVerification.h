@@ -26,6 +26,8 @@ private:
  UPROPERTY() TObjectPtr<UBBSBCombatComponent> Combat;
  UPROPERTY() TObjectPtr<ABBSBBreakableProp> Target;
  UPROPERTY() TObjectPtr<ABBSBInkEnemy> Enemy;
+ UPROPERTY() TObjectPtr<ABBSBInkEnemy> RetargetEnemy;
+ UPROPERTY() TObjectPtr<ABBSBBreakableProp> RetargetProp;
  UPROPERTY() TObjectPtr<AActor> Wall;
  FTransform OriginalTransform;
  FRotator OriginalView;
@@ -39,6 +41,8 @@ private:
  FVector SavedAim;
  FRotator CameraBefore;
  float ChargeDistanceBefore=0;
+ float RetargetHealthBefore=0;
+ FTransform SpearRelativeBefore;
  void Check(bool Condition,const TCHAR* Message);
  void Advance(int32 Next);
  void AimAt(FVector Position);

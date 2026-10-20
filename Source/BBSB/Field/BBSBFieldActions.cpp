@@ -78,6 +78,9 @@ namespace
 
 UBBSBFieldActionComponent::UBBSBFieldActionComponent()
 {
+	const TCHAR* AnimationNames[]={TEXT("Legacy"),TEXT("Greatsword"),TEXT("Spear"),TEXT("Hammer"),TEXT("Sword"),TEXT("Dagger"),TEXT("Crescent")};
+	for (int32 I=1;I<7;++I)
+		WeaponAnimationSets.Add(EBBSBPrototypeWeapon(I),TSoftObjectPtr<UBBSBWeaponAnimationSet>(FSoftObjectPath(FString::Printf(TEXT("/Game/BBSB/AnimationAuthoring/%s/DA_%s.DA_%s"),AnimationNames[I],AnimationNames[I],AnimationNames[I]))));
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 	WeaponViewTick.bCanEverTick = true;
@@ -526,6 +529,7 @@ bool UBBSBFieldActionComponent::EmitGesture(EBBSBFieldGesture Gesture, int32 Cha
 		++RejectedActions; return false;
 	}
 	CancelCurrentAction(false);
+	if (Gesture==EBBSBFieldGesture::Beat) AcquireWeaponAim(Channel);
 	Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,Now); ActiveState=EBBSBActionState::Attack;
 	if (Rule.bLockMovement) { Character->ConsumeMovementInputVector(); Character->GetCharacterMovement()->StopMovementImmediately(); }
 	if (Combat) Combat->OnAttackStarted();
@@ -541,7 +545,7 @@ bool UBBSBFieldActionComponent::EmitGesture(EBBSBFieldGesture Gesture, int32 Cha
 	Action.Charge = Charge;
 	Action.StartedAt=Now; Action.Revision=Arbiter.Revision; Action.OwnerOrigin=Character->GetActorLocation();
 	Action.DamageScale=Rule.DamageMultiplier*(Combat ? Combat->DamageMultiplier() : 1.f);
-	Action.Target = FindAimPoint();
+	Action.Target = bWeaponAimLocked ? LockedAimPoint : FindAimPoint();
 	LastAimPoint=Action.Target; LastTraceSummary=TEXT("No active sweep hit");
 	Action.Direction = (Action.Target - Character->GetActorLocation()).GetSafeNormal2D();
 	if (Action.Direction.IsNearlyZero()) Action.Direction = Character->GetActorForwardVector();
@@ -632,6 +636,7 @@ void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& 
 	{
 		AActor* Actor = Hit.GetActor();
 		if (!Actor || Action.HitActors.Contains(Actor)) continue;
+		if (Action.bRestrictToAimActor && Actor!=Action.AimActor.Get()) continue;
 		ABBSBBreakableProp* Prop = Cast<ABBSBBreakableProp>(Actor);
 		ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(Actor);
 		if ((!Prop || Prop->bBroken) && (!Enemy || Enemy->bDefeated)) continue;
@@ -653,6 +658,13 @@ void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& 
 		LastHitLabel = FString::Printf(TEXT("%s  %.0f%s"),GestureName(Gesture),Damage,Prop && Prop->bBroken ? TEXT("  BREAK!") : Enemy && Enemy->bDefeated ? TEXT("  DOWN!") : TEXT(""));
 		UE_LOG(LogBBSB, Display, TEXT("Field Hit %s target=%s hp=%.1f"),GestureName(Gesture),*Actor->GetName(),Prop ? Prop->Health : Enemy->Health);
 		if (Arbiter.Revision!=Revision) return;
+		if (PrototypeWeapon==EBBSBPrototypeWeapon::Spear && Gesture==EBBSBFieldGesture::Beat
+			&& Channels[Action.Channel].bHeld && (!Enemy || !Enemy->bDefeated) && (!Prop || !Prop->bBroken))
+		{
+			FloatingWeapon->SetActorTransform(PrototypeAttackPose(Action,1.f));
+			if (FloatingWeapon->AttachToActor(Actor,FAttachmentTransformRules::KeepWorldTransform))
+			{ bSpearEmbedded=true; SpearPiercedActor=Actor; }
+		}
 	}
 }
 

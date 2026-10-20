@@ -57,6 +57,7 @@ void ABBSBWeaponVerification::Tick(float DT)
   if (Age>0.5)
   {
    Check(Actions->Blade->GetStaticMesh()->GetPathName().Contains(TEXT("/BroadSword/")),TEXT("Greatsword floating model uses the authored weapon rather than Reparaton"));
+   Check(Actions->ActiveWeaponAnimationSet && Actions->ActiveWeaponAnimationSet->Clips.Num()>0,TEXT("Game loads the editor-authored weapon animation set"));
    Check(Actions->ConductorFull->IsVisible() && Actions->ConductorFull->GetStaticMesh()->GetPathName().Contains(TEXT("/Reparaton/"))
     && FVector::Dist(Actions->FloatingWeapon->GetActorLocation(),Actions->ConductorWeapon->GetActorLocation())>60,TEXT("Visible hand-held Reparaton and floating weapon remain separate"));
    Actions->FieldGesturePress(0); Advance(1);
@@ -101,10 +102,17 @@ void ABBSBWeaponVerification::Tick(float DT)
   }
   break;
  case 7:
+  if (!RetargetProp)
+  {
+   RetargetProp=GetWorld()->SpawnActor<ABBSBBreakableProp>(Target->GetActorLocation()+FVector(0,240,0),FRotator::ZeroRotator);
+   RetargetProp->MaximumHealth=10000; RetargetProp->ResetProp();
+  }
+  AimAt(RetargetProp->GetActorLocation()+FVector(0,0,35));
   Actions->FieldGestureMotion(Frame%2 ? 35 : -35,0);
   if (Age>0.24)
   {
    Check(Actions->WeaponChargeSeconds<ChargeBefore && Actions->WeaponChargeSeconds>0,TEXT("Recognized Shake consumes part of the hammer charge")); ChargeBefore=Actions->WeaponChargeSeconds; Advance(8);
+   Check(Actions->CurrentAction.IsSet() && Actions->CurrentAction->AimActor.Get()==Target && Actions->LockedAimActor==Target,TEXT("Hammer Shake keeps the right-click actor when aiming at another prop"));
   }
   break;
  case 8:
@@ -122,13 +130,21 @@ void ABBSBWeaponVerification::Tick(float DT)
   }
   break;
  case 10:
-  if (Age>0.025) { Actions->FieldGestureRelease(1); Advance(11); }
+  if (Age>0.025)
+  {
+   AimAt(RetargetProp->GetActorLocation()+FVector(0,0,35));
+   Actions->FieldGestureRelease(1);
+   Check(Actions->CurrentAction.IsSet() && Actions->CurrentAction->AimActor.Get()==Target,TEXT("Hammer Flick uses the original right-click actor rather than release aim"));
+   Advance(11);
+  }
   break;
  case 11:
   if (Age>1.4)
   {
    Check(Actions->WeaponChargeSeconds==0,TEXT("Hammer Flick spends its entire reservoir"));
    Check(FMath::IsNearlyEqual(HealthBefore-Target->Health,18.9f,0.05f),TEXT("Hammer Flick converts charge at exactly 0.75 of Shake efficiency"));
+   Check(RetargetProp && RetargetProp->Health==RetargetProp->MaximumHealth,TEXT("Changing aim during hammer gestures does not redirect damage to prop B"));
+   RetargetProp->Destroy(); RetargetProp=nullptr;
    Actions->SelectPrototypeWeapon(EBBSBPrototypeWeapon::Sword); HealthBefore=Target->Health; Counter=0; Advance(12);
    Check(Actions->Blade->GetStaticMesh()->GetPathName().Contains(TEXT("/Sword/")) && Actions->OtherConductorWeapon->GetAttachParentActor()==Character,TEXT("Sword floats independently of both held conductor halves"));
   }
@@ -182,6 +198,7 @@ void ABBSBWeaponVerification::Tick(float DT)
   }
   break;
  case 17:
+  AimAt(Enemy->GetAimPoint());
   if (Age>2.2)
   {
    Check(Actions->Blade->GetStaticMesh()->GetPathName().Contains(TEXT("/Spear/")),TEXT("Spear attacks use the authored spear model"));
@@ -190,24 +207,47 @@ void ABBSBWeaponVerification::Tick(float DT)
    Check(PC->IsLookInputIgnored() && PC->RotationInput.IsNearlyZero() && Actions->GetLookInputScale()==0,TEXT("Combat lock rejects rotation input before it can move the camera"));
    FVector2D Screen; int32 Width,Height; PC->GetViewportSize(Width,Height); PC->ProjectWorldLocationToScreen(Character->GetActorLocation(),Screen);
    Check(Width>0 && Height>0 && Screen.X/Width<0.4 && Screen.Y/Height>0.55,TEXT("Combat frame keeps the player at lower left"));
-   Actions->FieldGesturePress(0); HealthBefore=Enemy->Health; Advance(18);
+   Actions->FieldGesturePress(0); HealthBefore=Enemy->Health; Counter=0;
+   Check(Actions->LockedAimActor==Enemy,TEXT("Spear Beat captures the enemy actually clicked in the combat frame")); Advance(18);
+   Check(Actions->CurrentAction.IsSet() && Actions->CurrentAction->bAuthoredMotion && Actions->CurrentAction->Motion.Sequence
+    && FMath::IsNearlyEqual(Actions->CurrentAction->Duration,Actions->CurrentAction->Motion.Duration),TEXT("Spear action consumes its editable Sequencer clip and duration"));
   }
   break;
  case 18:
-  if (Age>0.4)
+  if (Age>0.75 && Counter==0)
   {
    Check(Enemy->Health<HealthBefore,TEXT("Spear Beat executes a fast physical thrust"));
    Check((Character->GetController()->GetControlRotation()-CameraBefore).GetNormalized().IsNearlyZero(0.001f),TEXT("Combat camera remains exact instead of rotating and easing back"));
+   Check(Actions->bSpearEmbedded && Actions->SpearPiercedActor.Get()==Enemy && Actions->FloatingWeapon->GetAttachParentActor()==Enemy
+    && !Actions->CurrentAction.IsSet(),TEXT("Spear stays embedded in struck enemy after the Beat animation finishes"));
+   SpearRelativeBefore=Actions->FloatingWeapon->GetActorTransform().GetRelativeTransform(Enemy->GetActorTransform());
+   Enemy->AddActorWorldOffset(FVector(0,35,0),false); HealthBefore=Enemy->Health; Counter=1;
+  }
+  if (Age>1.25 && Counter==1)
+  {
+   Check(Actions->bSpearEmbedded && Actions->FloatingWeapon->GetActorTransform().GetRelativeTransform(Enemy->GetActorTransform()).Equals(SpearRelativeBefore,0.1f),TEXT("Embedded spear follows the same enemy instead of returning or retargeting"));
+   Check(Enemy->Health==HealthBefore,TEXT("Leaving the spear embedded adds no repeated damage"));
+   Combat->CycleTarget(1); RetargetEnemy=Combat->SelectedEnemy;
+   Check(RetargetEnemy && RetargetEnemy!=Enemy,TEXT("A different enemy can be selected while the spear remains in enemy A"));
+   RetargetHealthBefore=RetargetEnemy ? RetargetEnemy->Health:0;
+   if (RetargetEnemy) AimAt(RetargetEnemy->GetAimPoint());
    Actions->FieldGestureMotion(220,0); Advance(19);
   }
   break;
  case 19:
-  if (Age>0.025) { EnemyBefore=Enemy->GetActorLocation(); Actions->FieldGestureRelease(0); Advance(20); }
+  if (Age>0.025)
+  {
+   EnemyBefore=Enemy->GetActorLocation(); Actions->FieldGestureRelease(0);
+   Check(Actions->CurrentAction.IsSet() && Actions->CurrentAction->AimActor.Get()==Enemy
+    && !Actions->bSpearEmbedded && !Actions->FloatingWeapon->GetAttachParentActor(),TEXT("Spear Flick detaches from and attacks the pierced enemy, despite selecting B"));
+   Advance(20);
+  }
   break;
  case 20:
   if (Age>0.7)
   {
    Check(Actions->LastWeaponImpulse.Size()>900 && FVector::Dist2D(EnemyBefore,Enemy->GetActorLocation())>15,TEXT("Directional spear Flick physically launches the living target"));
+   Check(RetargetEnemy && RetargetEnemy->Health==RetargetHealthBefore,TEXT("Spear Flick cannot redirect damage or launch onto selected enemy B"));
    Actions->ResetActionState(); Actions->SelectPrototypeWeapon(EBBSBPrototypeWeapon::Dagger); Combat->bCombatStance=false;
    Target->SetActorLocation(Character->GetActorLocation()+FVector(180,180,-92)); Target->ResetProp(); Advance(21);
   }
@@ -217,7 +257,7 @@ void ABBSBWeaponVerification::Tick(float DT)
   if (Age>0.5)
   {
    HealthBefore=Target->Health; EnemyBefore=Enemy->GetActorLocation(); Actions->FieldGesturePress(0); Actions->FieldGestureRelease(0);
-   Check(Actions->ActionMontage==nullptr && !Actions->Arbiter.Rule.bLockMovement,TEXT("Dagger Beat starts no character montage or movement lock"));
+   Check(!Actions->Arbiter.Rule.bLockMovement && (!Actions->ActionMontage || (Actions->CurrentAction.IsSet() && Actions->CurrentAction->Motion.CharacterAnimation)),TEXT("Dagger Beat keeps movement free and only plays an explicitly authored character animation"));
    Check(FVector::Dist(Actions->LastAimPoint,Enemy->GetAimPoint())>100,TEXT("Dagger ignores selected-enemy aim correction while locked on"));
    Check(Target->Health==HealthBefore,TEXT("Dagger does not damage the destination before traveling")); Advance(22);
    bool CorrectProjectile=false;
@@ -367,6 +407,58 @@ void ABBSBWeaponVerification::Tick(float DT)
   if (Age>0.5)
   {
    Check(!Actions->bWeaponAimLocked && Actions->GetLookInputScale()>0.99f && FMath::IsNearlyEqual(Actions->WeaponChargeSeconds,ChargeBefore,0.01f),TEXT("Right Dive releases hammer capture while keeping its remaining charge"));
+   Actions->ResetActionState(); Actions->SelectPrototypeWeapon(EBBSBPrototypeWeapon::Spear);
+   Target->SetActorLocation(Character->GetActorLocation()+FVector(250,0,-92)); Target->ResetProp(); Advance(38);
+  }
+  break;
+ case 38:
+  AimAt(Target->GetActorLocation()+FVector(0,0,35));
+  if (Age>0.6) { Actions->FieldGesturePress(0); Advance(39); }
+  break;
+ case 39:
+  if (Age>1.0)
+  {
+   Check(Actions->bSpearEmbedded && Actions->SpearPiercedActor.Get()==Target,TEXT("Field spear also waits embedded in the clicked prop"));
+   Actions->FieldGestureRelease(0);
+   Check(!Actions->bSpearEmbedded && !Actions->FloatingWeapon->GetAttachParentActor(),TEXT("Plain Dive release safely recalls an embedded spear without a Flick")); Advance(40);
+  }
+  break;
+ case 40:
+  AimAt(Target->GetActorLocation()+FVector(0,0,35));
+  if (Age>0.8) { Actions->FieldGesturePress(0); Advance(41); }
+  break;
+ case 41:
+  if (Age>0.8)
+  {
+   Check(Actions->bSpearEmbedded && Actions->TryDodge(),TEXT("An embedded spear does not prevent dodge cancellation"));
+   Check(!Actions->bSpearEmbedded && !Actions->bWeaponAimLocked && !Actions->FloatingWeapon->GetAttachParentActor(),TEXT("Dodge detaches the spear and clears its captured target")); Advance(42);
+  }
+  break;
+ case 42:
+  AimAt(Character->GetActorLocation()+FVector(-180,-240,-92));
+  if (Age>0.9) { Actions->FieldGesturePress(0); Actions->FieldGestureMotion(220,0); Advance(43); }
+  break;
+ case 43:
+  if (Age>0.025)
+  {
+   Actions->FieldGestureRelease(0);
+   Check(!Actions->bSpearEmbedded && (!Actions->CurrentAction.IsSet() || Actions->CurrentAction->Gesture!=EBBSBFieldGesture::Flick),TEXT("A missed spear Beat cannot Flick-launch a newly aimed victim")); Advance(44);
+  }
+  break;
+ case 44:
+  if (Age>0.9)
+  {
+   Check(!Actions->bWeaponAimLocked,TEXT("A missed spear chain releases its capture cleanly"));
+   Actions->ResetActionState(); Actions->SelectPrototypeWeapon(EBBSBPrototypeWeapon::Hammer); Advance(45);
+  }
+  break;
+ case 45:
+  if (Age>2.0)
+  {
+   FTransform Expected;
+   const bool Sampled=Actions->ActiveWeaponAnimationSet && UBBSBWeaponAnimationSet::SampleTransform(Actions->ActiveWeaponAnimationSet->FormSequence,TEXT("Upper"),1.f,Expected);
+   Check(Sampled && Actions->FormUpper->GetRelativeTransform().Equals(Expected,0.01f),TEXT("Equipped hammer form matches the editable Sequencer end pose"));
+   Check(!Actions->ConductorFull->IsVisible() && Actions->FormUpper->IsVisible() && Actions->WeaponChargeSeconds==0 && !Actions->IsGestureCaptured(),TEXT("Idle hammer retains its selected form beyond the old 1.5-second timeout"));
    Finish();
   }
   break;
@@ -386,6 +478,7 @@ void ABBSBWeaponVerification::Finish()
  if (Combat) { Combat->ResetEncounter(); Combat->MaximumHealth=OriginalMaxHP; Combat->Health=OriginalHP; Combat->Ecstatic=OriginalEcstatic; }
  if (Actions) Actions->SelectPrototypeWeapon(static_cast<EBBSBPrototypeWeapon>(OriginalWeapon));
  if (Target) Target->Destroy();
+ if (RetargetProp) RetargetProp->Destroy();
  if (Wall) Wall->Destroy();
  for (TActorIterator<ABBSBPlayerWeaponProjectile> It(GetWorld()); It; ++It) It->Destroy();
  if (Character) { Character->SetActorTransform(OriginalTransform,false,nullptr,ETeleportType::TeleportPhysics); Character->GetController()->SetControlRotation(OriginalView); }

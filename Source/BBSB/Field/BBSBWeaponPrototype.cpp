@@ -68,6 +68,8 @@ bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
  if (Combat && !Combat->CanAttack()) return false;
  CancelCurrentAction(true); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle;
  PrototypeWeapon=Type; HandAttacks={0,0}; LastWeaponDamage=0; bLastWeaponOnBeat=false;
+ ActiveWeaponAnimationSet=nullptr;
+ if (const auto* Set=WeaponAnimationSets.Find(Type)) ActiveWeaponAnimationSet=Set->LoadSynchronous();
  if (IsValid(FloatingWeapon)) FloatingWeapon->Destroy();
  if (IsValid(OtherFloatingWeapon)) OtherFloatingWeapon->Destroy();
  if (IsValid(ConductorWeapon)) ConductorWeapon->Destroy();
@@ -83,6 +85,7 @@ bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
 
 void UBBSBFieldActionComponent::ResetPrototypeState()
 {
+ ReleaseSpearEmbed();
  WeaponChargeSeconds=0; ChargeAtPress=0; ChargingChannel=-1; bHammerSpending=false; SwordComboStep=0; LastSwordBeatAt=-100;
 }
 
@@ -97,6 +100,9 @@ void UBBSBFieldActionComponent::CreatePrototypeWeapon()
  FloatingWeapon=WeaponActor(GetWorld(),Character); OtherFloatingWeapon=WeaponActor(GetWorld(),Character);
  Blade=Part(FloatingWeapon,TEXT("FloatingBlade"),WeaponPath(PrototypeWeapon));
  OtherBlade=Part(OtherFloatingWeapon,TEXT("OtherFloatingBlade"),WeaponPath(PrototypeWeapon));
+ if (!ActiveWeaponAnimationSet) if (const auto* Set=WeaponAnimationSets.Find(PrototypeWeapon)) ActiveWeaponAnimationSet=Set->LoadSynchronous();
+ if (ActiveWeaponAnimationSet && ActiveWeaponAnimationSet->WeaponMesh)
+ { Blade->SetStaticMesh(ActiveWeaponAnimationSet->WeaponMesh); OtherBlade->SetStaticMesh(ActiveWeaponAnimationSet->WeaponMesh); }
  if (Blade->GetStaticMesh()) Blade->SetRelativeLocation(-Blade->GetStaticMesh()->GetBoundingBox().GetCenter());
  if (OtherBlade->GetStaticMesh()) OtherBlade->SetRelativeLocation(-OtherBlade->GetStaticMesh()->GetBoundingBox().GetCenter());
  ConductorWeapon=WeaponActor(GetWorld(),Character); OtherConductorWeapon=WeaponActor(GetWorld(),Character);
@@ -114,6 +120,7 @@ void UBBSBFieldActionComponent::CreatePrototypeWeapon()
  }
  CurrentUpperPose=FTransform(FRotator::ZeroRotator,FVector(0,0,-6));
  CurrentLowerPose=FTransform(FRotator::ZeroRotator,FVector(0,0,-90));
+ FormProgress=0;
  FloatingWeapon->SetActorTransform(GetWeaponRestTransform()); OtherFloatingWeapon->SetActorTransform(GetWeaponRestTransform());
  PresentPrototypeWeapon(); LastWeaponPosition=FloatingWeapon->GetActorLocation();
 }
@@ -126,8 +133,8 @@ double UBBSBFieldActionComponent::WeaponBeatPosition() const
 
 void UBBSBFieldActionComponent::TickPrototypeState()
 {
- if (PrototypeWeapon==EBBSBPrototypeWeapon::Legacy) return;
  UpdateWeaponAim();
+ if (PrototypeWeapon==EBBSBPrototypeWeapon::Legacy) return;
  const double Now=GetWorld()->GetTimeSeconds();
  if (ChargingChannel>=0 && !Channels[ChargingChannel].bHeld)
  {
@@ -219,15 +226,27 @@ bool UBBSBFieldActionComponent::PrototypeGesture(EBBSBFieldGesture G,int32 Chann
  }
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Spear)
  {
-  if (G==EBBSBFieldGesture::Beat) return StartPrototypeAttack(G,Channel,BaseDamage,0.55f);
+  if (G==EBBSBFieldGesture::Beat)
+  {
+   if (IsGestureCaptured()) return false; // One spear cannot start a second held chain.
+   const bool WasLocked=bWeaponAimLocked;
+   AcquireWeaponAim(Channel);
+   if (StartPrototypeAttack(G,Channel,BaseDamage,0.55f)) return true;
+   if (!WasLocked) ClearWeaponAim();
+   return false;
+  }
   if (G==EBBSBFieldGesture::Flick)
   {
+   if (!bSpearEmbedded || !SpearPiercedActor.IsValid()) return false;
    FVector Eye; FRotator View; Cast<APlayerController>(Character->GetController())->GetPlayerViewPoint(Eye,View);
    const FVector2D Motion=Channels[Channel].ReleaseMotion;
    FVector Direction=View.RotateVector(FVector(0,Motion.X,Motion.Y)).GetSafeNormal();
    if (Direction.IsNearlyZero()) Direction=View.Vector();
-   return StartPrototypeAttack(G,Channel,BaseDamage,0.75f,Direction*950.f+FVector(0,0,140));
+   const bool Accepted=StartPrototypeAttack(G,Channel,BaseDamage,0.75f,Direction*950.f+FVector(0,0,140));
+   ReleaseSpearEmbed(!Accepted);
+   return Accepted;
   }
+  if (G==EBBSBFieldGesture::Dive) ReleaseSpearEmbed(true);
   return true;
  }
  if (G!=EBBSBFieldGesture::Beat) return true;
@@ -243,6 +262,9 @@ bool UBBSBFieldActionComponent::PrototypeGesture(EBBSBFieldGesture G,int32 Chann
 bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 Channel,float Damage,float Duration,FVector Impulse)
 {
  const double Now=GetWorld()->GetTimeSeconds(); const bool Independent=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent;
+ const int32 Combo=PrototypeWeapon==EBBSBPrototypeWeapon::Sword ? (Now-LastSwordBeatAt>SwordComboWindow ? 1:SwordComboStep%3+1) : 1;
+ const FBBSBWeaponAnimationClip* Clip=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->FindClip(G,Channel,Combo) : nullptr;
+ if (Clip) Duration=FMath::Max(Clip->Duration,0.05f);
  auto& Slot=Independent && Channel==1 ? OtherWeaponAction : CurrentAction;
  FBBSBWeaponActionRule Rule; Rule.Duration=Duration; Rule.ChainCancelOpen=PrototypeWeapon==EBBSBPrototypeWeapon::Spear ? 0.4f : 0.65f;
  Rule.bLockMovement=PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger; Rule.bOccupyConductor=PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger;
@@ -256,7 +278,14 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  if (C) C->OnAttackStarted();
  if (Rule.bLockMovement) { Character->ConsumeMovementInputVector(); Character->GetCharacterMovement()->StopMovementImmediately(); }
  FWeaponAction A; A.bPrototype=true; A.Gesture=G; A.Channel=Channel; A.StartedAt=Now; A.Duration=Duration; A.Revision=Arbiter.Revision; A.OwnerOrigin=Character->GetActorLocation();
+ if (Clip) { A.Motion=*Clip; A.bAuthoredMotion=true; }
  A.Target=bWeaponAimLocked ? LockedAimPoint : PrototypeWeapon==EBBSBPrototypeWeapon::Dagger ? FindPrototypeCursorPoint() : FindAimPoint();
+ if (bWeaponAimLocked)
+ {
+  A.AimActor=LockedAimActor;
+  if (A.AimActor.IsValid()) A.AimLocalPoint=A.AimActor->GetActorTransform().InverseTransformPosition(A.Target);
+  A.bRestrictToAimActor=PrototypeWeapon==EBBSBPrototypeWeapon::Spear;
+ }
  A.StartPose=StartPose; A.ComboStep=PrototypeWeapon==EBBSBPrototypeWeapon::Sword ? (Now-LastSwordBeatAt>SwordComboWindow ? 1 : SwordComboStep%3+1) : 1;
  bHasFollowThrough[Independent && Channel==1 ? 1:0]=false;
  A.Direction=(A.Target-Character->GetActorLocation()).GetSafeNormal2D(); if (A.Direction.IsNearlyZero()) A.Direction=Character->GetActorForwardVector();
@@ -266,15 +295,22 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  OnGesture.Broadcast(G,Channel,WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f));
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Dagger)
  {
+  if (Clip && Clip->CharacterAnimation) if (UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance())
+   ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(Clip->CharacterAnimation,TEXT("DefaultSlot"),0.03f,0.04f,Clip->CharacterAnimation->GetPlayLength()/Duration);
   ABBSBPlayerWeaponProjectile* P=GetWorld()->SpawnActor<ABBSBPlayerWeaponProjectile>(FloatingWeapon->GetActorLocation(),FloatingWeapon->GetActorRotation());
-  if (P) P->Launch(Character,A.Target,A.ExactDamage,Blade->GetStaticMesh());
-  DaggerAwayUntil[0]=Now+FVector::Dist(FloatingWeapon->GetActorLocation(),A.Target)/1900.f+0.08;
+  if (P) P->Launch(Character,A.Target,A.ExactDamage,Blade->GetStaticMesh(),ActiveWeaponAnimationSet);
+  DaggerAwayUntil[0]=Now+FVector::Dist(FloatingWeapon->GetActorLocation(),A.Target)/FMath::Max(100.f,ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->ProjectileSpeed:1900.f)+0.08;
  }
  else
  {
   UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance();
-  if (PrototypeWeapon!=EBBSBPrototypeWeapon::Sword && (!Independent || !Anim || !ActionMontage || !Anim->Montage_IsPlaying(ActionMontage))) PlayGestureAnimation(G);
-  if (PrototypeWeapon==EBBSBPrototypeWeapon::Sword && GestureAnimations.Num()>=4)
+  if (Clip && Clip->CharacterAnimation && Anim)
+  {
+   if (ActionMontage) Anim->Montage_Stop(0.025f,ActionMontage);
+   ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(Clip->CharacterAnimation,TEXT("DefaultSlot"),0.03f,0.04f,Clip->CharacterAnimation->GetPlayLength()/Duration);
+  }
+  else if (PrototypeWeapon!=EBBSBPrototypeWeapon::Sword && (!Independent || !Anim || !ActionMontage || !Anim->Montage_IsPlaying(ActionMontage))) PlayGestureAnimation(G);
+  if ((!Clip || !Clip->CharacterAnimation) && PrototypeWeapon==EBBSBPrototypeWeapon::Sword && GestureAnimations.Num()>=4)
   {
    const int32 Next=Now-LastSwordBeatAt>SwordComboWindow ? 1 : SwordComboStep%3+1;
     if (Anim)
@@ -291,12 +327,27 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
 
 FTransform UBBSBFieldActionComponent::PrototypeAttackPose(const FWeaponAction& A,float T) const
 {
+ FTransform Local;
+ if (A.bAuthoredMotion && UBBSBWeaponAnimationSet::SampleTransform(A.Motion.Sequence,TEXT("WeaponMotion"),T,Local))
+ {
+  if (A.Motion.bMirrorLeftHand && A.Channel==1)
+  { FVector P=Local.GetTranslation(); P.Y=-P.Y; Local.SetTranslation(P); FRotator R=Local.Rotator(); R.Roll=-R.Roll; Local.SetRotation(R.Quaternion()); }
+  const FRotator Frame=A.Motion.bUseImpulseFrame && !A.Impulse.IsNearlyZero() ? A.Impulse.Rotation() : A.Direction.Rotation();
+  FTransform Pose=Local*FTransform(Frame,A.Target);
+  if (A.Motion.bUseImpulseFrame) Pose.SetRotation((A.StartPose.Rotator()+Local.Rotator()).Quaternion());
+  if (A.Motion.BlendIn>0 && T<A.Motion.BlendIn) { FTransform Blend; Blend.Blend(A.StartPose,Pose,FMath::SmoothStep(0.f,A.Motion.BlendIn,T)); return Blend; }
+  return Pose;
+ }
  const FVector Forward=A.Direction, Right=FVector::CrossProduct(FVector::UpVector,Forward);
  const float Swing=FMath::InterpEaseInOut(0.f,1.f,FMath::Clamp((T-0.2f)/0.44f,0.f,1.f),1.6f);
  const float Side=PrototypeWeapon==EBBSBPrototypeWeapon::Sword ? (A.ComboStep==2 ? -1.f:1.f) : (A.Channel==0 ? 1.f:-1.f);
  FVector Position=A.Target; FRotator Rotation=Forward.Rotation();
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Spear)
- { Position+=Forward*FMath::Lerp(-135.f,25.f,Swing); Rotation+=FRotator(90,0,0); }
+ {
+  if (A.Gesture==EBBSBFieldGesture::Flick)
+  { Position+=A.Impulse.GetSafeNormal()*Swing*100.f; Rotation=A.StartPose.Rotator()+FRotator(0,0,Swing*40.f); }
+  else { Position+=Forward*FMath::Lerp(-135.f,25.f,Swing); Rotation+=FRotator(90,0,0); }
+ }
  else if (PrototypeWeapon==EBBSBPrototypeWeapon::Greatsword)
  { Position-=Forward*FMath::Lerp(135.f,-60.f,Swing); Position+=Right*FMath::Sin(Swing*PI)*45.f+FVector(0,0,FMath::Lerp(55.f,-20.f,Swing)); Rotation+=FRotator(0,0,FMath::Lerp(-75.f,110.f,Swing)); }
  else if (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && A.Gesture==EBBSBFieldGesture::Shake)
@@ -321,14 +372,24 @@ void UBBSBFieldActionComponent::TickPrototypeWeapon(float DT)
   const float PreviousT=FMath::Clamp(A.Elapsed/A.Duration,0.f,1.f);
   A.Elapsed=GetWorld()->GetTimeSeconds()-A.StartedAt;
   const float T=FMath::Clamp(A.Elapsed/A.Duration,0.f,1.f);
+  if (A.AimActor.IsValid() && !A.HitActors.Contains(A.AimActor.Get()))
+   A.Target=A.AimActor->GetActorTransform().TransformPosition(A.AimLocalPoint);
   AActor* Visual=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent && A.Channel==1 ? OtherFloatingWeapon.Get() : FloatingWeapon.Get();
+  if (PrototypeWeapon==EBBSBPrototypeWeapon::Spear && A.Gesture==EBBSBFieldGesture::Beat && bSpearEmbedded)
+  {
+   // The attached spear waits without another damage trace or automatic return.
+   if (T>=1.f) Slot.Reset();
+   continue;
+  }
   if (PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger)
   {
    Visual->SetActorTransform(PrototypeAttackPose(A,T));
    // Damage exists only while crossing the swing; the visible follow-through never adds another hit.
-   if (T>=0.2f && PreviousT<=0.64f)
+   const float ActiveStart=A.bAuthoredMotion ? FMath::Clamp(A.Motion.ActiveStart,0.f,1.f):0.2f;
+   const float ActiveEnd=A.bAuthoredMotion ? FMath::Clamp(A.Motion.ActiveEnd,ActiveStart,1.f):0.64f;
+   if (T>=ActiveStart && PreviousT<=ActiveEnd)
    {
-    const float Begin=FMath::Max(PreviousT,0.2f), End=FMath::Min(T,0.64f);
+    const float Begin=FMath::Max(PreviousT,ActiveStart), End=FMath::Min(T,ActiveEnd);
     const int32 Steps=FMath::Max(1,FMath::CeilToInt((End-Begin)*24.f));
     FVector From=PrototypeAttackPose(A,Begin).GetLocation();
     for (int32 Step=1;Step<=Steps;++Step)
@@ -353,7 +414,8 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
 {
  if (!Character || !Character->IsLocallyControlled() || !IsValid(FloatingWeapon) || !OtherFloatingWeapon || !ConductorWeapon || !FormUpper) return;
  const double Now=GetWorld()->GetTimeSeconds(); const bool Dual=IsDual(PrototypeWeapon);
- const bool Split=Dual || (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && (IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil));
+ const bool Split=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->bSplitReparaton && (ActiveWeaponAnimationSet->bKeepFormEquipped || IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil)
+  : Dual || (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && (IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil));
  ConductorFull->SetVisibility(!Split); FormUpper->SetVisibility(Split); FormLower->SetVisibility(Split && !Dual); OtherFormLower->SetVisibility(Dual);
  Blade->SetVisibility(PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger || Now>=DaggerAwayUntil[0]);
  OtherBlade->SetVisibility(PrototypeWeapon==EBBSBPrototypeWeapon::Crescent);
@@ -369,8 +431,18 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
   Top=FTransform(UpperRotation,-UpperRotation.RotateVector(FVector(0,0,25)));
   Bottom=FTransform(LowerRotation,-LowerRotation.RotateVector(FVector(0,0,90)));
  }
- const float Alpha=FMath::Clamp(GetWorld()->GetDeltaSeconds()/0.12f,0.f,1.f);
- CurrentUpperPose.Blend(CurrentUpperPose,Top,Alpha); CurrentLowerPose.Blend(CurrentLowerPose,Bottom,Alpha);
+ if (ActiveWeaponAnimationSet && ActiveWeaponAnimationSet->FormSequence)
+ {
+  FormProgress=FMath::FInterpConstantTo(FormProgress,Split ? 1.f:0.f,GetWorld()->GetDeltaSeconds(),1.f/FMath::Max(ActiveWeaponAnimationSet->FormTransitionSeconds,0.01f));
+  UBBSBWeaponAnimationSet::SampleTransform(ActiveWeaponAnimationSet->FormSequence,TEXT("Upper"),FormProgress,Top);
+  UBBSBWeaponAnimationSet::SampleTransform(ActiveWeaponAnimationSet->FormSequence,TEXT("Lower"),FormProgress,Bottom);
+  CurrentUpperPose=Top; CurrentLowerPose=Bottom;
+ }
+ else
+ {
+  const float Alpha=FMath::Clamp(GetWorld()->GetDeltaSeconds()/0.12f,0.f,1.f);
+  CurrentUpperPose.Blend(CurrentUpperPose,Top,Alpha); CurrentLowerPose.Blend(CurrentLowerPose,Bottom,Alpha);
+ }
  FormUpper->SetRelativeTransform(CurrentUpperPose); FormLower->SetRelativeTransform(CurrentLowerPose); OtherFormLower->SetRelativeTransform(CurrentLowerPose);
  const FTransform Rest=GetWeaponRestTransform();
  FVector Eye; FRotator View; Cast<APlayerController>(Character->GetController())->GetPlayerViewPoint(Eye,View);
@@ -384,6 +456,8 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
   AActor* Visual=Index==0 ? FloatingWeapon.Get() : OtherFloatingWeapon.Get();
   UStaticMeshComponent* Model=Index==0 ? Blade.Get() : OtherBlade.Get();
   if (!Model->GetStaticMesh()) continue;
+
+  if (Index==0 && bSpearEmbedded) continue;
 
   if (Index==0 && bWeaponAimLocked && !CurrentAction.IsSet())
   {
@@ -430,17 +504,29 @@ ABBSBPlayerWeaponProjectile::ABBSBPlayerWeaponProjectile()
  SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("ThrowOrigin")));
  Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FlyingWeapon")); Body->SetupAttachment(RootComponent); Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
-void ABBSBPlayerWeaponProjectile::Launch(ACharacter* Shooter,FVector Target,float Amount,UStaticMesh* Mesh)
+void ABBSBPlayerWeaponProjectile::Launch(ACharacter* Shooter,FVector Target,float Amount,UStaticMesh* Mesh,UBBSBWeaponAnimationSet* AnimationSet)
 {
  SourceCharacter=Shooter; SetOwner(Shooter); FrozenTarget=Target; Damage=Amount; Body->SetStaticMesh(Mesh);
  if (Mesh) Body->SetRelativeLocation(-Mesh->GetBoundingBox().GetCenter());
- FlightVelocity=(Target-GetActorLocation()).GetSafeNormal()*1900.f; SetActorRotation(FlightVelocity.Rotation()+FRotator(-90,0,0)); SetLifeSpan(2.f);
+ const float Speed=FMath::Max(100.f,AnimationSet ? AnimationSet->ProjectileSpeed:1900.f);
+ FlightOrigin=GetActorLocation(); FlightDistance=FVector::Dist(Target,FlightOrigin); FlightSeconds=FMath::Max(0.01f,FlightDistance/Speed);
+ if (AnimationSet) if (const auto* Clip=AnimationSet->FindClip(EBBSBFieldGesture::Beat,0,1)) FlightSequence=Clip->Sequence;
+ FlightVelocity=(Target-FlightOrigin).GetSafeNormal()*Speed; SetActorRotation(FlightVelocity.Rotation()+FRotator(-90,0,0)); SetLifeSpan(FMath::Max(2.f,FlightSeconds+0.5f));
 }
 void ABBSBPlayerWeaponProjectile::Tick(float DT)
 {
  Super::Tick(DT); if (!SourceCharacter.IsValid()) { Destroy(); return; }
  const FVector From=GetActorLocation(); const FVector Delta=FlightVelocity*DT;
- const bool Arrive=Delta.SizeSquared()>=(FrozenTarget-From).SizeSquared(); const FVector To=Arrive ? FrozenTarget : From+Delta;
+ const bool Arrive=Age+DT>=FlightSeconds;
+ FVector To=Arrive ? FrozenTarget : From+Delta;
+ FTransform Local;
+ const bool Authored=UBBSBWeaponAnimationSet::SampleTransform(FlightSequence,TEXT("WeaponMotion"),FMath::Clamp((Age+DT)/FlightSeconds,0.f,1.f),Local);
+ if (Authored)
+ {
+  const FVector P=Local.GetLocation();
+  To=Arrive ? FrozenTarget : FrozenTarget+FlightVelocity.Rotation().RotateVector(FVector(P.X*FlightDistance/250.f,P.Y,P.Z));
+  SetActorRotation((Local*FTransform(FlightVelocity.Rotation(),FVector::ZeroVector)).GetRotation());
+ }
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBPlayerThrow),false,SourceCharacter.Get()); Q.AddIgnoredActor(this);
  FHitResult Hit;
  if (GetWorld()->SweepSingleByChannel(Hit,From,To,GetActorQuat(),ECC_Visibility,FCollisionShape::MakeCapsule(16,54),Q))
@@ -458,6 +544,6 @@ void ABBSBPlayerWeaponProjectile::Tick(float DT)
   }
   SetActorLocation(Hit.Location); Destroy(); return;
  }
- SetActorLocation(To); AddActorLocalRotation(FRotator(0,0,DT*720)); Age+=DT;
- if (Arrive || Age>1.5f) Destroy();
+ SetActorLocation(To); if (!Authored) AddActorLocalRotation(FRotator(0,0,DT*720)); Age+=DT;
+ if (Arrive || Age>FlightSeconds+0.25f) Destroy();
 }

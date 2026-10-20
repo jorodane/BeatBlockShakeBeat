@@ -18,7 +18,10 @@ public class BBSB : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
-			"Slate"
+			"Slate",
+			"LevelSequence",
+			"MovieScene",
+			"MovieSceneTracks"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

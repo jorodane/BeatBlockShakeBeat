@@ -17,17 +17,39 @@ void UBBSBFieldActionComponent::AcquireWeaponAim(int32 Channel)
 {
  if (bWeaponAimLocked) return;
  AActor* Target=nullptr;
- LockedAimPoint=FindPrototypeCursorPoint(&Target); LockedAimActor=Target;
+ const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
+ if (PrototypeWeapon==EBBSBPrototypeWeapon::Legacy && Combat && Combat->IsStageLocked() && IsValid(Combat->SelectedEnemy))
+ {
+  // Preserve the baseline weapon's selected-target input, captured once per chain.
+  LockedAimPoint=FindAimPoint(); Target=Combat->SelectedEnemy;
+ }
+ else LockedAimPoint=FindPrototypeCursorPoint(&Target);
+ LockedAimActor=Target;
  LockedAimLocalPoint=Target ? Target->GetActorTransform().InverseTransformPosition(LockedAimPoint) : LockedAimPoint;
  LockedApproach=(LockedAimPoint-Character->GetActorLocation()).GetSafeNormal2D();
  if (LockedApproach.IsNearlyZero()) LockedApproach=Character->GetActorForwardVector();
- AimLockChannel=Channel; AimLockStartedAt=GetWorld()->GetTimeSeconds(); bWeaponAimLocked=true;
+ AimLockChannel=Channel; AimLockStartedAt=GetWorld()->GetTimeSeconds(); bWeaponAimLocked=true; bAimCameraNearAnchor=false;
  AimLockWeaponFrom=FloatingWeapon->GetActorTransform();
 }
 
 void UBBSBFieldActionComponent::ClearWeaponAim()
 {
- bWeaponAimLocked=false; LockedAimActor=nullptr; AimLockChannel=-1;
+ ReleaseSpearEmbed();
+ bWeaponAimLocked=false; LockedAimActor=nullptr; AimLockChannel=-1; bAimCameraNearAnchor=false;
+}
+
+void UBBSBFieldActionComponent::ReleaseSpearEmbed(bool bReturnToRest)
+{
+ if (bSpearEmbedded && IsValid(FloatingWeapon))
+ {
+  if (bReturnToRest)
+  {
+   FollowThroughPose[0]=FloatingWeapon->GetActorTransform(); bHasFollowThrough[0]=true;
+   FollowThroughUntil[0]=GetWorld()->GetTimeSeconds()+WeaponReturnSeconds;
+  }
+  FloatingWeapon->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+ }
+ bSpearEmbedded=false; SpearPiercedActor.Reset();
 }
 
 void UBBSBFieldActionComponent::UpdateWeaponAim()
@@ -37,9 +59,10 @@ void UBBSBFieldActionComponent::UpdateWeaponAim()
  {
   const ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(LockedAimActor);
   const ABBSBBreakableProp* Prop=Cast<ABBSBBreakableProp>(LockedAimActor);
-  if ((Enemy && Enemy->bDefeated) || (Prop && Prop->bBroken)) LockedAimActor=nullptr;
+  if ((Enemy && Enemy->bDefeated) || (Prop && Prop->bBroken)) { ReleaseSpearEmbed(true); LockedAimActor=nullptr; }
   else LockedAimPoint=LockedAimActor->GetActorTransform().TransformPosition(LockedAimLocalPoint);
  }
+ if (bSpearEmbedded && !SpearPiercedActor.IsValid()) ReleaseSpearEmbed(true);
  if ((AimLockChannel<0 || !Channels[AimLockChannel].bHeld) && !CurrentAction.IsSet() && !OtherWeaponAction.IsSet())
  { ClearWeaponAim(); return; }
  const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
@@ -48,16 +71,25 @@ void UBBSBFieldActionComponent::UpdateWeaponAim()
  if (!PC) return;
  FVector Eye; FRotator View; PC->GetPlayerViewPoint(Eye,View);
  const FVector LocalEye=PC->GetControlRotation().UnrotateVector(Eye-Character->GetActorLocation());
- const FQuat RelativeView=PC->GetControlRotation().Quaternion().Inverse()*View.Quaternion();
- FRotator Goal=PC->GetControlRotation();
- // Recompute the view about the same world anchor when the player moves.
- for (int32 I=0;I<4;++I)
+ // A shoulder camera cannot center an anchor inside its lateral orbit radius.
+ // Keep the last view there; rotating the camera to chase that impossible solution
+ // makes it orbit the player indefinitely. Hysteresis also prevents edge chatter.
+ const float NearRadius=FMath::Max(200.f,float(FMath::Abs(LocalEye.Y))+80.f);
+ const float Distance=FVector::Dist2D(Character->GetActorLocation(),LockedAimPoint);
+ const FVector ToTarget=LockedAimPoint-Eye;
+ if (Distance<=NearRadius) bAimCameraNearAnchor=true;
+ if (bAimCameraNearAnchor)
  {
-  const FVector NewEye=Character->GetActorLocation()+Goal.RotateVector(LocalEye);
-  Goal=((LockedAimPoint-NewEye).Rotation().Quaternion()*RelativeView.Inverse()).Rotator();
-  Goal.Pitch=FMath::Clamp(FRotator::NormalizeAxis(Goal.Pitch),-65.f,65.f); Goal.Roll=0;
+  if (Distance<NearRadius+80.f || FVector::DotProduct(ToTarget.GetSafeNormal(),View.Vector())<=0.1f) return;
+  bAimCameraNearAnchor=false;
  }
- PC->SetControlRotation(Goal);
+ if (ToTarget.IsNearlyZero()) return;
+ // One bounded correction from the actual view, never a recursive orbit solve.
+ // Preserve the captured actor/point even while the close-range camera is held.
+ const FRotator Current=PC->GetControlRotation();
+ FRotator Goal=Current+(ToTarget.Rotation()-View).GetNormalized();
+ Goal.Pitch=FMath::Clamp(FRotator::NormalizeAxis(Goal.Pitch),-65.f,65.f); Goal.Roll=0;
+ PC->SetControlRotation(FMath::RInterpConstantTo(Current,Goal,GetWorld()->GetDeltaSeconds(),90.f));
 }
 
 void UBBSBFieldActionComponent::DrawAimFeedback(AHUD* HUD) const
