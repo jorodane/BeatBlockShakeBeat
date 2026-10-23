@@ -18,10 +18,13 @@ class UAnimSequence;
 class UAnimMontage;
 class UPrimitiveComponent;
 class UAudioComponent;
+class UCanvas;
 class USoundWaveProcedural;
 class ABBSBWeaponVerification;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FBBSBFieldGestureEvent, EBBSBFieldGesture, Gesture, int32, MouseChannel, float, Charge);
+DECLARE_DELEGATE_RetVal_FourParams(bool, FBBSBEquipmentGesture, EBBSBFieldGesture, int32, float, bool);
+DECLARE_DELEGATE_OneParam(FBBSBEquipmentPointerMotion, FVector2D);
 
 UCLASS(ClassGroup=(BBSB), meta=(BlueprintSpawnableComponent))
 class BBSB_API UBBSBFieldActionComponent : public UActorComponent
@@ -47,7 +50,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") float WeaponHitRadius = 36.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") float BaseDamage = 18.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") FName WeaponName = "Floating baton";
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") EBBSBPrototypeWeapon PrototypeWeapon=EBBSBPrototypeWeapon::Greatsword;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") EBBSBPrototypeWeapon PrototypeWeapon=EBBSBPrototypeWeapon::Sword;
 	/** Assign a different animation set per weapon; keys and timing are editable without C++. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Animations") TMap<EBBSBPrototypeWeapon,TSoftObjectPtr<UBBSBWeaponAnimationSet>> WeaponAnimationSets;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Animations") TObjectPtr<UBBSBWeaponAnimationSet> ActiveWeaponAnimationSet;
@@ -69,6 +72,37 @@ public:
 	UFUNCTION(BlueprintCallable, Category="BBSB|Weapon") bool SelectPrototypeWeapon(EBBSBPrototypeWeapon Type);
 	void NextPrototypeWeapon();
 	FString PrototypeWeaponLabel() const;
+	/** A puzzle tool occupies the floating weapon slot and shares its gesture recognizers. */
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") TObjectPtr<AActor> FieldEquipment;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") FName FieldEquipmentName;
+	FBBSBEquipmentGesture EquipmentGesture;
+	UFUNCTION(BlueprintCallable, Category="BBSB|Equipment") bool EquipFieldEquipment(AActor* Equipment,FName Name);
+	void ClearFieldEquipment();
+	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") FTransform FieldEquipmentRestTransform() const;
+	UFUNCTION(BlueprintPure, Category="BBSB|Interaction") FVector VisualAimPoint() const;
+ /** Shared ray, reach and occlusion used by highlighting and Bunniar dispatch. */
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool TraceEquipmentAim(FHitResult& Hit) const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsEquipmentTarget(AActor* Actor) const;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") TObjectPtr<AActor> BunniarEquipment;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") TArray<EBBSBPrototypeWeapon> AvailableWeapons={EBBSBPrototypeWeapon::Sword};
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") float EquipmentHoldSeconds=.25f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment", meta=(ClampMin="0.001",ClampMax="1")) float EquipmentWheelTimeScale=.025f;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentWheelOpen=false;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") int32 EquipmentWheelIndex=INDEX_NONE;
+	/** 0 is Bunniar; combat weapons retain their existing enum IDs. Latest request wins. */
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") int32 PendingEquipmentId=INDEX_NONE;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentInputBlocked=false;
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentPointerCaptured=false;
+	void SetEquipmentPointerCapture(bool bCapture);
+	FBBSBEquipmentPointerMotion EquipmentPointerMotion;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Debug") bool bEnablePracticeControls=false;
+	UFUNCTION(BlueprintCallable, Category="BBSB|Equipment") bool RequestEquipment(int32 EquipmentId);
+	UFUNCTION(BlueprintCallable, Category="BBSB|Equipment") void CancelEquipmentSelection();
+	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") bool IsEquipmentActionBusy() const;
+	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") FString EquipmentLabel(int32 EquipmentId) const;
+	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") int32 EquippedEquipmentId() const;
+	static constexpr int32 EquipmentWheelSlotCount=10;
+	void DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) const;
 	double WeaponBeatPosition() const;
 	/** Fallback viewport position when the player cannot be projected; normally mirror the player across the crosshair. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon", meta=(ClampMin="0.05", ClampMax="0.95")) FVector2D WeaponRestScreenPosition = FVector2D(0.76f,0.68f);
@@ -92,6 +126,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Movement") bool IsDodging() const { return bDodging; }
 	UFUNCTION(BlueprintPure, Category="BBSB|Movement") bool IsDodgeInvulnerable() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") bool IsGestureCaptured() const;
+	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") bool IsGestureChannelHeld(int32 Channel) const { return Channel>=0 && Channel<2 && Channels[Channel].bHeld; }
+	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") FVector2D GestureReleaseDirection(int32 Channel) const;
+	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") float GestureHeldSeconds(int32 Channel) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Action") bool CanMove() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Action") bool IsConductorAvailable() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Camera") float GetLookInputScale() const;
@@ -124,6 +161,16 @@ protected:
 private:
 	friend class ABBSBWeaponVerification;
 	FActorComponentTickFunction WeaponViewTick;
+	bool bEquipmentTabHeld=false,bEquipmentTabCancelled=false,bWheelOriginalCursor=false,bWheelOpenedInCombat=false;
+	double EquipmentTabPressedAt=0,EquipmentLookResumeAt=0;
+	float WheelSavedTimeDilation=1,WheelAppliedTimeDilation=1;
+	FVector2D WheelSavedMousePosition=FVector2D::ZeroVector;
+	bool bWheelSavedMousePosition=false;
+	EBBSBPrototypeWeapon LastCombatWeapon=EBBSBPrototypeWeapon::Sword;
+	void EquipmentTabDown(); void EquipmentTabUp();
+	void TickEquipmentSelection(); void EnsureBunniarEquipment();
+	void OpenEquipmentWheel(); void CloseEquipmentWheel();
+	int32 WheelEquipmentId(int32 Index) const;
 	struct FWeaponAction
 	{
 		EBBSBFieldGesture Gesture = EBBSBFieldGesture::Beat;
@@ -220,6 +267,8 @@ private:
 
 	void BindControls();
 	void PrimaryDown(); void PrimaryUp(); void SecondaryDown(); void SecondaryUp();
+	void RotateHeldObject(float Steps);
+	void RotateHeldObjectUp(); void RotateHeldObjectDown();
 	void ToggleHelp();
 	void BeginGesture(int32 Channel);
 	void EndGesture(int32 Channel);

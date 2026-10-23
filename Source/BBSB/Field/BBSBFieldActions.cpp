@@ -23,6 +23,8 @@
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 #include "BBSB.h"
+#include "Caravan/BBSBCaravan.h"
+#include "Interaction/BBSBInteraction.h"
 #include "Combat/BBSBCombat.h"
 #include "Components/MeshComponent.h"
 
@@ -132,6 +134,9 @@ void UBBSBFieldActionComponent::BeginPlay()
 	Camera = Character->FindComponentByClass<UCameraComponent>();
 	if (Camera) OriginalFOV = Camera->FieldOfView;
 	OriginalMeshRotation = Character->GetMesh()->GetRelativeRotation();
+	// Fresh play starts with the real one-handed sword, including old Blueprint defaults.
+	PrototypeWeapon=EBBSBPrototypeWeapon::Sword;
+	AvailableWeapons={EBBSBPrototypeWeapon::Sword};
 	Character->GetCharacterMovement()->AddTickPrerequisiteComponent(this);
 	if (UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance())
 	{
@@ -143,6 +148,7 @@ void UBBSBFieldActionComponent::BeginPlay()
 
 void UBBSBFieldActionComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+	CancelEquipmentSelection();
 	FinishDodge();
 	ClearHover();
 	if (bSavedRootMotionMode && Character)
@@ -174,15 +180,22 @@ void UBBSBFieldActionComponent::BindControls()
 	Input->BindKey(EKeys::LeftMouseButton, IE_Released, this, &UBBSBFieldActionComponent::PrimaryUp);
 	Input->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &UBBSBFieldActionComponent::SecondaryDown);
 	Input->BindKey(EKeys::RightMouseButton, IE_Released, this, &UBBSBFieldActionComponent::SecondaryUp);
-	Input->BindKey(EKeys::R, IE_Pressed, this, &UBBSBFieldActionComponent::ResetPracticeProps);
-	Input->BindKey(EKeys::F1, IE_Pressed, this, &UBBSBFieldActionComponent::ToggleHelp);
-	Input->BindKey(EKeys::F7, IE_Pressed, this, &UBBSBFieldActionComponent::NextPrototypeWeapon);
-	Input->BindKey(EKeys::One, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponOne);
-	Input->BindKey(EKeys::Two, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponTwo);
-	Input->BindKey(EKeys::Three, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponThree);
-	Input->BindKey(EKeys::Four, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponFour);
-	Input->BindKey(EKeys::Five, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponFive);
-	Input->BindKey(EKeys::Six, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponSix);
+	Input->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &UBBSBFieldActionComponent::RotateHeldObjectUp).bConsumeInput=false;
+	Input->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &UBBSBFieldActionComponent::RotateHeldObjectDown).bConsumeInput=false;
+	Input->BindKey(EKeys::Tab, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentTabDown);
+	Input->BindKey(EKeys::Tab, IE_Released, this, &UBBSBFieldActionComponent::EquipmentTabUp);
+	if (bEnablePracticeControls)
+	{
+		Input->BindKey(EKeys::R, IE_Pressed, this, &UBBSBFieldActionComponent::ResetPracticeProps);
+		Input->BindKey(EKeys::F1, IE_Pressed, this, &UBBSBFieldActionComponent::ToggleHelp);
+		Input->BindKey(EKeys::F7, IE_Pressed, this, &UBBSBFieldActionComponent::NextPrototypeWeapon);
+		Input->BindKey(EKeys::One, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponOne);
+		Input->BindKey(EKeys::Two, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponTwo);
+		Input->BindKey(EKeys::Three, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponThree);
+		Input->BindKey(EKeys::Four, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponFour);
+		Input->BindKey(EKeys::Five, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponFive);
+		Input->BindKey(EKeys::Six, IE_Pressed, this, &UBBSBFieldActionComponent::WeaponSix);
+	}
 	BoundInput = Input;
 	UE_LOG(LogBBSB, Display, TEXT("Field controls ready: %s"), *Character->GetName());
 }
@@ -191,6 +204,14 @@ void UBBSBFieldActionComponent::PrimaryDown() { BeginGesture(0); }
 void UBBSBFieldActionComponent::PrimaryUp() { EndGesture(0); }
 void UBBSBFieldActionComponent::SecondaryDown() { BeginGesture(1); }
 void UBBSBFieldActionComponent::SecondaryUp() { EndGesture(1); }
+void UBBSBFieldActionComponent::RotateHeldObjectUp() { RotateHeldObject(1); }
+void UBBSBFieldActionComponent::RotateHeldObjectDown() { RotateHeldObject(-1); }
+void UBBSBFieldActionComponent::RotateHeldObject(float Steps)
+{
+	if(bEquipmentWheelOpen || bEquipmentInputBlocked || !IsGestureChannelHeld(0)) return;
+	if(auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
+		if(auto* Object=Cast<ABBSBCarryObject>(Buddy->SurfaceComponent->GetOwner())) Object->RotateFromWheel(Steps);
+}
 void UBBSBFieldActionComponent::ToggleHelp() { bHelpVisible = !bHelpVisible; }
 
 void UBBSBFieldActionComponent::FieldGesturePress(int32 Channel)
@@ -217,6 +238,7 @@ void UBBSBFieldActionComponent::ExerciseGesture(int32 Index)
 
 void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
 {
+	if (bEquipmentWheelOpen || PendingEquipmentId!=INDEX_NONE) return;
 	if (!Character || bDodging || Channel < 0 || Channel > 1 || Channels[Channel].bHeld) return;
 	if (EmitGesture(EBBSBFieldGesture::Beat, Channel, 0.f,false)) Channels[Channel].Begin(GetWorld()->GetTimeSeconds());
 }
@@ -229,7 +251,7 @@ void UBBSBFieldActionComponent::EndGesture(int32 Channel)
 	const bool MouseGesture=RequiresMouseGesture(Channel);
 	const float Charge = FMath::Clamp((Now - Channels[Channel].PressedAt - HoldThreshold) / 1.1, 0.0, 1.0);
 	const EBBSBFieldGesture Gesture=Channels[Channel].End(Now, GetGestureSettings());
-	const bool bAccepted=(PrototypeWeapon==EBBSBPrototypeWeapon::Legacy || MouseGesture || PrototypeWeapon==EBBSBPrototypeWeapon::Hammer) ? EmitGesture(Gesture,Channel,Charge) : false;
+	const bool bAccepted=(FieldEquipment || PrototypeWeapon==EBBSBPrototypeWeapon::Legacy || MouseGesture || PrototypeWeapon==EBBSBPrototypeWeapon::Hammer) ? EmitGesture(Gesture,Channel,Charge) : false;
 	const double Finish=bAccepted && CurrentAction.IsSet() ? CurrentAction->StartedAt+CurrentAction->Duration : Now;
 	if (MouseGesture) CameraResumeAt=FMath::Max(CameraResumeAt,Finish+(Gesture==EBBSBFieldGesture::Flick ? FlickSettleSeconds : 0.07f));
 }
@@ -238,7 +260,7 @@ bool UBBSBFieldActionComponent::IsGestureCaptured() const { return Channels[0].b
 
 float UBBSBFieldActionComponent::GetCharge() const
 {
-	if (PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy) return WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f);
+	if (!FieldEquipment && PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy) return WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f);
 	float Charge = 0.f;
 	for (const auto& Channel : Channels)
 		if (Channel.bHeld) Charge = FMath::Max(Charge, static_cast<float>(FMath::Clamp((GetWorld()->GetTimeSeconds() - Channel.PressedAt - HoldThreshold) / 1.1, 0.0, 1.0)));
@@ -254,6 +276,7 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	if (!PC) return;
 	BindControls();
 	if (!FloatingWeapon) CreateWeapon();
+	TickEquipmentSelection();
 	if (!bHUDInitialized && bShowPracticeHUD)
 	{
 		PC->ClientSetHUD(ABBSBFieldPracticeHUD::StaticClass());
@@ -300,7 +323,7 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	}
 	else
 	{
-		Move->MaxWalkSpeed = PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift) ? WalkSpeed : RunSpeed;
+		Move->MaxWalkSpeed = PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift) ? RunSpeed : WalkSpeed;
 		if (!CanMove()) { Character->ConsumeMovementInputVector(); Move->Velocity.X=Move->Velocity.Y=0; }
 	}
 	if (Camera)
@@ -326,8 +349,9 @@ void UBBSBFieldActionComponent::UpdateMouseMotion(double Now)
 		MX=PC->PlayerInput->GetRawKeyValue(EKeys::MouseX);
 		MY=PC->PlayerInput->GetRawKeyValue(EKeys::MouseY);
 	}
-	const FVector2D Motion=bSyntheticInput ? SyntheticMotion : FVector2D(MX,MY);
+	const FVector2D Motion=bEquipmentWheelOpen ? FVector2D::ZeroVector:bSyntheticInput ? SyntheticMotion : FVector2D(MX,MY);
 	SyntheticMotion=FVector2D::ZeroVector;
+	if (FieldEquipment && bEquipmentPointerCaptured && !bEquipmentWheelOpen) EquipmentPointerMotion.ExecuteIfBound(FVector2D(Motion.X,-Motion.Y));
 	const auto Settings=GetGestureSettings();
 	for (int32 Index=0; Index<2; ++Index)
 		for (auto Event : Channels[Index].Update(Now,Motion,Settings)) EmitGesture(Event,Index,GetCharge());
@@ -342,6 +366,7 @@ void UBBSBFieldActionComponent::RecordMoveInput(float Right, float Forward)
 
 bool UBBSBFieldActionComponent::TryDodge()
 {
+ if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive) return false;
 	if (!Character || bDodging || GetDodgeCooldownRemaining() > 0.f) return false;
 	if (!Arbiter.CanDodge(GetWorld()->GetTimeSeconds())) return false;
 	UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
@@ -492,6 +517,17 @@ FTransform UBBSBFieldActionComponent::GetWeaponRestTransform() const
 
 void UBBSBFieldActionComponent::UpdateWeaponPresentation()
 {
+	if (IsValid(FieldEquipment))
+	{
+		if (FloatingWeapon) FloatingWeapon->SetActorHiddenInGame(true);
+		if (OtherFloatingWeapon) OtherFloatingWeapon->SetActorHiddenInGame(true);
+		// Reparaton remains in the hand; its ordinary complete form conducts the tool.
+		if (ConductorWeapon) ConductorWeapon->SetActorHiddenInGame(false);
+		if (OtherConductorWeapon) OtherConductorWeapon->SetActorHiddenInGame(true);
+		if (ConductorFull) ConductorFull->SetVisibility(true);
+		for (auto* Part:{FormUpper.Get(),FormLower.Get(),OtherFormLower.Get()}) if (Part) Part->SetVisibility(false);
+		return;
+	}
 	if (PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy) { PresentPrototypeWeapon(); return; }
 	if (!Character || !Character->IsLocallyControlled() || !IsValid(FloatingWeapon) || CurrentAction.IsSet()) return;
 	APlayerController* PC=Cast<APlayerController>(Character->GetController());
@@ -520,6 +556,24 @@ void UBBSBFieldActionComponent::UpdateWeaponPresentation()
 
 bool UBBSBFieldActionComponent::EmitGesture(EBBSBFieldGesture Gesture, int32 Channel, float Charge,bool bGestureChain)
 {
+ if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive && !bGestureChain) return false;
+	if (IsValid(FieldEquipment))
+	{
+		const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
+		const bool Continuation=bGestureChain && Arbiter.State==EBBSBActionState::Attack;
+  if (bDodging || (Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) && !Continuation) || (Combat && !Combat->CanAttack())) return false;
+		if (EquipmentGesture.IsBound() && !EquipmentGesture.Execute(Gesture,Channel,Charge,!bGestureChain)) return false;
+		LastGesture=Gesture; ++GestureCounts[int32(Gesture)]; GestureTimes[int32(Gesture)]=GetWorld()->GetTimeSeconds();
+		OnGesture.Broadcast(Gesture,Channel,Charge);
+		if (Gesture==EBBSBFieldGesture::Beat && !bGestureChain)
+		{
+			FBBSBWeaponActionRule Rule; Rule.Duration=.18f; Rule.bLockMovement=false; Rule.bOccupyConductor=true;
+			Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,GetWorld()->GetTimeSeconds()); ActiveState=EBBSBActionState::Attack;
+			if (GestureAnimations.Num()>0 && GestureAnimations[0]) if (UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance())
+				ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(GestureAnimations[0],TEXT("DefaultSlot"),.04f,.08f,GestureAnimations[0]->GetPlayLength()/.3f);
+		}
+		return true;
+	}
 	if (PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy) return PrototypeGesture(Gesture,Channel);
 	const double Now=GetWorld()->GetTimeSeconds();
 	const FBBSBWeaponActionRule Rule=GetWeaponRule(Gesture,Channel);
@@ -573,6 +627,7 @@ void UBBSBFieldActionComponent::PlayGestureAnimation(EBBSBFieldGesture Gesture)
 
 void UBBSBFieldActionComponent::TickWeapon(float DT)
 {
+	if (FieldEquipment) return;
 	if (PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy) { TickPrototypeWeapon(DT); return; }
 	if (!FloatingWeapon) return;
 	if (!CurrentAction.IsSet())
@@ -639,7 +694,8 @@ void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& 
 		if (Action.bRestrictToAimActor && Actor!=Action.AimActor.Get()) continue;
 		ABBSBBreakableProp* Prop = Cast<ABBSBBreakableProp>(Actor);
 		ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(Actor);
-		if ((!Prop || Prop->bBroken) && (!Enemy || Enemy->bDefeated)) continue;
+		ABBSBCarryObject* Object=Cast<ABBSBCarryObject>(Actor);
+  if ((!Prop || Prop->bBroken) && (!Enemy || Enemy->bDefeated) && (!Object || Object->bBroken)) continue;
 		// Check each target from the player as well; sweeping around a corner cannot bypass a wall.
 		FHitResult Obstruction;
 		const FVector Origin = Character->GetActorLocation()+FVector(0,0,30);
@@ -650,13 +706,14 @@ void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& 
 		const uint32 Revision=Action.Revision;
 		const EBBSBFieldGesture Gesture=Action.Gesture;
 		const FVector Direction=Action.Direction;
-		const bool bPreviouslyBroken = Prop && Prop->bBroken;
+		const bool bPreviouslyBroken = (Prop && Prop->bBroken) || (Object && Object->bBroken);
 		UGameplayStatics::ApplyPointDamage(Actor,Damage,Direction,Hit,Character->GetController(),Character,nullptr);
 		if (Enemy && !Enemy->bDefeated && !Impulse.IsNearlyZero()) Enemy->ApplyWeaponImpulse(Impulse);
-		if (Prop && !bPreviouslyBroken && Prop->bBroken) ++PropsBroken;
+		const bool BrokenNow=(Prop && Prop->bBroken) || (Object && Object->bBroken);
+  if (!bPreviouslyBroken && BrokenNow) ++PropsBroken;
 		LastHitAt = GetWorld()->GetTimeSeconds();
-		LastHitLabel = FString::Printf(TEXT("%s  %.0f%s"),GestureName(Gesture),Damage,Prop && Prop->bBroken ? TEXT("  BREAK!") : Enemy && Enemy->bDefeated ? TEXT("  DOWN!") : TEXT(""));
-		UE_LOG(LogBBSB, Display, TEXT("Field Hit %s target=%s hp=%.1f"),GestureName(Gesture),*Actor->GetName(),Prop ? Prop->Health : Enemy->Health);
+		LastHitLabel = FString::Printf(TEXT("%s  %.0f%s"),GestureName(Gesture),Damage,BrokenNow ? TEXT("  BREAK!") : Enemy && Enemy->bDefeated ? TEXT("  DOWN!") : TEXT(""));
+		UE_LOG(LogBBSB, Display, TEXT("Field Hit %s target=%s hp=%.1f"),GestureName(Gesture),*Actor->GetName(),Prop ? Prop->Health : Enemy ? Enemy->Health : Object->Health);
 		if (Arbiter.Revision!=Revision) return;
 		if (PrototypeWeapon==EBBSBPrototypeWeapon::Spear && Gesture==EBBSBFieldGesture::Beat
 			&& Channels[Action.Channel].bHeld && (!Enemy || !Enemy->bDefeated) && (!Prop || !Prop->bBroken))
@@ -694,6 +751,8 @@ bool UBBSBFieldActionComponent::SetWeaponExperiment(EBBSBWeaponCommitment Preset
 }
 bool UBBSBFieldActionComponent::CanMove() const
 {
+ if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive) return false;
+	if (bEquipmentWheelOpen) return false;
 	if (bDodging) return false;
 	if (Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) && Arbiter.Rule.bLockMovement) return false;
 	const UBBSBCombatComponent* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
@@ -701,10 +760,12 @@ bool UBBSBFieldActionComponent::CanMove() const
 }
 bool UBBSBFieldActionComponent::IsConductorAvailable() const
 {
+	if (bEquipmentWheelOpen) return false;
 	return !bDodging && (!Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) || !Arbiter.Rule.bOccupyConductor);
 }
 float UBBSBFieldActionComponent::GetLookInputScale() const
 {
+	if (bEquipmentWheelOpen || bEquipmentPointerCaptured || FPlatformTime::Seconds()<EquipmentLookResumeAt) return 0.f;
 	const UBBSBCombatComponent* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
 	if (Combat && Combat->IsStageLocked()) return 0.f;
 	if (bWeaponAimLocked) return 0.f;
@@ -741,6 +802,7 @@ void UBBSBFieldActionComponent::InterruptAction(EBBSBActionState State,float Sec
 }
 void UBBSBFieldActionComponent::ResetActionState()
 {
+	CancelEquipmentSelection();
 	FinishDodge(); CancelCurrentAction(true); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle; CameraResumeAt=-100;
 }
 void UBBSBFieldActionComponent::ClearHover()
@@ -756,23 +818,19 @@ void UBBSBFieldActionComponent::ClearHover()
 }
 void UBBSBFieldActionComponent::UpdateHover()
 {
+	if (bEquipmentWheelOpen || (Character && Character->FindComponentByClass<UBBSBInteractionComponent>() && Character->FindComponentByClass<UBBSBInteractionComponent>()->bDialogueActive)) { ClearHover(); return; }
 	APlayerController* PC=Character ? Cast<APlayerController>(Character->GetController()) : nullptr;
 	if (!PC) { ClearHover(); return; }
-	FVector Eye,Direction; FRotator Rotation; PC->GetPlayerViewPoint(Eye,Rotation); Direction=Rotation.Vector();
-	if (PC->bShowMouseCursor) PC->DeprojectMousePositionToWorld(Eye,Direction);
-	FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBHover),false,Character);
-	if (FloatingWeapon) Query.AddIgnoredActor(FloatingWeapon);
-	FHitResult Hit; AActor* Target=nullptr;
-	if (GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Direction*2500,ECC_Visibility,Query))
-	{
-		AActor* Actor=Hit.GetActor();
-		ABBSBBreakableProp* Prop=Cast<ABBSBBreakableProp>(Actor); ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(Actor);
-		const bool bUsable=Prop ? !Prop->bBroken : Enemy ? !Enemy->bDefeated : Actor && Actor->ActorHasTag(TEXT("BBSBInteractable"));
-		FHitResult Occluder;
-		if (bUsable && FVector::Dist(Hit.ImpactPoint,Character->GetActorLocation())<=WeaponReach
-			&& (!GetWorld()->LineTraceSingleByChannel(Occluder,Character->GetActorLocation()+FVector(0,0,30),Hit.ImpactPoint,ECC_Visibility,Query) || Occluder.GetActor()==Actor)) Target=Actor;
-	}
-	if (bWeaponAimLocked) Target=IsValid(LockedAimActor) ? LockedAimActor.Get() : nullptr;
+ AActor* Target=nullptr;
+ if(const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
+ {
+  AActor* Attached=Buddy->SurfaceComponent->GetOwner();if(IsEquipmentTarget(Attached)) Target=Attached;
+ }
+ else
+ {
+  FHitResult Hit;if(TraceEquipmentAim(Hit) && IsEquipmentTarget(Hit.GetActor())) Target=Hit.GetActor();
+ }
+ if(!FieldEquipment && bWeaponAimLocked && IsEquipmentTarget(LockedAimActor)) Target=LockedAimActor;
 	const int32 HighlightStencil=bWeaponAimLocked ? 3 : 2;
 	if (Target==HoveredActor)
 	{
@@ -902,6 +960,8 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	APawn* Pawn=GetOwningPawn();
 	UBBSBFieldActionComponent* Actions=Pawn ? Pawn->FindComponentByClass<UBBSBFieldActionComponent>() : nullptr;
 	if (!Canvas || !Actions) return;
+ if(const auto* Dialogue=Pawn->FindComponentByClass<UBBSBInteractionComponent>();Dialogue && Dialogue->bDialogueActive) { Dialogue->DrawDialogue(this,Canvas);return; }
+	if (Actions->bEquipmentWheelOpen) { Actions->DrawEquipmentWheel(this,Canvas); return; }
 	const float Scale=FMath::Clamp(Canvas->SizeX/1280.f,0.7f,1.35f);
 	const float W=Canvas->SizeX, H=Canvas->SizeY;
 	const float CX=W*0.5f, CY=H*0.5f;
@@ -914,18 +974,22 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	if (Now-Actions->LastHitAt<1.2)
 		DrawText(Actions->LastHitLabel,FLinearColor(0.98f,0.7f,0.8f),CX-80*Scale,CY+28*Scale,GEngine->GetMediumFont(),Scale);
 	const float Charge=Actions->GetCharge();
-	if (Actions->PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy)
+	if (Actions->FieldEquipment || Actions->PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy)
 	{
 		const float X=Canvas->ClipX-260*Scale;
-		DrawText(Actions->PrototypeWeaponLabel()+TEXT("  [1-6 / F7]"),FLinearColor(0.94f,0.82f,0.9f),X,18*Scale,GEngine->GetSmallFont(),Scale);
-		if (Actions->PrototypeWeapon==EBBSBPrototypeWeapon::Sword) DrawText(FString::Printf(TEXT("Combo %d / 3"),Actions->SwordComboStep),FLinearColor(0.9f,0.8f,0.95f),X,38*Scale,GEngine->GetSmallFont(),Scale);
-		if (Charge>0) DrawText(FString::Printf(TEXT("Charge %.2f / 2 s"),Actions->WeaponChargeSeconds),FLinearColor(0.94f,0.8f,0.87f),X,38*Scale,GEngine->GetSmallFont(),Scale);
-		else if (Actions->bLastWeaponOnBeat && GetWorld()->GetTimeSeconds()-Actions->GestureTimes[int32(Actions->LastGesture)]<0.7) DrawText(TEXT("ON BEAT  x1.5"),FLinearColor(0.98f,0.78f,0.86f),X,38*Scale,GEngine->GetSmallFont(),Scale);
+		DrawText(Actions->EquipmentLabel(Actions->EquippedEquipmentId())+TEXT("  |  Tab 전환 · 길게 선택"),FLinearColor(0.94f,0.82f,0.9f),X,18*Scale,GEngine->GetSmallFont(),Scale);
+		if (Actions->PendingEquipmentId!=INDEX_NONE) DrawText(TEXT("행동 종료 후 → ")+Actions->EquipmentLabel(Actions->PendingEquipmentId),FLinearColor(.98f,.80f,.58f),X,58*Scale,GEngine->GetSmallFont(),1.15f*Scale);
+		if (!Actions->FieldEquipment)
+		{
+			if (Actions->PrototypeWeapon==EBBSBPrototypeWeapon::Sword) DrawText(FString::Printf(TEXT("Combo %d / 3"),Actions->SwordComboStep),FLinearColor(0.9f,0.8f,0.95f),X,38*Scale,GEngine->GetSmallFont(),Scale);
+			if (Charge>0) DrawText(FString::Printf(TEXT("Charge %.2f / 2 s"),Actions->WeaponChargeSeconds),FLinearColor(0.94f,0.8f,0.87f),X,38*Scale,GEngine->GetSmallFont(),Scale);
+			else if (Actions->bLastWeaponOnBeat && GetWorld()->GetTimeSeconds()-Actions->GestureTimes[int32(Actions->LastGesture)]<0.7) DrawText(TEXT("ON BEAT  x1.5"),FLinearColor(0.98f,0.78f,0.86f),X,38*Scale,GEngine->GetSmallFont(),Scale);
+		}
 		const double Beat=Actions->WeaponBeatPosition();
 		const float Pulse=1.f-FMath::Clamp(float(FMath::Frac(Beat)*5),0.f,1.f);
 		DrawRect(FLinearColor(0.6f+0.3f*Pulse,0.5f+0.3f*Pulse,0.65f+0.3f*Pulse),Canvas->ClipX-22*Scale,20*Scale,6*Scale,6*Scale);
 	}
-	if (Charge>0.f)
+	if (Charge>0.f && !Actions->FieldEquipment)
 	{
 		DrawRect(FLinearColor(0.2f,0.16f,0.23f,0.8f),CX-70*Scale,CY+55*Scale,140*Scale,5*Scale);
 		DrawRect(FLinearColor(0.9f,0.68f,0.8f),CX-70*Scale,CY+55*Scale,140*Scale*Charge,5*Scale);
@@ -1025,7 +1089,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	const float X=18*Scale, Y=H-171*Scale;
 	DrawRect(FLinearColor(0.12f,0.1f,0.15f,0.76f),X-8*Scale,Y-10*Scale,550*Scale,164*Scale);
 	DrawText(TEXT("FIELD PRACTICE"),FLinearColor(0.96f,0.85f,0.9f),X,Y,GEngine->GetMediumFont(),Scale);
-	DrawText(TEXT("WASD Run / Parry   Shift Walk   Space Dodge   R Reset   F1 Help"),FLinearColor(0.88f,0.85f,0.9f),X,Y+25*Scale,GEngine->GetSmallFont(),Scale);
+	DrawText(TEXT("WASD Walk / Parry   Shift Run   Space Dodge   R Reset   F1 Help"),FLinearColor(0.88f,0.85f,0.9f),X,Y+25*Scale,GEngine->GetSmallFont(),Scale);
 	DrawText(TEXT("LMB / RMB: press > hold > shake > release (fast = Flick)"),FLinearColor(0.88f,0.85f,0.9f),X,Y+44*Scale,GEngine->GetSmallFont(),Scale);
 	for (int32 Index=0; Index<5; ++Index)
 	{

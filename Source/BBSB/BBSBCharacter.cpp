@@ -12,6 +12,9 @@
 #include "InputActionValue.h"
 #include "BBSB.h"
 #include "Field/BBSBFieldActions.h"
+#include "Character/BBSBAimGaze.h"
+#include "Interaction/BBSBInteraction.h"
+#include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
 #include "Combat/BBSBCombatVerification.h"
 #include "Combat/BBSBFormationVerification.h"
@@ -24,6 +27,8 @@ ABBSBCharacter::ABBSBCharacter()
 {
 	FieldActions = CreateDefaultSubobject<UBBSBFieldActionComponent>(TEXT("FieldActions"));
 	Combat = CreateDefaultSubobject<UBBSBCombatComponent>(TEXT("Combat"));
+	AimGaze = CreateDefaultSubobject<UBBSBAimGazeComponent>(TEXT("AimGaze"));
+ Interaction=CreateDefaultSubobject<UBBSBInteractionComponent>(TEXT("Interaction"));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 		
@@ -111,7 +116,10 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 	{
 		// find out which way is forward
 		const FRotator Rotation = GetController()->GetControlRotation();
-		const FRotator YawRotation(0, Rotation.Yaw, 0);
+		FRotator MoveView=Rotation;
+		if(const auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->FieldEquipment):nullptr;Buddy && Buddy->bSurfaceViewLocked)
+			if(const auto* PC=Cast<APlayerController>(GetController())) { FVector Eye;PC->GetPlayerViewPoint(Eye,MoveView); }
+		const FRotator YawRotation(0, MoveView.Yaw, 0);
 
 		// get forward vector
 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
@@ -154,6 +162,13 @@ float ABBSBCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AContr
 	return Super::TakeDamage(Amount,Event,InstigatorController,Causer);
 }
 
+void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
+{
+	Super::CalcCamera(DeltaTime,OutResult);
+	// A release blend also finishes when Tab switches away from Bunniar.
+	if(auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->BunniarEquipment):nullptr) Buddy->ApplySurfaceFocus(DeltaTime,OutResult);
+}
+
 void ABBSBCharacter::FieldPress(int32 Channel) { if (FieldActions) FieldActions->FieldGesturePress(Channel); }
 void ABBSBCharacter::FieldRelease(int32 Channel) { if (FieldActions) FieldActions->FieldGestureRelease(Channel); }
 void ABBSBCharacter::FieldMotion(float X, float Y) { if (FieldActions) FieldActions->FieldGestureMotion(X,Y); }
@@ -178,7 +193,7 @@ void ABBSBCharacter::CombatLabKey(FString KeyName,bool bPressed)
 {
 #if !UE_BUILD_SHIPPING
 	const FKey Key{FName(*KeyName)};
-	const TArray<FKey> Allowed={EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E};
+	const TArray<FKey> Allowed={EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
 	if (Allowed.Contains(Key))
 		if (APlayerController* PC=Cast<APlayerController>(GetController())) PC->InputKey(FInputKeyEventArgs::CreateSimulated(Key,bPressed ? IE_Pressed : IE_Released,bPressed ? 1.f : 0.f));
 #endif

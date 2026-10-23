@@ -84,11 +84,14 @@ void UBBSBCombatComponent::BindControls()
 	Input->BindKey(EKeys::A,IE_Released,this,&UBBSBCombatComponent::LeftUp).bConsumeInput=false;
 	Input->BindKey(EKeys::Q,IE_Pressed,this,&UBBSBCombatComponent::PreviousTarget);
 	Input->BindKey(EKeys::E,IE_Pressed,this,&UBBSBCombatComponent::NextTarget);
-	Input->BindKey(EKeys::F2,IE_Pressed,this,&UBBSBCombatComponent::GoToPractice);
-	Input->BindKey(EKeys::F3,IE_Pressed,this,&UBBSBCombatComponent::NextExperiment);
-	Input->BindKey(EKeys::F4,IE_Pressed,this,&UBBSBCombatComponent::NextCameraExperiment);
-	Input->BindKey(EKeys::F5,IE_Pressed,this,&UBBSBCombatComponent::NextFeedbackExperiment);
-	Input->BindKey(EKeys::F6,IE_Pressed,this,&UBBSBCombatComponent::NextWeaponExperiment);
+	if (auto* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>(); Actions && Actions->bEnablePracticeControls)
+	{
+		Input->BindKey(EKeys::F2,IE_Pressed,this,&UBBSBCombatComponent::GoToPractice);
+		Input->BindKey(EKeys::F3,IE_Pressed,this,&UBBSBCombatComponent::NextExperiment);
+		Input->BindKey(EKeys::F4,IE_Pressed,this,&UBBSBCombatComponent::NextCameraExperiment);
+		Input->BindKey(EKeys::F5,IE_Pressed,this,&UBBSBCombatComponent::NextFeedbackExperiment);
+		Input->BindKey(EKeys::F6,IE_Pressed,this,&UBBSBCombatComponent::NextWeaponExperiment);
+	}
 	BoundInput=Input;
 }
 void UBBSBCombatComponent::RestoreViewBindings()

@@ -9,6 +9,7 @@
 
 bool UBBSBFieldActionComponent::RequiresMouseGesture(int32 Channel) const
 {
+ if (FieldEquipment) return false;
  return PrototypeWeapon==EBBSBPrototypeWeapon::Legacy || PrototypeWeapon==EBBSBPrototypeWeapon::Greatsword
   || PrototypeWeapon==EBBSBPrototypeWeapon::Spear || (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && Channel==1);
 }

@@ -24,7 +24,11 @@ public class BBSB : ModuleRules
 			"MovieSceneTracks"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "RenderCore", "RHI", "Landscape" });
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AnimGraph", "BlueprintGraph" }); // PIE tests and gaze authoring helper only.
+		}
 
 		PublicIncludePaths.AddRange(new string[] {
 			"BBSB",

@@ -12,6 +12,8 @@ class UCameraComponent;
 class UInputAction;
 class UBBSBFieldActionComponent;
 class UBBSBCombatComponent;
+class UBBSBAimGazeComponent;
+class UBBSBInteractionComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -59,8 +61,11 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB")
 	TObjectPtr<UBBSBFieldActionComponent> FieldActions;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB") TObjectPtr<UBBSBCombatComponent> Combat;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB") TObjectPtr<UBBSBAimGazeComponent> AimGaze;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBInteractionComponent> Interaction;
 
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 
 	UFUNCTION(Exec) void FieldPress(int32 Channel = 0);
 	UFUNCTION(Exec) void FieldRelease(int32 Channel = 0);

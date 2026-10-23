@@ -50,6 +50,7 @@ namespace
 
 FString UBBSBFieldActionComponent::PrototypeWeaponLabel() const
 {
+ if (FieldEquipment) return FieldEquipmentName.ToString();
  const TCHAR* Names[]={TEXT("Legacy"),TEXT("Greatsword"),TEXT("Spear"),TEXT("Hammer"),TEXT("Sword"),TEXT("Dagger"),TEXT("Crescent Blades")};
  return Names[FMath::Clamp(int32(PrototypeWeapon),0,6)];
 }
@@ -66,8 +67,10 @@ bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
  if (!Character || int32(Type)>6 || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return false;
  UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
  if (Combat && !Combat->CanAttack()) return false;
+ ClearFieldEquipment();
  CancelCurrentAction(true); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle;
  PrototypeWeapon=Type; HandAttacks={0,0}; LastWeaponDamage=0; bLastWeaponOnBeat=false;
+ if (Type!=EBBSBPrototypeWeapon::Legacy) LastCombatWeapon=Type;
  ActiveWeaponAnimationSet=nullptr;
  if (const auto* Set=WeaponAnimationSets.Find(Type)) ActiveWeaponAnimationSet=Set->LoadSynchronous();
  if (IsValid(FloatingWeapon)) FloatingWeapon->Destroy();
@@ -79,7 +82,7 @@ bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
  for (auto& Original:HiddenOriginalStaff) if (Original.IsValid()) Original->SetVisibility(Type==EBBSBPrototypeWeapon::Legacy);
  if (FieldMetronome) FieldMetronome->Stop();
  CreateWeapon(); FormUntil=GetWorld()->GetTimeSeconds()+1.5;
- if (Combat) Combat->SetFeedback(TEXT("WEAPON  ")+PrototypeWeaponLabel()+TEXT("  |  1-6 select, F7 cycle"));
+ if (Combat && bEnablePracticeControls) Combat->SetFeedback(TEXT("WEAPON  ")+PrototypeWeaponLabel());
  return true;
 }
 
@@ -133,6 +136,7 @@ double UBBSBFieldActionComponent::WeaponBeatPosition() const
 
 void UBBSBFieldActionComponent::TickPrototypeState()
 {
+ if (FieldEquipment) return;
  UpdateWeaponAim();
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Legacy) return;
  const double Now=GetWorld()->GetTimeSeconds();
@@ -171,8 +175,7 @@ FVector UBBSBFieldActionComponent::FindPrototypeCursorPoint(AActor** TargetActor
  const FVector Shoulder=Character->GetActorLocation()+FVector(0,0,30);
  if (FVector::Dist(Shoulder,Target)>WeaponReach) { Target=Shoulder+(Target-Shoulder).GetSafeNormal()*WeaponReach; Candidate=nullptr; }
  if (GetWorld()->LineTraceSingleByChannel(Hit,Shoulder,Target,ECC_Visibility,Q)) { Target=Hit.ImpactPoint; Candidate=Hit.GetActor(); }
- const ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(Candidate); const ABBSBBreakableProp* Prop=Cast<ABBSBBreakableProp>(Candidate);
- if (TargetActor && ((Enemy && !Enemy->bDefeated) || (Prop && !Prop->bBroken) || (Candidate && Candidate->ActorHasTag(TEXT("BBSBInteractable"))))) *TargetActor=Candidate;
+ if (TargetActor && IsEquipmentTarget(Candidate)) *TargetActor=Candidate;
  return Target;
 }
 
