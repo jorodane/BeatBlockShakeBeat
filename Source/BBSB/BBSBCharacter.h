@@ -13,6 +13,7 @@ class UInputAction;
 class UBBSBFieldActionComponent;
 class UBBSBCombatComponent;
 class UBBSBAimGazeComponent;
+class UBBSBTraversalComponent;
 class UBBSBInteractionComponent;
 struct FInputActionValue;
 
@@ -62,6 +63,7 @@ public:
 	TObjectPtr<UBBSBFieldActionComponent> FieldActions;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB") TObjectPtr<UBBSBCombatComponent> Combat;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB") TObjectPtr<UBBSBAimGazeComponent> AimGaze;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBTraversalComponent> Traversal;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBInteractionComponent> Interaction;
 
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
@@ -116,6 +118,8 @@ public:
 	/** Handles jump pressed inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpEnd();
+ UFUNCTION(BlueprintCallable,Category="Input") void DoDash();
+ virtual void Landed(const FHitResult& Hit) override;
 
 public:
 

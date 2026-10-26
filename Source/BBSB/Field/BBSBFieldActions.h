@@ -21,6 +21,11 @@ class UAudioComponent;
 class UCanvas;
 class USoundWaveProcedural;
 class ABBSBWeaponVerification;
+class UDecalComponent;
+class UMaterialInterface;
+
+UENUM(BlueprintType)
+enum class EBBSBAimPresentation : uint8 { Hidden, Air, Surface, Interactive };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FBBSBFieldGestureEvent, EBBSBFieldGesture, Gesture, int32, MouseChannel, float, Charge);
 DECLARE_DELEGATE_RetVal_FourParams(bool, FBBSBEquipmentGesture, EBBSBFieldGesture, int32, float, bool);
@@ -82,6 +87,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Interaction") FVector VisualAimPoint() const;
  /** Shared ray, reach and occlusion used by highlighting and Bunniar dispatch. */
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool TraceEquipmentAim(FHitResult& Hit) const;
+ /** Always supplies the point on the rendered aim ray; true means a surface is in reach. */
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const;
+ bool EquipmentAimRay(FVector& Origin,FVector& Direction) const;
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsEquipmentTarget(AActor* Actor) const;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") TObjectPtr<AActor> BunniarEquipment;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") TArray<EBBSBPrototypeWeapon> AvailableWeapons={EBBSBPrototypeWeapon::Sword};
@@ -123,6 +131,13 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Gestures") TArray<int32> GestureCounts = {0,0,0,0,0};
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Feedback") int32 PropsBroken = 0;
 
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Movement") bool bFaceCameraWhileMoving=true;
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") FVector MovementIntent() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") float GetDodgeAge() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") float GetDodgeVisualAge() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") bool IsDodgeRunExit() const { return bDodgeExitToRun; }
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") float GetDodgeDirectionAngle() const;
+ void UpdateMovementFacing();
 	UFUNCTION(BlueprintPure, Category="BBSB|Movement") bool IsDodging() const { return bDodging; }
 	UFUNCTION(BlueprintPure, Category="BBSB|Movement") bool IsDodgeInvulnerable() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") bool IsGestureCaptured() const;
@@ -130,6 +145,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") FVector2D GestureReleaseDirection(int32 Channel) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") float GestureHeldSeconds(int32 Channel) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Action") bool CanMove() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") bool CanStartJump() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Action") bool IsConductorAvailable() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Camera") float GetLookInputScale() const;
 	bool RequiresMouseGesture(int32 Channel) const;
@@ -146,6 +162,24 @@ public:
 	UFUNCTION(Exec) void FieldGestureRelease(int32 Channel = 0);
 	UFUNCTION(Exec) void FieldGestureMotion(float X, float Y);
 	void RecordMoveInput(float Right, float Forward);
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") FVector MovementDashDirection() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Aim") bool IsSurfaceAimLocked() const;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") EBBSBAimPresentation AimPresentation=EBBSBAimPresentation::Air;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") FVector AimPresentationPoint;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") FLinearColor AimPresentationColor;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") TObjectPtr<AActor> AimPresentationActor;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") TObjectPtr<UDecalComponent> SurfaceAimDecal;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") TSoftObjectPtr<UMaterialInterface> SurfaceAimMaterial= TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/Interaction/Materials/M_BunniarAimRing.M_BunniarAimRing")));
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") TSoftObjectPtr<UMaterialInterface> BuddyOutlineMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/Interaction/Materials/M_PP_BunniarOutline.M_PP_BunniarOutline")));
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim",meta=(ClampMin="2",Units="cm")) float SurfaceAimRadius=17.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor AirAimColor=FLinearColor(.87f,.83f,.86f,.8f);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor SurfaceAimColor=FLinearColor(.96f,.83f,.90f,1);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor SurfaceDecalColor=FLinearColor(.58f,.32f,.45f,1);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor NPCAimColor=FLinearColor(.98f,.68f,.81f,1);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor CarryAimColor=FLinearColor(.57f,.79f,.98f,1);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor DeviceAimColor=FLinearColor(.60f,.92f,.73f,1);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor AttackAimColor=FLinearColor(.98f,.65f,.54f,1);
+ void DrawContextAim(AHUD* HUD,UCanvas* Canvas) const;
 	void ExerciseGesture(int32 Index);
 	float GetCharge() const;
 	float GetDodgeCooldownRemaining() const;
@@ -237,12 +271,19 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UAnimMontage> ActionMontage;
 	struct FHoverState { TWeakObjectPtr<UPrimitiveComponent> Primitive; bool bDepth=false; int32 Stencil=0; };
 	TArray<FHoverState> HoverStates;
+ TWeakObjectPtr<UPrimitiveComponent> HoverLockedSurface;
+ TWeakObjectPtr<AActor> HoverBuddy;
+ UPROPERTY(Transient) TObjectPtr<class UMaterialInstanceDynamic> BuddyOutlineMID;
+ void UpdateAimPresentation();
 	double CameraResumeAt = -100;
 	TWeakObjectPtr<UInputComponent> BoundInput;
 	FVector2D LastMove = FVector2D::ZeroVector;
 	double LastMoveAt = -100.0;
 	double DodgeStartedAt = -100.0;
 	double LastDodgeAt = -100.0;
+ double DodgeExitStartedAt=-100;
+ bool bDodgeExitSettling=false;
+ bool bDodgeExitToRun=false;
 	FVector DodgeDirection = FVector(-1,0,0);
 	FVector LastWeaponPosition = FVector::ZeroVector;
 	FTransform WeaponReturnFromView;
@@ -250,6 +291,7 @@ private:
 	bool bWeaponWasAttacking = false;
 	FRotator OriginalMeshRotation;
 	float OriginalFriction = 8.f;
+	float OriginalFallingBraking=0;
 	float OriginalBraking = 2000.f;
 	float OriginalBrakingFactor = 2.f;
 	float OriginalFOV = 90.f;
@@ -294,7 +336,7 @@ private:
 	void WeaponOne(); void WeaponTwo(); void WeaponThree(); void WeaponFour(); void WeaponFive(); void WeaponSix();
 	void TickWeapon(float DeltaTime);
 	void TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action);
-	void FinishDodge();
+	void FinishDodge(bool bContinueMovement=false);
 	FVector FindAimPoint() const;
 	void PlayGestureAnimation(EBBSBFieldGesture Gesture);
 	void CancelCurrentAction(bool bCancelGesture);

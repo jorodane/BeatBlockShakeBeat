@@ -1,5 +1,7 @@
 #include "BBSBFieldActions.h"
 #include "BBSB.h"
+#include "BBSBCharacter.h"
+#include "Character/BBSBTraversal.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSequence.h"
 #include "Combat/BBSBCombat.h"
@@ -167,7 +169,12 @@ void UBBSBFieldActionComponent::TickPrototypeState()
 FVector UBBSBFieldActionComponent::FindPrototypeCursorPoint(AActor** TargetActor) const
 {
  if (TargetActor) *TargetActor=nullptr;
- APlayerController* PC=Cast<APlayerController>(Character->GetController()); FVector Eye,Direction; FRotator View; PC->GetPlayerViewPoint(Eye,View); Direction=View.Vector();
+ // Placed preview characters and pawns awaiting possession have no local mouse view.
+ if (!IsValid(Character)) return GetOwner() ? GetOwner()->GetActorLocation():FVector::ZeroVector;
+ const FVector ForwardAim=Character->GetPawnViewLocation()+Character->GetActorForwardVector()*FMath::Max(WeaponReach,100.f);
+ const APlayerController* PC=Cast<APlayerController>(Character->GetController());
+ if (!IsValid(PC) || !PC->IsLocalController() || !GetWorld()) return ForwardAim;
+ FVector Eye,Direction; FRotator View; PC->GetPlayerViewPoint(Eye,View); Direction=View.Vector();
  if (PC->bShowMouseCursor) PC->DeprojectMousePositionToWorld(Eye,Direction);
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBManualWeaponAim),false,Character); Q.AddIgnoredActor(FloatingWeapon); Q.AddIgnoredActor(OtherFloatingWeapon);
  FHitResult Hit; FVector Target=Eye+Direction*WeaponReach; AActor* Candidate=nullptr;
@@ -296,10 +303,22 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  Slot.Emplace(A); ActiveState=EBBSBActionState::Attack; LastGesture=G; ++GestureCounts[int32(G)]; GestureTimes[int32(G)]=Now; ++HandAttacks[Channel];
  LastWeaponDamage=A.ExactDamage; LastAimPoint=A.Target; LastWeaponImpulse=Impulse; FormUntil=Now+1;
  OnGesture.Broadcast(G,Channel,WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f));
+ auto* Player=Cast<ABBSBCharacter>(Character);auto* Traversal=Player ? Player->Traversal.Get():nullptr;
+ const bool Airborne=Character->GetCharacterMovement()->IsFalling();
+ UAnimSequence* BodyClip=Clip ? (Airborne && Clip->AirCharacterAnimation ? Clip->AirCharacterAnimation.Get():Clip->CharacterAnimation.Get()):nullptr;
+ if(Traversal && Traversal->Presentation)
+ {
+  const auto& ComboClips=Airborne ? Traversal->Presentation->AirWeaponCombo:Traversal->Presentation->GroundWeaponCombo;
+  if((Airborne ? !(Clip && Clip->AirCharacterAnimation):PrototypeWeapon==EBBSBPrototypeWeapon::Sword) && ComboClips.IsValidIndex(Combo-1) && ComboClips[Combo-1]) BodyClip=ComboClips[Combo-1];
+ }
+ if(BodyClip) if(UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance())
+ {
+  if(ActionMontage) Anim->Montage_Stop(.035f,ActionMontage);
+  ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(BodyClip,TEXT("DefaultSlot"),.045f,.08f,BodyClip->GetPlayLength()/Duration);
+ }
+ if(Airborne && Traversal) Traversal->BeginAirWeaponHang(Duration);
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Dagger)
  {
-  if (Clip && Clip->CharacterAnimation) if (UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance())
-   ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(Clip->CharacterAnimation,TEXT("DefaultSlot"),0.03f,0.04f,Clip->CharacterAnimation->GetPlayLength()/Duration);
   ABBSBPlayerWeaponProjectile* P=GetWorld()->SpawnActor<ABBSBPlayerWeaponProjectile>(FloatingWeapon->GetActorLocation(),FloatingWeapon->GetActorRotation());
   if (P) P->Launch(Character,A.Target,A.ExactDamage,Blade->GetStaticMesh(),ActiveWeaponAnimationSet);
   DaggerAwayUntil[0]=Now+FVector::Dist(FloatingWeapon->GetActorLocation(),A.Target)/FMath::Max(100.f,ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->ProjectileSpeed:1900.f)+0.08;
@@ -307,13 +326,8 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  else
  {
   UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance();
-  if (Clip && Clip->CharacterAnimation && Anim)
-  {
-   if (ActionMontage) Anim->Montage_Stop(0.025f,ActionMontage);
-   ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(Clip->CharacterAnimation,TEXT("DefaultSlot"),0.03f,0.04f,Clip->CharacterAnimation->GetPlayLength()/Duration);
-  }
-  else if (PrototypeWeapon!=EBBSBPrototypeWeapon::Sword && (!Independent || !Anim || !ActionMontage || !Anim->Montage_IsPlaying(ActionMontage))) PlayGestureAnimation(G);
-  if ((!Clip || !Clip->CharacterAnimation) && PrototypeWeapon==EBBSBPrototypeWeapon::Sword && GestureAnimations.Num()>=4)
+  if (!BodyClip && PrototypeWeapon!=EBBSBPrototypeWeapon::Sword && (!Independent || !Anim || !ActionMontage || !Anim->Montage_IsPlaying(ActionMontage))) PlayGestureAnimation(G);
+  if (!BodyClip && PrototypeWeapon==EBBSBPrototypeWeapon::Sword && GestureAnimations.Num()>=4)
   {
    const int32 Next=Now-LastSwordBeatAt>SwordComboWindow ? 1 : SwordComboStep%3+1;
     if (Anim)

@@ -30,6 +30,10 @@ UCLASS(Transient,Blueprintable)
 class BBSB_API UBBSBHeadGazeAnimInstance : public UAnimInstance
 {
  GENERATED_BODY()
+public:
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Motion Matching") bool bDashMotionMatched=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Motion Matching") float DashMatchedAngle=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Motion Matching") float DashMatchCost=0;
 protected:
  virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override;
  virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy* Proxy) override;

@@ -419,10 +419,10 @@ void ABBSBPuzzleFieldHUD::DrawHUD()
  if(Actions->bEquipmentWheelOpen) { Actions->DrawEquipmentWheel(this,Canvas);return; }
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.3f),W=Canvas->ClipX,H=Canvas->ClipY,CX=W*.5f,CY=H*.5f;
  const FLinearColor Ink(.94f,.90f,.78f),Green(.57f,.85f,.66f),Rose(.95f,.58f,.65f),Paper(.13f,.17f,.16f,.85f);
- DrawLine(CX-7*S,CY,CX-2*S,CY,Ink,1.5f);DrawLine(CX+2*S,CY,CX+7*S,CY,Ink,1.5f);DrawLine(CX,CY-7*S,CX,CY-2*S,Ink,1.5f);DrawLine(CX,CY+2*S,CX,CY+7*S,Ink,1.5f);
+ Actions->DrawContextAim(this,Canvas);
  DrawText(FString::Printf(TEXT("BUNNIAR MEADOW   %d / 20"),Field->SolvedCount),Ink,26*S,22*S,GEngine->GetMediumFont(),S);
  DrawText(Actions->FieldEquipment ? TEXT("Bunniar  |  Tab: sword"):TEXT("Sword  |  Tab: Bunniar"),Ink,W-270*S,22*S,GEngine->GetSmallFont(),S);
- DrawText(TEXT("WASD Walk   Shift Run   Space Dodge   Tab Switch / Hold for wheel"),Ink,26*S,H-34*S,GEngine->GetSmallFont(),S);
+ DrawText(TEXT("WASD Run   Shift Dash   Space Jump / Glide toggle   Tab Switch / Hold for wheel"),Ink,26*S,H-34*S,GEngine->GetSmallFont(),S);
  if(Field->bReturning) { DrawRect(Paper,CX-230*S,105*S,460*S,42*S);DrawText(TEXT("The trail ends here. Returning to the meadow..."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
  if(auto* Station=Field->Focus.Get())
  {

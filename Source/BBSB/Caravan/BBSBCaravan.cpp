@@ -1,6 +1,7 @@
 #include "Caravan/BBSBCaravan.h"
 #include "Caravan/BBSBBunniarAnimation.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBTraversal.h"
 #include "Interaction/BBSBInteraction.h"
 #include "BBSB.h"
 #include "Combat/BBSBCombatVisuals.h"
@@ -88,17 +89,82 @@ void ABBSBBunniarCompanion::Tick(float DT)
 {
  Super::Tick(DT);
  const float T=GetWorld()->GetTimeSeconds(); FVector Target=GetActorLocation();
+ if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Traversal) P->Traversal->UpdateWirePresentation();
+ if (bGliding)
+ {
+  const auto* Player=Cast<ABBSBCharacter>(GetOwner());
+  if (Player && Player->Traversal && Player->Traversal->IsBunniarTraversalActive())
+  {
+   const auto* Traversal=Player->Traversal.Get();
+   const float Duration=AnimationSet ? AnimationSet->AttachTravelSeconds:.24f;
+   const float Alpha=Duration<=0 ? 1.f:1-FMath::Pow(1-FMath::Clamp((T-float(SurfaceTransitAt))/Duration,0.f,1.f),3.f);
+   const FVector Face=AnimationSet ? AnimationSet->FaceDirection.GetSafeNormal():FVector::RightVector;
+   const FQuat ModelFrame=FRotationMatrix::MakeFromXZ(Visual->GetRelativeTransform().TransformVectorNoScale(Face),FVector::UpVector).ToQuat();
+   if (Traversal->bGlideDashing)
+   {
+    const FQuat Spin(Traversal->GlideDashTangent,Traversal->GlideDashElapsed*Traversal->GlideDashSpinHz*2*PI);
+    const FQuat Rotation=Spin*Traversal->GlideDashTangent.Rotation().Quaternion()*ModelFrame.Inverse();
+    const FVector Back=AnimationSet ? AnimationSet->BackContactPoint:FVector(0,-54,70);
+    const FVector Contact=Visual->GetRelativeTransform().TransformPosition(Back)*Traversal->BunniarScale;
+    const FVector NormalPosition=Player->GetActorTransform().TransformPosition(Traversal->BunniarOffset)+Traversal->GlideLeadOffset;
+    const float Lead=FMath::SmoothStep(0.f,FMath::Max(.01f,Traversal->GlideDashLeadSeconds),Traversal->GlideDashElapsed);
+    // Spin through the hand/back contact. An origin under the mesh makes the
+    // whole companion orbit through the player's head instead of drilling ahead.
+    SetActorLocation(FMath::Lerp(NormalPosition,Traversal->GlideGrip(true)-Rotation.RotateVector(Contact),Lead));
+    SetActorRotation(Rotation);
+    // The ordinary glide branch blends from the final drill frame on release.
+    SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;
+   }
+   else
+   {
+    SetActorLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),Player->GetActorTransform().TransformPosition(Traversal->BunniarOffset)+Traversal->GlideLeadOffset,Alpha));
+    const FQuat Rotation=Player->GetActorQuat()*ModelFrame.Inverse();
+    SetActorRotation(Alpha<1.f ? FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Rotation,Alpha):FMath::QInterpTo(GetActorQuat(),Rotation,DT,12.f));
+   }
+   SetActorScale3D(FMath::Lerp(SurfaceTransitFrom.GetScale3D(),FVector(Traversal->BunniarScale),Alpha));
+   return;
+  }
+  EndGlidePresentation();
+ }
  if (auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0))) bEquipped=P->FieldActions && P->FieldActions->FieldEquipment==this;
+ if(bEquipped!=bLastEquipped)
+ {
+  bLastEquipped=bEquipped;
+  if(bFollowing && !bSurfaceAttached && !bAirHovering)
+  {
+   SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;ReturnTransitSeconds=EquipmentTravelSeconds;bSurfaceReturning=true;
+  }
+ }
  const float SmallScale=AnimationSet ? AnimationSet->CompanionScale:.12f;
  const float NormalScale=!bFollowing ? 1.f:bEquipped ? (AnimationSet ? AnimationSet->EquippedScale:.175f):SmallScale;
- const float TravelSeconds=AnimationSet ? AnimationSet->AttachTravelSeconds:.24f;
+ const float TravelSeconds=bSurfaceReturning ? ReturnTransitSeconds:AnimationSet ? AnimationSet->AttachTravelSeconds:.24f;
  const float Transit=TravelSeconds<=0 ? 1.f:FMath::Clamp(float((T-SurfaceTransitAt)/TravelSeconds),0.f,1.f);
- const float Ease=1-FMath::Pow(1-Transit,3.f);
- SetActorScale3D(bSurfaceAttached || bSurfaceReturning ? FMath::Lerp(SurfaceTransitFrom.GetScale3D(),FVector(bSurfaceAttached ? SmallScale:NormalScale),Ease):FVector(NormalScale));
+ const float Ease=bSurfaceReturning ? Transit*Transit*(3-2*Transit):1-FMath::Pow(1-Transit,3.f);
+ SetActorScale3D(bSurfaceAttached || bAirHovering || bSurfaceReturning ? FMath::Lerp(SurfaceTransitFrom.GetScale3D(),FVector(bSurfaceAttached || bAirHovering ? SmallScale:NormalScale),Ease):FVector(NormalScale));
+ if(bAirHovering)
+ {
+  if(!CanMaintainAirHover()) { ReleaseSurface();return; }
+  else
+  {
+   SurfaceArrivalAlpha=Transit;
+   SetActorLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),AirHoverPoint,Ease));
+   const auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
+   const FVector Face=AnimationSet ? AnimationSet->FaceDirection.GetSafeNormal():FVector::RightVector;
+   const FQuat ModelFrame=FRotationMatrix::MakeFromXZ(Visual->GetRelativeTransform().TransformVectorNoScale(Face),Visual->GetRelativeTransform().TransformVectorNoScale(FVector::UpVector)).ToQuat();
+   const FVector Aim=P->FieldActions->VisualAimPoint();
+   FVector Eye;FRotator View;Cast<APlayerController>(P->GetController())->GetPlayerViewPoint(Eye,View);
+   // A ray through the anchor has no look direction. Face the player until the aim moves away.
+   const FVector LookDirection=FVector::DistSquared(Aim,AirHoverPoint)>FMath::Square(12.f) ? Aim-AirHoverPoint:Eye-AirHoverPoint;
+   const FQuat Look=FRotationMatrix::MakeFromXZ(LookDirection.GetSafeNormal(),FVector::UpVector).ToQuat()*ModelFrame.Inverse();
+   AirHoverRotation=FMath::QInterpTo(AirHoverRotation,Look,DT,AirGazeInterpSpeed);
+   SetActorRotation(Transit<1.f ? FQuat::Slerp(SurfaceTransitFrom.GetRotation(),AirHoverRotation,Ease):AirHoverRotation);
+   return;
+  }
+ }
  if (bSurfaceAttached)
  {
   const auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
-  if (!CanMaintainSurfaceAttachment()) ReleaseSurface();
+  if (!CanMaintainSurfaceAttachment()) { ReleaseSurface();return; }
   else
   {
    const FTransform Frame=SurfaceLocalFrame*SurfaceComponent->GetComponentTransform();

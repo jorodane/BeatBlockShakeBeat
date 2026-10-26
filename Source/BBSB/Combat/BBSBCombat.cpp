@@ -7,6 +7,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "EngineUtils.h"
@@ -37,6 +38,7 @@ void UBBSBCombatComponent::BeginPlay()
 	Camera=Character->FindComponentByClass<UCameraComponent>();
 	if (Camera) CameraRelativeRotation=Camera->GetRelativeRotation();
 	Character->GetCharacterMovement()->AddTickPrerequisiteComponent(this);
+ Character->GetMesh()->AddTickPrerequisiteComponent(this);
 }
 
 void UBBSBCombatComponent::EndPlay(const EEndPlayReason::Type Reason)
@@ -107,7 +109,7 @@ void UBBSBCombatComponent::RestoreViewBindings()
 void UBBSBCombatComponent::TickComponent(float DT,ELevelTick TickType,FActorComponentTickFunction* TickFunction)
 {
 	Super::TickComponent(DT,TickType,TickFunction);
-	if (!Character || !Character->IsLocallyControlled()) return;
+	if (!Character || !Character->IsLocallyControlled() || !Cast<APlayerController>(Character->GetController())) { BoundInput.Reset(); return; }
 	BindControls();
 	if (Stage && !IsValid(Stage)) LeaveStage(false);
 	if (IsStageLocked() && (!IsValid(SelectedEnemy) || SelectedEnemy->bDefeated || SelectedEnemy->Stage!=Stage)) CycleTarget(1);
@@ -141,6 +143,7 @@ void UBBSBCombatComponent::TickComponent(float DT,ELevelTick TickType,FActorComp
 		}
 		else if (!Actions || !Actions->IsDodging()) Character->GetCharacterMovement()->bOrientRotationToMovement=true;
 	}
+ if(auto* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>()) Actions->UpdateMovementFacing();
 }
 
 void UBBSBCombatComponent::SetStageCameraLock(bool bLocked)

@@ -9,7 +9,7 @@ class ULevelSequence;
 class USkeletalMesh;
 
 UENUM(BlueprintType)
-enum class EBBSBBunniarMotion : uint8 { Idle, Travel, Equipped, Attached };
+enum class EBBSBBunniarMotion : uint8 { Idle, Travel, Equipped, Attached, Gliding, AirDash };
 
 /** Edit LS_Bunniar_* with FK controls; linked A_Bunniar_* clips are the runtime poses. */
 UCLASS(BlueprintType)
@@ -24,6 +24,8 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation") TObjectPtr<UAnimSequence> Travel;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation") TObjectPtr<UAnimSequence> Equipped;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation") TObjectPtr<UAnimSequence> Attached;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Animation") TObjectPtr<UAnimSequence> Gliding;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Animation") TObjectPtr<UAnimSequence> AirDash;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation", meta=(ClampMin="0.01")) float BlendSeconds=.16f;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation", meta=(ClampMin="1")) float TravelSpeedThreshold=60;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Authoring") TArray<TObjectPtr<ULevelSequence>> EditableSources;

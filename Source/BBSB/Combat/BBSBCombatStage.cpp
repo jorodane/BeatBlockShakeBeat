@@ -137,7 +137,7 @@ void ABBSBCombatStage::Tick(float DT)
 	else if (Now<MusicEpoch) Phase=EBBSBStagePhase::CountIn;
 	else if (Phase==EBBSBStagePhase::Forming || Phase==EBBSBStagePhase::CountIn)
 	{
-		Phase=EBBSBStagePhase::Fighting; Player->SetFeedback(TEXT("GO!  WASD / X parry | Space dodge | Q E target"));
+		Phase=EBBSBStagePhase::Fighting; Player->SetFeedback(TEXT("GO!  WASD / X parry | Shift dash | Space jump / glide | Q E target"));
 	}
 	if (Phase==EBBSBStagePhase::Replacing && IsValid(Front))
 	{

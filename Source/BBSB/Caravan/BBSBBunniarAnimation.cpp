@@ -6,10 +6,12 @@
 #include "AnimationRuntime.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "BBSBCharacter.h"
+#include "Character/BBSBTraversal.h"
 
 UAnimSequence* UBBSBBunniarAnimationSet::Clip(int32 Index) const
 {
- UAnimSequence* Clips[]={Idle,Travel,Equipped,Attached}; return Clips[FMath::Clamp(Index,0,3)];
+ UAnimSequence* Clips[]={Idle,Travel,Equipped,Attached,Gliding ? Gliding.Get():Travel.Get(),AirDash ? AirDash.Get():Travel.Get()}; return Clips[FMath::Clamp(Index,0,5)];
 }
 
 namespace
@@ -18,9 +20,9 @@ namespace
  {
   FBunniarPoseProxy(UAnimInstance* Instance):FAnimInstanceProxy(Instance) {}
   FAnimNode_Base Root;
-  UAnimSequence* Clips[4]={};
-  double Times[4]={};
-  float Weights[4]={1,0,0,0};
+  UAnimSequence* Clips[6]={};
+  double Times[6]={};
+  float Weights[6]={1,0,0,0,0,0};
   EBBSBBunniarMotion PreviousMotion=EBBSBBunniarMotion::Idle;
   virtual FAnimNode_Base* GetCustomRootNode() override { return &Root; }
   virtual void PreUpdate(UAnimInstance* Instance,float DT) override
@@ -29,17 +31,18 @@ namespace
    const auto* Anim=CastChecked<UBBSBBunniarAnimInstance>(Instance);
    const auto* Set=Anim->AnimationSet.Get();
    const bool EnteringAttached=Anim->Motion==EBBSBBunniarMotion::Attached && PreviousMotion!=EBBSBBunniarMotion::Attached;
+   const bool EnteringDash=Anim->Motion==EBBSBBunniarMotion::AirDash && PreviousMotion!=EBBSBBunniarMotion::AirDash;
    PreviousMotion=Anim->Motion;
    const float Step=1-FMath::Exp(-FMath::Max(0.f,DT)*5.f/FMath::Max(Set ? Set->BlendSeconds:.16f,.01f));
-   for (int32 I=0;I<4;++I)
+   for (int32 I=0;I<6;++I)
    {
     UAnimSequence* Next=Set ? Set->Clip(I):nullptr;
     if (Next!=Clips[I]) { Clips[I]=Next; Times[I]=0; }
-    if (I==int32(EBBSBBunniarMotion::Attached))
+    if (I==int32(EBBSBBunniarMotion::Attached) || I==int32(EBBSBBunniarMotion::AirDash))
     {
      // Fold once per attachment, then retain the authored end pose until release.
-     if (EnteringAttached) Times[I]=0;
-     if (Anim->Motion==EBBSBBunniarMotion::Attached)
+     if ((I==int32(EBBSBBunniarMotion::Attached) && EnteringAttached) || (I==int32(EBBSBBunniarMotion::AirDash) && EnteringDash)) Times[I]=0;
+     if (int32(Anim->Motion)==I)
       Times[I]=Next ? FMath::Clamp(Times[I]+DT,0.0,double(Next->GetPlayLength())):0;
     }
     else Times[I]=Next && Next->GetPlayLength()>0 ? FMath::Fmod(Times[I]+DT,Next->GetPlayLength()):0;
@@ -50,7 +53,7 @@ namespace
   {
    Output.ResetToRefPose(); float Sum=0;
    FAnimationPoseData Result(Output);
-   for (int32 I=0;I<4;++I)
+   for (int32 I=0;I<6;++I)
    {
     if (!Clips[I] || Weights[I]<.0001f) continue;
     FPoseContext Pose(this); Pose.ResetToRefPose(); FAnimationPoseData Data(Pose);
@@ -78,8 +81,10 @@ void UBBSBBunniarAnimInstance::NativeUpdateAnimation(float DT)
  {
   AnimationSet=Buddy->AnimationSet;
   const auto* Player=UGameplayStatics::GetPlayerCharacter(Buddy,0);
-  Motion=Buddy->bSurfaceAttached ? EBBSBBunniarMotion::Attached:Buddy->bEquipped ? EBBSBBunniarMotion::Equipped:
+  const auto* Reparado=Cast<ABBSBCharacter>(Player);
+  Motion=Buddy->bGliding ? EBBSBBunniarMotion::Gliding:Buddy->bSurfaceAttached ? EBBSBBunniarMotion::Attached:Buddy->bEquipped || Buddy->bAirHovering ? EBBSBBunniarMotion::Equipped:
    Player && Player->GetVelocity().Size2D()>(AnimationSet ? AnimationSet->TravelSpeedThreshold:60) ? EBBSBBunniarMotion::Travel:EBBSBBunniarMotion::Idle;
+  if(Buddy->bGliding && Reparado && Reparado->Traversal && Reparado->Traversal->bGlideDashing) Motion=EBBSBBunniarMotion::AirDash;
  }
  else if (const auto* Performer=Cast<ABBSBCaravanPerformer>(GetOwningActor())) Motion=Performer->bDefeated ? EBBSBBunniarMotion::Idle:EBBSBBunniarMotion::Equipped;
 }

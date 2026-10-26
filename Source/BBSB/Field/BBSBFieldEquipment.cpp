@@ -43,8 +43,13 @@ void UBBSBFieldActionComponent::SetEquipmentPointerCapture(bool Capture)
 
 FVector UBBSBFieldActionComponent::VisualAimPoint() const
 {
- if (!Character || !Character->GetController()) return FVector::ZeroVector;
- if (const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment); Buddy && Buddy->bSurfaceAttached) return Buddy->SurfacePoint;
+ const APlayerController* PC=IsValid(Character) ? Cast<APlayerController>(Character->GetController()):nullptr;
+ if (!IsValid(PC) || !PC->IsLocalController()) return FindPrototypeCursorPoint();
+ if (const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment))
+ {
+  if(Buddy->bSurfaceAttached) return Buddy->SurfacePoint;
+  FVector Point;FHitResult Hit;ResolveEquipmentAim(Point,Hit);return Point;
+ }
  return bWeaponAimLocked ? LockedAimPoint:FindPrototypeCursorPoint();
 }
 
@@ -71,15 +76,47 @@ bool UBBSBFieldActionComponent::IsEquipmentTarget(AActor* Actor) const
  if(const auto* Prop=Cast<ABBSBBreakableProp>(Actor)) return !Prop->bBroken;
  return Actor->ActorHasTag(TEXT("BBSBAttackable"));
 }
-bool UBBSBFieldActionComponent::TraceEquipmentAim(FHitResult& Hit) const
+bool UBBSBFieldActionComponent::EquipmentAimRay(FVector& Origin,FVector& Direction) const
 {
  auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
- if(!PC || bEquipmentWheelOpen) return false;
- FVector Eye,Ray;FRotator View;PC->GetPlayerViewPoint(Eye,View);Ray=View.Vector();
- if(PC->bShowMouseCursor) PC->DeprojectMousePositionToWorld(Eye,Ray);
- FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBEquipmentAim),true,Character);Q.AddIgnoredActor(FloatingWeapon);Q.AddIgnoredActor(OtherFloatingWeapon);Q.AddIgnoredActor(BunniarEquipment);
- if(!GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Ray*2500,ECC_Visibility,Q) || !Hit.GetComponent()) return false;
- if(FVector::Dist(Character->GetActorLocation(),Hit.ImpactPoint)>WeaponReach) return false;
+ if(!PC || !PC->IsLocalController() || !GetWorld()) return false;
+ FRotator View;PC->GetPlayerViewPoint(Origin,View);Direction=View.Vector();
+ if(PC->bShowMouseCursor && PC->DeprojectMousePositionToWorld(Origin,Direction)) { Direction.Normalize();return true; }
+ int32 Width=0,Height=0;PC->GetViewportSize(Width,Height);
+ if(Width>0 && Height>0) PC->DeprojectScreenPositionToWorld(Width*.5f,Height*.5f,Origin,Direction);
+ Direction.Normalize();return true;
+}
+bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const
+{
+ Hit=FHitResult();Point=Character ? Character->GetActorLocation():FVector::ZeroVector;
+ FVector Origin,Direction;
+ if(!EquipmentAimRay(Origin,Direction)) return false;
+ const float Reach=FMath::Max(50.f,WeaponReach);
+ const FVector Offset=Origin-Character->GetActorLocation();const float B=FVector::DotProduct(Offset,Direction);
+ const float Discriminant=B*B-Offset.SizeSquared()+FMath::Square(Reach);
+ const float RayDistance=FMath::Max(0.f,-B+(Discriminant>=0 ? FMath::Sqrt(Discriminant):0.f));
+ Point=Origin+Direction*RayDistance;
+ if(bEquipmentWheelOpen) return false;
+ FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBEquipmentAim),true,Character);
+ for(AActor* Ignored:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get(),BunniarEquipment.Get()}) Q.AddIgnoredActor(Ignored);
+ FHitResult CameraHit;
+ if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent()) return false;
+ if(FVector::DistSquared(Character->GetActorLocation(),CameraHit.ImpactPoint)<=FMath::Square(Reach))
+ {
+  Hit=CameraHit;Point=Hit.ImpactPoint;return true;
+ }
+ // An unreachable visible surface may stop the free-air point along this same
+ // screen ray. A character-to-point obstruction never substitutes its own point.
+ if(CameraHit.Distance<RayDistance) Point=Origin+Direction*FMath::Max(0.f,CameraHit.Distance-22.f);
+ return false;
+}
+bool UBBSBFieldActionComponent::TraceEquipmentAim(FHitResult& Hit) const
+{
+ FVector Point;
+ if(!ResolveEquipmentAim(Point,Hit)) return false;
+ if(IsValid(FieldEquipment) && FieldEquipment==BunniarEquipment) return true;
+ // Keep the existing character cover check for combat weapons.
+ FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBWeaponCover),true,Character);Q.AddIgnoredActor(FloatingWeapon);Q.AddIgnoredActor(OtherFloatingWeapon);Q.AddIgnoredActor(BunniarEquipment);
  FHitResult Cover;
  return !GetWorld()->LineTraceSingleByChannel(Cover,Character->GetActorLocation()+FVector(0,0,25),Hit.ImpactPoint,ECC_Visibility,Q) || Cover.GetActor()==Hit.GetActor();
 }

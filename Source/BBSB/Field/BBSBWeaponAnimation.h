@@ -32,6 +32,8 @@ struct BBSB_API FBBSBWeaponAnimationClip
  /** Spear Flick uses the same clip in an impulse-facing frame. */
  UPROPERTY(EditAnywhere, BlueprintReadWrite) bool bUseImpulseFrame=false;
  UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<UAnimSequence> CharacterAnimation;
+ /** Optional airborne override. The traversal library provides the shared placeholder combo. */
+ UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<UAnimSequence> AirCharacterAnimation;
 };
 
 UCLASS(BlueprintType)

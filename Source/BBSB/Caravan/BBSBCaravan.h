@@ -80,7 +80,17 @@ public:
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<ABBSBBunniarDevice> AttachedDevice;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) bool bFollowing=false;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) bool bEquipped=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float ReturnTravelSeconds=.40f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float EquipmentTravelSeconds=.32f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="1")) float AirGazeInterpSpeed=5.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Glide") bool bGliding=false;
+ void BeginGlidePresentation();
+ void EndGlidePresentation();
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bSurfaceAttached=false;
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bAirHovering=false;
+ /** The wire takes ownership of an anchor until arrival, independently of the held mouse button. */
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Surface") bool bWireAnchored=false;
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") FVector AirHoverPoint=FVector::ZeroVector;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bSurfaceViewLocked=false;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Bunniar|Surface", meta=(ClampMin="0.02",ClampMax="0.2")) float SurfaceFocusScreenMargin=.08f;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") float SurfaceCameraRetreat=0;
@@ -102,12 +112,18 @@ private:
  FTransform SurfaceLocalFrame;
  FTransform SurfaceTransitFrom;
  double SurfaceTransitAt=0;
+ float ReturnTransitSeconds=.40f;
+ bool bLastEquipped=false;
  bool bSurfaceReturning=false;
  bool bSurfaceArrived=false;
  TWeakObjectPtr<APlayerController> SurfaceLookController;
  FRotator SurfaceOrbitOffset=FRotator::ZeroRotator;
  bool CanMaintainSurfaceAttachment() const;
+ bool BeginAirHoverFromCursor(APlayerController* Controller);
+ bool CanMaintainAirHover() const;
+ FQuat AirHoverRotation=FQuat::Identity;
  float SurfaceRetreatGoal=0,SurfaceRetreatVelocity=0;
+ double SurfaceFramingBlockedAt=-100;
  TWeakObjectPtr<APlayerController> SurfaceBlendController;
  FVector SurfaceBlendLocalEye=FVector::ZeroVector;
  float SurfaceBlendElapsed=0,SurfaceBlendRetreat=0;

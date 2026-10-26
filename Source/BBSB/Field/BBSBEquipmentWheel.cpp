@@ -1,4 +1,6 @@
 #include "BBSBFieldActions.h"
+#include "BBSBCharacter.h"
+#include "Character/BBSBTraversal.h"
 #include "BBSB.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
@@ -48,6 +50,7 @@ int32 UBBSBFieldActionComponent::WheelEquipmentId(int32 Index) const
 
 bool UBBSBFieldActionComponent::IsEquipmentActionBusy() const
 {
+ if (const auto* Player=Cast<ABBSBCharacter>(Character);Player && Player->Traversal && (Player->Traversal->IsBunniarTraversalActive() || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive())) return true;
  if (!Character || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return true;
  const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
  return Combat && !Combat->CanAttack();

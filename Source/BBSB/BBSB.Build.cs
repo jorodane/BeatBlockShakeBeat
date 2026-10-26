@@ -21,13 +21,14 @@ public class BBSB : ModuleRules
 			"Slate",
 			"LevelSequence",
 			"MovieScene",
-			"MovieSceneTracks"
+			"MovieSceneTracks",
+            "PoseSearch"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "RenderCore", "RHI", "Landscape" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "RenderCore", "RHI", "Landscape", "AnimationCore", "Niagara" });
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AnimGraph", "BlueprintGraph" }); // PIE tests and gaze authoring helper only.
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AnimGraph", "BlueprintGraph", "PoseSearchEditor" }); // PIE tests and gaze authoring helper only.
 		}
 
 		PublicIncludePaths.AddRange(new string[] {

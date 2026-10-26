@@ -13,6 +13,7 @@
 #include "BBSB.h"
 #include "Field/BBSBFieldActions.h"
 #include "Character/BBSBAimGaze.h"
+#include "Character/BBSBTraversal.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
@@ -28,6 +29,7 @@ ABBSBCharacter::ABBSBCharacter()
 	FieldActions = CreateDefaultSubobject<UBBSBFieldActionComponent>(TEXT("FieldActions"));
 	Combat = CreateDefaultSubobject<UBBSBCombatComponent>(TEXT("Combat"));
 	AimGaze = CreateDefaultSubobject<UBBSBAimGazeComponent>(TEXT("AimGaze"));
+ Traversal=CreateDefaultSubobject<UBBSBTraversalComponent>(TEXT("Traversal"));
  Interaction=CreateDefaultSubobject<UBBSBInteractionComponent>(TEXT("Interaction"));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
@@ -67,6 +69,8 @@ ABBSBCharacter::ABBSBCharacter()
 
 void ABBSBCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
+	PlayerInputComponent->BindKey(EKeys::LeftShift,IE_Pressed,this,&ABBSBCharacter::DoDash);
+	PlayerInputComponent->BindKey(EKeys::RightShift,IE_Pressed,this,&ABBSBCharacter::DoDash);
 	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
 		
@@ -76,6 +80,8 @@ void ABBSBCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 
 		// Moving
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ABBSBCharacter::Move);
+        EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Completed, this, &ABBSBCharacter::Move);
+        EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Canceled, this, &ABBSBCharacter::Move);
 		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ABBSBCharacter::Look);
 
 		// Looking
@@ -112,6 +118,7 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 		FieldActions->RecordMoveInput(Right, Forward);
 		if (!FieldActions->CanMove()) return;
 	}
+	if (Traversal && Traversal->bGlideDashing) return;
 	if (GetController() != nullptr)
 	{
 		// find out which way is forward
@@ -147,12 +154,25 @@ void ABBSBCharacter::DoLook(float Yaw, float Pitch)
 
 void ABBSBCharacter::DoJumpStart()
 {
-	if (FieldActions) FieldActions->TryDodge();
+	if (Traversal) Traversal->TryJump();
 }
 
 void ABBSBCharacter::DoJumpEnd()
 {
-	// Space is a directional dodge in BBSB; releasing it does not interrupt the dash.
+	StopJumping(); // Releasing Space does not release an already opened glide.
+}
+
+void ABBSBCharacter::DoDash()
+{
+ if(Traversal && Traversal->IsParkourActive()) { Traversal->DropParkour();return; }
+ if(Traversal && Traversal->IsWireTraversalActive()) return;
+ if (Traversal && Traversal->IsBunniarTraversalActive()) { Traversal->TryGlideDash();return; }
+ if (FieldActions) FieldActions->TryDodge();
+}
+void ABBSBCharacter::Landed(const FHitResult& Hit)
+{
+ if (Traversal) Traversal->Landed(Hit);
+ Super::Landed(Hit);
 }
 
 float ABBSBCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AController* InstigatorController, AActor* Causer)
@@ -165,6 +185,7 @@ float ABBSBCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AContr
 void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
 {
 	Super::CalcCamera(DeltaTime,OutResult);
+ if(Traversal) Traversal->ApplyClimbCamera(DeltaTime,OutResult);
 	// A release blend also finishes when Tab switches away from Bunniar.
 	if(auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->BunniarEquipment):nullptr) Buddy->ApplySurfaceFocus(DeltaTime,OutResult);
 }
@@ -193,7 +214,7 @@ void ABBSBCharacter::CombatLabKey(FString KeyName,bool bPressed)
 {
 #if !UE_BUILD_SHIPPING
 	const FKey Key{FName(*KeyName)};
-	const TArray<FKey> Allowed={EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
+	const TArray<FKey> Allowed={EKeys::LeftMouseButton,EKeys::RightMouseButton,EKeys::SpaceBar,EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
 	if (Allowed.Contains(Key))
 		if (APlayerController* PC=Cast<APlayerController>(GetController())) PC->InputKey(FInputKeyEventArgs::CreateSimulated(Key,bPressed ? IE_Pressed : IE_Released,bPressed ? 1.f : 0.f));
 #endif
