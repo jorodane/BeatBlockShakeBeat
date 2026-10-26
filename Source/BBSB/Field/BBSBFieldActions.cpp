@@ -153,6 +153,8 @@ void UBBSBFieldActionComponent::BeginPlay()
 
 void UBBSBFieldActionComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+ bBunniarZoomHeld=false;
+ if(Camera) Camera->SetFieldOfView(OriginalFOV);
 	CancelEquipmentSelection();
 	FinishDodge();
 	ClearHover();
@@ -246,10 +248,11 @@ void UBBSBFieldActionComponent::ExerciseGesture(int32 Index)
 void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
 {
  if (bEquipmentWheelOpen) return;
+ if(Channel==1 && CanUseBunniarZoom()) { bBunniarZoomHeld=true;return; }
  if (auto* Player=Cast<ABBSBCharacter>(Character);Player && Player->Traversal)
  {
   if((Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive())) return;
-  if (Player->Traversal->bGliding)
+  if (Player->Traversal->bGliding && FieldEquipment && FieldEquipment==BunniarEquipment)
   {
    if (Channel!=0 || !Player->Traversal->PrepareSurfaceAttachment()) return;
   }
@@ -262,6 +265,7 @@ void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
 
 void UBBSBFieldActionComponent::EndGesture(int32 Channel)
 {
+ if(Channel==1 && bBunniarZoomHeld) { bBunniarZoomHeld=false;return; }
 	if (!Character || Channel < 0 || Channel > 1 || !Channels[Channel].bHeld) return;
 	const double Now = GetWorld()->GetTimeSeconds();
 	UpdateMouseMotion(Now);
@@ -274,6 +278,19 @@ void UBBSBFieldActionComponent::EndGesture(int32 Channel)
 }
 
 bool UBBSBFieldActionComponent::IsGestureCaptured() const { return Channels[0].bHeld || Channels[1].bHeld; }
+
+bool UBBSBFieldActionComponent::CanUseBunniarZoom() const
+{
+ const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);
+ const auto* Player=Cast<ABBSBCharacter>(Character);
+ const auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
+ const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
+ const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;
+ return Buddy && !Buddy->bSurfaceAttached && !Buddy->bAirHovering && PC && PC->IsLocalController() && !PC->IsMoveInputIgnored() &&
+  !bEquipmentWheelOpen && !bEquipmentInputBlocked && !bDodging && PendingEquipmentId==INDEX_NONE &&
+  !(Dialogue && Dialogue->bDialogueActive) && !(Combat && (Combat->bDead || Combat->IsStageLocked() || Combat->BlocksMovement())) &&
+  !(Player && Player->Traversal && (Player->Traversal->bGlideDashing || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive()));
+}
 
 float UBBSBFieldActionComponent::GetCharge() const
 {
@@ -293,6 +310,8 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
 	if (!PC) { BoundInput.Reset(); return; }
 	BindControls();
+ if(bBunniarZoomHeld && (!CanUseBunniarZoom() || (!bSyntheticInput && !PC->IsInputKeyDown(EKeys::RightMouseButton)) ||
+    (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()))) bBunniarZoomHeld=false;
 	if (!FloatingWeapon) CreateWeapon();
 	TickEquipmentSelection();
 	if (!bHUDInitialized && bShowPracticeHUD)
@@ -352,7 +371,8 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 		const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
 		const bool LockedFrame=Combat && Combat->IsStageLocked();
 		const float ExtraFOV = bDodging ? 5.f : FMath::Clamp(Move->Velocity.Size2D() / RunSpeed,0.f,1.f) * 2.f;
-		Camera->SetFieldOfView(LockedFrame ? OriginalFOV:FMath::FInterpTo(Camera->FieldOfView,OriginalFOV+ExtraFOV,DT,7.f));
+  const float TargetFOV=bBunniarZoomHeld ? FMath::Min(OriginalFOV,BunniarZoomFOV):OriginalFOV+ExtraFOV;
+		Camera->SetFieldOfView(LockedFrame ? OriginalFOV:FMath::FInterpTo(Camera->FieldOfView,TargetFOV,DT,7.f));
 	}
 	TickWeapon(DT);
 	UpdateHover();
@@ -600,17 +620,8 @@ FTransform UBBSBFieldActionComponent::GetWeaponRestTransform() const
 
 void UBBSBFieldActionComponent::UpdateWeaponPresentation()
 {
- const auto* Player=Cast<ABBSBCharacter>(Character);
- const bool Gliding=Player && Player->Traversal && Player->Traversal->IsBunniarTraversalActive();
- for (AActor* Visual:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get()}) if (Visual) Visual->SetActorHiddenInGame(Gliding);
- if (Gliding)
- {
-  // Left hand borrows Bunniar; the ordinary full Reparaton stays in the right grip.
-  if (ConductorWeapon) ConductorWeapon->SetActorHiddenInGame(false);
-  if (ConductorFull) ConductorFull->SetVisibility(true);
-  for (auto* Part:{FormUpper.Get(),FormLower.Get(),OtherFormLower.Get()}) if (Part) Part->SetVisibility(false);
-  return;
- }
+ // Traversal borrows the companion without changing the selected weapon or its form.
+ for (AActor* Visual:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get()}) if (Visual) Visual->SetActorHiddenInGame(false);
 	if (IsValid(FieldEquipment))
 	{
 		if (FloatingWeapon) FloatingWeapon->SetActorHiddenInGame(true);
@@ -905,6 +916,7 @@ void UBBSBFieldActionComponent::InterruptAction(EBBSBActionState State,float Sec
 }
 void UBBSBFieldActionComponent::ResetActionState()
 {
+ bBunniarZoomHeld=false;
 	CancelEquipmentSelection();
 	FinishDodge(); CancelCurrentAction(true); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle; CameraResumeAt=-100;
 }

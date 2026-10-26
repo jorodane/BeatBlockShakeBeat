@@ -75,6 +75,12 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
  FQuat BodyTilt=FQuat::Identity;
  FVector Grips[2],Elbows[2];
  UAnimSequence* GlidePose=nullptr;
+ UAnimSequence* GlideAttackClip=nullptr;
+ float GlideAttackTime=0,GlideAttackWeight=0;
+ FVector WeaponHand,WeaponElbow;
+ float WeaponArmWeight=0,WeaponBodyTurn=0;
+ UAnimSequence* WeaponStepClip=nullptr;
+ float WeaponStepTime=0,WeaponStepWeight=0;
  virtual void PreUpdate(UAnimInstance* Instance,float DT) override
  {
   FAnimInstanceProxy::PreUpdate(Instance,DT);
@@ -82,6 +88,17 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   const auto* Player=Cast<ABBSBCharacter>(Instance->GetOwningActor());
   Offset=Player && Player->AimGaze ? Player->AimGaze->ComponentAimRotation:FQuat::Identity;
   const auto* Traversal=Player ? Player->Traversal.Get():nullptr;
+  WeaponArmWeight=WeaponBodyTurn=0;
+  WeaponStepClip=nullptr;WeaponStepTime=WeaponStepWeight=0;
+  if(Player && Player->FieldActions)
+  {
+   Player->FieldActions->GetWeaponStepPose(WeaponStepClip,WeaponStepTime,WeaponStepWeight);
+   FVector Hand,Elbow;
+   if(Player->FieldActions->GetWeaponArmPose(Hand,Elbow,WeaponArmWeight,WeaponBodyTurn))
+   {
+    const FTransform Mesh=Player->GetMesh()->GetComponentTransform();WeaponHand=Mesh.InverseTransformPosition(Hand);WeaponElbow=Mesh.InverseTransformPosition(Elbow);
+   }
+  }
   GlideWeight=Traversal ? Traversal->GlidePoseAlpha:0;
   HangWeight=GlideWeight*(Traversal ? Traversal->GlideHandAlpha:1.f);
   MotionClip=nullptr;MotionWeight=0;MotionTime=0;AirSpin=FQuat::Identity;DashBlend=nullptr;DashWeight=0;
@@ -89,6 +106,8 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   GlidePose=Traversal ? Traversal->GlideBodyPose.Get():nullptr;
   bRelaxedGlide=Traversal && Traversal->bUseRelaxedGlidePose;
   LimbExtension=Traversal ? FMath::Clamp(Traversal->RelaxedLimbExtension,.9f,.999f):.99f;
+  GlideAttackClip=nullptr;GlideAttackTime=GlideAttackWeight=0;
+  if(Player && Player->FieldActions) Player->FieldActions->GetGlideAttackPose(GlideAttackClip,GlideAttackTime,GlideAttackWeight);
   if (Traversal && GlideWeight>.0001f)
   {
    const FTransform Mesh=Player->GetMesh()->GetComponentTransform();
@@ -96,6 +115,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
    Right=Mesh.InverseTransformVectorNoScale(Player->GetActorRightVector());
    Down=Mesh.InverseTransformVectorNoScale(-FVector::UpVector);
    AirSpin=FQuat(-Down,FMath::DegreesToRadians(Traversal->DoubleJumpYaw));
+   if(GlideAttackWeight>0) AirSpin=FQuat::Identity;
    if(const auto* Presentation=Traversal->Presentation.Get())
    {
     if(Traversal->DoubleJumpAge>=0 && Presentation->DoubleJump)
@@ -220,7 +240,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
  {
   if (!Input) return false;
   Input->Evaluate_AnyThread(Output);
-  if (Offset.Equals(FQuat::Identity,.00001f) && GlideWeight<.0001f && WireWeight<.0001f && MotionWeight<.0001f && DashWeight<.0001f) return true;
+  if (Offset.Equals(FQuat::Identity,.00001f) && GlideWeight<.0001f && WireWeight<.0001f && MotionWeight<.0001f && DashWeight<.0001f && WeaponArmWeight<.0001f && WeaponStepWeight<.0001f && FMath::IsNearlyZero(WeaponBodyTurn)) return true;
   if (GlidePose && GlideWeight>.0001f)
   {
    FPoseContext Authored(this);Authored.ResetToRefPose();
@@ -243,6 +263,31 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     FPoseContext Authored(this);Authored.ResetToRefPose();FAnimationPoseData Data(Authored),Result(Output);
     DashBlend->GetAnimationPose(Samples,FAnimExtractContext(0.0,false),Data);
     FAnimationRuntime::BlendTwoPosesTogetherInPlace(Result,Data,1.f-DashWeight);
+   }
+  }
+  // Only the torso and free arm attack; the supporting hand and legs retain glide authority.
+  if(GlideAttackClip && GlideAttackWeight>.0001f)
+  {
+   FPoseContext Authored(this);Authored.ResetToRefPose();FAnimationPoseData Data(Authored);
+   GlideAttackClip->GetAnimationPose(Data,FAnimExtractContext(double(GlideAttackTime),false));
+   const FBoneContainer& Bones=Output.Pose.GetBoneContainer();
+   for(const FName Name:{FName(TEXT("spine_01")),FName(TEXT("spine_02")),FName(TEXT("spine_03")),FName(TEXT("clavicle_r")),FName(TEXT("upperarm_r")),FName(TEXT("lowerarm_r")),FName(TEXT("hand_r"))})
+   {
+    const int32 Bone=Bones.GetPoseBoneIndexForBoneName(Name);if(Bone==INDEX_NONE) continue;
+    const FCompactPoseBoneIndex Index=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Bone));if(Index.GetInt()==INDEX_NONE) continue;
+    FTransform Blended;Blended.Blend(Output.Pose[Index],Authored.Pose[Index],GlideAttackWeight);Output.Pose[Index]=Blended;
+   }
+  }
+  if(WeaponStepClip && WeaponStepWeight>.0001f)
+  {
+   FPoseContext Step(this);Step.ResetToRefPose();FAnimationPoseData Data(Step);
+   WeaponStepClip->GetAnimationPose(Data,FAnimExtractContext(double(WeaponStepTime),false));
+   const FBoneContainer& Bones=Output.Pose.GetBoneContainer();
+   for(const FName Name:{FName(TEXT("thigh_l")),FName(TEXT("calf_l")),FName(TEXT("foot_l")),FName(TEXT("ball_l")),FName(TEXT("thigh_r")),FName(TEXT("calf_r")),FName(TEXT("foot_r")),FName(TEXT("ball_r"))})
+   {
+    const int32 Bone=Bones.GetPoseBoneIndexForBoneName(Name);if(Bone==INDEX_NONE) continue;
+    const FCompactPoseBoneIndex Index=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Bone));if(Index.GetInt()==INDEX_NONE) continue;
+    auto& Transform=Output.Pose[Index];Transform.SetRotation(FQuat::Slerp(Transform.GetRotation(),Step.Pose[Index].GetRotation(),WeaponStepWeight).GetNormalized());
    }
   }
   FCSPose<FCompactPose> Pose;Pose.InitPose(Output.Pose);
@@ -304,13 +349,14 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
      AnimationCore::SolveTwoBoneIK(Upper,Lower,End,Pole,Goal,false,1.0,1.0);
      End.SetRotation((FQuat::FindBetweenNormals(OldDirection,(End.GetLocation()-Lower.GetLocation()).GetSafeNormal())*End.GetRotation()).GetNormalized());
      TArray<FBoneTransform> Changes={FBoneTransform(Indices[0],Upper),FBoneTransform(Indices[1],Lower),FBoneTransform(Indices[2],End)};
-     Pose.LocalBlendCSBoneTransforms(Changes,HangWeight*(1.f-MotionWeight));
+     Pose.LocalBlendCSBoneTransforms(Changes,HangWeight*(1.f-MotionWeight)*(Chain==0 ? 1.f-GlideAttackWeight:1.f));
     }
    }
   }
   // Rotate the rendered body around its pelvis, never the capsule or camera.
   // Applying the sampled quaternion directly preserves the complete CCW turn.
-  if(!AirSpin.Equals(FQuat::Identity,.00001f))
+  const FQuat BodySpin=FQuat(FVector::UpVector,FMath::DegreesToRadians(WeaponBodyTurn))*AirSpin;
+  if(!BodySpin.Equals(FQuat::Identity,.00001f))
   {
    const int32 Pelvis=Bones.GetPoseBoneIndexForBoneName(TEXT("pelvis"));
    if(Pelvis!=INDEX_NONE)
@@ -318,7 +364,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     const FCompactPoseBoneIndex Index=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Pelvis));
     if(Index.GetInt()!=INDEX_NONE)
     {
-     FTransform Transform=Pose.GetComponentSpaceTransform(Index);Transform.SetRotation((AirSpin*Transform.GetRotation()).GetNormalized());
+     FTransform Transform=Pose.GetComponentSpaceTransform(Index);Transform.SetRotation((BodySpin*Transform.GetRotation()).GetNormalized());
      const FBoneTransform Change(Index,Transform);Pose.LocalBlendCSBoneTransforms(MakeArrayView(&Change,1),1.f);
     }
    }
@@ -348,6 +394,23 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
    Transform.SetRotation((FQuat::Slerp(FQuat::Identity,Offset,Shares[I])*Transform.GetRotation()).GetNormalized());
    const FBoneTransform Change(Index,Transform);
    Pose.LocalBlendCSBoneTransforms(MakeArrayView(&Change,1),1.f-MotionWeight*.9f);
+  }
+  if(WeaponArmWeight>.0001f)
+  {
+   const int32 S=Bones.GetPoseBoneIndexForBoneName(TEXT("upperarm_r")),E=Bones.GetPoseBoneIndexForBoneName(TEXT("lowerarm_r")),H=Bones.GetPoseBoneIndexForBoneName(TEXT("hand_r"));
+   if(S!=INDEX_NONE && E!=INDEX_NONE && H!=INDEX_NONE)
+   {
+    const auto Shoulder=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(S)),Elbow=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(E)),Hand=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(H));
+    if(Shoulder.GetInt()!=INDEX_NONE && Elbow.GetInt()!=INDEX_NONE && Hand.GetInt()!=INDEX_NONE)
+    {
+     FTransform Upper=Pose.GetComponentSpaceTransform(Shoulder),Lower=Pose.GetComponentSpaceTransform(Elbow),End=Pose.GetComponentSpaceTransform(Hand);
+     const FVector OldDirection=(End.GetLocation()-Lower.GetLocation()).GetSafeNormal();
+     AnimationCore::SolveTwoBoneIK(Upper,Lower,End,WeaponElbow,WeaponHand,false,1.0,1.0);
+     End.SetRotation((FQuat::FindBetweenNormals(OldDirection,(End.GetLocation()-Lower.GetLocation()).GetSafeNormal())*End.GetRotation()).GetNormalized());
+     const TArray<FBoneTransform> Changes={FBoneTransform(Shoulder,Upper),FBoneTransform(Elbow,Lower),FBoneTransform(Hand,End)};
+     Pose.LocalBlendCSBoneTransforms(Changes,WeaponArmWeight);
+    }
+   }
   }
   if (bGlideHands && HangWeight>.0001f)
   {

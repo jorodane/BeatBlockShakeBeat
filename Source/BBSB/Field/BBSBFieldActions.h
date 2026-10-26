@@ -119,6 +119,13 @@ public:
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Practice") EBBSBWeaponCommitment WeaponExperiment=EBBSBWeaponCommitment::Authored;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Camera") float FlickSettleSeconds = 0.2f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Camera") float LookReturnSeconds = 0.22f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Camera",meta=(ClampMin="20",ClampMax="100",Units="deg")) float BunniarZoomFOV=55.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Camera") bool bBunniarZoomHeld=false;
+ UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool IsGlideAttacking() const;
+ void GetGlideAttackPose(UAnimSequence*& Animation,float& Time,float& Weight) const;
+ bool GetWeaponArmPose(FVector& Hand,FVector& Elbow,float& Weight,float& BodyTurn) const;
+ void GetWeaponStepPose(UAnimSequence*& Animation,float& Time,float& Weight) const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponRecoveryRemaining() const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") EBBSBActionState ActiveState = EBBSBActionState::Idle;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 RejectedActions = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 CanceledAttacks = 0;
@@ -222,6 +229,7 @@ private:
 		bool bRestrictToAimActor=false;
 		FVector Direction = FVector::ForwardVector;
 		bool bPrototype=false;
+  bool bGlideAttack=false;
 		float ExactDamage=0;
 		FVector Impulse=FVector::ZeroVector;
 		FVector PreviousPosition=FVector::ZeroVector;
@@ -313,6 +321,7 @@ private:
 	void RotateHeldObjectUp(); void RotateHeldObjectDown();
 	void ToggleHelp();
 	void BeginGesture(int32 Channel);
+ bool CanUseBunniarZoom() const;
 	void EndGesture(int32 Channel);
 	void UpdateMouseMotion(double Now);
 	bool EmitGesture(EBBSBFieldGesture Gesture, int32 Channel, float Charge, bool bGestureChain=true);

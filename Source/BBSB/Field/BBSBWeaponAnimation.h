@@ -34,6 +34,14 @@ struct BBSB_API FBBSBWeaponAnimationClip
  UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<UAnimSequence> CharacterAnimation;
  /** Optional airborne override. The traversal library provides the shared placeholder combo. */
  UPROPERTY(EditAnywhere, BlueprintReadWrite) TObjectPtr<UAnimSequence> AirCharacterAnimation;
+ /** Advance during the active swing; swept capsule movement respects walls. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,meta=(ClampMin="0",Units="cm")) float ForwardTravel=0;
+ /** Sample WeaponMotion around the character instead of the remote hit anchor. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite) bool bUseOwnerFrame=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,meta=(Units="deg")) float BodyTurnDegrees=0;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,meta=(ClampMin="0",Units="s")) float RecoverySeconds=0;
+ /** Optional legs-only step; torso and authored arm path stay independent. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite) TObjectPtr<UAnimSequence> StepAnimation;
 };
 
 UCLASS(BlueprintType)
@@ -51,10 +59,13 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Reparaton") bool bKeepFormEquipped=true;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Reparaton", meta=(ClampMin="0.01")) float FormTransitionSeconds=0.18f;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Actions", meta=(TitleProperty="Sequence")) TArray<FBBSBWeaponAnimationClip> Clips;
- const FBBSBWeaponAnimationClip* FindClip(EBBSBFieldGesture Gesture,int32 Channel,int32 Combo) const;
+ /** Independent weapon curves and upper-body animation while supported by Bunniar. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Glide attacks",meta=(TitleProperty="Sequence")) TArray<FBBSBWeaponAnimationClip> GlideClips;
+ const FBBSBWeaponAnimationClip* FindClip(EBBSBFieldGesture Gesture,int32 Channel,int32 Combo,bool bGliding=false) const;
  /** Read ordinary absolute transform curves directly so hit sweeps and visible motion share one source. */
  static bool SampleTransform(const ULevelSequence* Sequence,FName Binding,float Alpha,FTransform& Out);
  UFUNCTION(BlueprintPure, Category="Animation") FTransform SampleClip(int32 ClipIndex,float NormalizedTime) const;
+ UFUNCTION(BlueprintPure,Category="Animation") FTransform SampleGlideClip(int32 ClipIndex,float NormalizedTime) const;
 };
 
 /** Place in the animation studio. Sequencer controls the named components directly. */
@@ -67,12 +78,15 @@ public:
  virtual void OnConstruction(const FTransform& Transform) override;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation") TObjectPtr<UBBSBWeaponAnimationSet> AnimationSet;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation") int32 ClipIndex=0;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Animation") bool bPreviewGlideAttack=false;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Animation", meta=(ClampMin="0",ClampMax="1")) float PreviewTime=1;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<USceneComponent> Grip;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<USkeletalMeshComponent> CharacterBody;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<USceneComponent> OtherGrip;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<USceneComponent> HitAnchor;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<USceneComponent> WeaponMotion;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Parts") TObjectPtr<USceneComponent> ArmAnchor;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Parts") TObjectPtr<USceneComponent> ArmMotion;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<UStaticMeshComponent> WeaponModel;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<UStaticMeshComponent> Full;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Parts") TObjectPtr<UStaticMeshComponent> Upper;

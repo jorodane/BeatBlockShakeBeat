@@ -35,6 +35,7 @@ bool UBBSBTraversalComponent::TryWireRecall(ABBSBBunniarCompanion* Buddy)
   WireLocalAnchor=Surface->GetComponentTransform().InverseTransformPosition(Anchor);
   WireLocalNormal=Surface->GetComponentTransform().InverseTransformVectorNoScale(WireNormal);
  }
+ RestoreWallJumpMovement();
  WireSavedAirControl=Move->AirControl;WireSavedFlyingBraking=Move->BrakingDecelerationFlying;
  WireSavedMaxFlySpeed=Move->MaxFlySpeed;bWireSavedOrient=Move->bOrientRotationToMovement;
  EndAirWeaponHang();Character->StopJumping();Character->FieldActions->ResetActionState();Character->ConsumeMovementInputVector();

@@ -114,11 +114,13 @@ void UBBSBTraversalComponent::BeginLowMantle(const FLedgeCandidate& Ledge)
 }
 void UBBSBTraversalComponent::BeginParkour(EBBSBParkourMode Mode)
 {
+ RestoreWallJumpMovement();
  RestoreParkourRunExit();ParkourEntryVelocity=Character->GetVelocity();EndAirWeaponHang();EndGlide();
+ // End a contacting dash before saving the movement settings that parkour restores.
+ const int32 Pending=Character->FieldActions->PendingEquipmentId;Character->FieldActions->ResetActionState();Character->FieldActions->PendingEquipmentId=Pending;
  auto* Move=Character->GetCharacterMovement();
  ParkourSavedAirControl=Move->AirControl;ParkourSavedFlyingBraking=Move->BrakingDecelerationFlying;ParkourSavedMaxFlySpeed=Move->MaxFlySpeed;bParkourSavedOrient=Move->bOrientRotationToMovement;
  ParkourSavedFallingBraking=Move->BrakingDecelerationFalling;ParkourSavedFallingFriction=Move->FallingLateralFriction;bParkourJumpPlanned=bParkourJumping=false;
- const int32 Pending=Character->FieldActions->PendingEquipmentId;Character->FieldActions->ResetActionState();Character->FieldActions->PendingEquipmentId=Pending;
  if(auto* Buddy=Cast<ABBSBBunniarCompanion>(Character->FieldActions->BunniarEquipment)) Buddy->ReleaseSurface();
  Character->StopJumping();Character->ConsumeMovementInputVector();Move->ClearAccumulatedForces();Move->StopMovementImmediately();Move->SetMovementMode(MOVE_Flying);
  Move->GravityScale=0;Move->AirControl=0;Move->BrakingDecelerationFlying=0;Move->MaxFlySpeed=1800.f;Move->bOrientRotationToMovement=false;
@@ -143,10 +145,15 @@ bool UBBSBTraversalComponent::TryAutoLedge()
 {
  if((!bAutoCatchLedges && !bAutoWallSlide) || !Character || IsParkourActive() || IsWireTraversalActive() || bGlideDashing || bAirLiftPending || bAirWeaponHanging || GetWorld()->GetTimeSeconds()<ParkourIgnoreUntil) return false;
  auto* Move=Character->GetCharacterMovement();const auto* PC=Cast<APlayerController>(Character->GetController());
+ const bool AirDash=Move->IsFalling() && Character->FieldActions && Character->FieldActions->IsDodging();
  if(!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || !Move->IsFalling() || !Character->FieldActions ||
-  Character->FieldActions->IsGestureCaptured() || !Character->FieldActions->CanStartJump()) return false;
+  Character->FieldActions->IsGestureCaptured() || (!AirDash && !Character->FieldActions->CanStartJump())) return false;
+ if(AirDash && ((FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()) ||
+    Character->FieldActions->bEquipmentWheelOpen || (Character->Interaction && Character->Interaction->bDialogueActive) ||
+    (Character->Combat && (Character->Combat->bDead || Character->Combat->BlocksMovement())))) return false;
  const FVector Intent=Character->FieldActions->MovementIntent();
- const FVector Direction=(!Intent.IsNearlyZero() ? Intent:Move->Velocity.GetSafeNormal2D()).GetSafeNormal2D();
+ // A dash keeps its committed direction even if the movement key has been released.
+ const FVector Direction=(AirDash ? Move->Velocity:(!Intent.IsNearlyZero() ? Intent:Move->Velocity)).GetSafeNormal2D();
  if(Direction.IsNearlyZero()) return false;
  FHitResult Wall;const FVector Start=Character->GetActorLocation()+FVector(0,0,10);
  const float Radius=Character->GetCapsuleComponent()->GetScaledCapsuleRadius();
@@ -157,7 +164,7 @@ bool UBBSBTraversalComponent::TryAutoLedge()
    ValidParkourSurface(Hit.GetComponent()) && FMath::Abs(Hit.ImpactNormal.Z)<=.35f && FVector::DotProduct(Direction,-Hit.ImpactNormal.GetSafeNormal2D())>=.65f;
  };
  const bool HasWall=ForwardWall(Start,Wall);
- if(bAutoCatchLedges && !Intent.IsNearlyZero())
+ if(!AirDash && bAutoCatchLedges && !Intent.IsNearlyZero())
  {
   FLedgeCandidate Low;bool Found=HasWall && FindLowLedge(Wall.ImpactPoint,Wall.ImpactNormal,Wall.GetComponent(),Low);
   if(!Found)
@@ -179,7 +186,7 @@ bool UBBSBTraversalComponent::TryAutoLedge()
  }
  if(!HasWall) return false;
  FLedgeCandidate Ledge;
- if(bAutoCatchLedges && FindLedge(Wall.ImpactPoint,Wall.ImpactNormal,Wall.GetComponent(),Ledge))
+ if(!AirDash && bAutoCatchLedges && FindLedge(Wall.ImpactPoint,Wall.ImpactNormal,Wall.GetComponent(),Ledge))
  {
   bool Predictive=false;
   if(Move->Velocity.Z>100.f)
@@ -194,7 +201,8 @@ bool UBBSBTraversalComponent::TryAutoLedge()
   BeginLedgeHang(Ledge);bClimbQueued=Predictive;return true;
  }
  const float Gap=FVector::DotProduct(Character->GetActorLocation()-Wall.ImpactPoint,Wall.ImpactNormal.GetSafeNormal2D());
- if(bAutoWallSlide && Move->Velocity.Z<=0.f && !Intent.IsNearlyZero() && Gap<=Radius+18.f) return BeginWallSlide(Wall.ImpactPoint,Wall.ImpactNormal,Wall.GetComponent());
+ if(bAutoWallSlide && (AirDash || (Move->Velocity.Z<=0.f && !Intent.IsNearlyZero())) && Gap<=Radius+18.f)
+  return BeginWallSlide(Wall.ImpactPoint,Wall.ImpactNormal,Wall.GetComponent());
  return false;
 }
 bool UBBSBTraversalComponent::BeginWallSlide(const FVector& Point,const FVector& Normal,UPrimitiveComponent* Surface)
@@ -386,11 +394,46 @@ bool UBBSBTraversalComponent::TryWallJump()
  const FVector N=Ledge ? LedgeNormal:WireNormal.GetSafeNormal2D();const FVector Point=Ledge ? LedgePoint:WireAnchor;
  if(Ledge) CancelParkour();else CancelWireRecall();
  EndAirWeaponHang();Character->ConsumeMovementInputVector();Character->StopJumping();
- FVector Side=Character->FieldActions ? FVector::VectorPlaneProject(Character->FieldActions->MovementDashDirection(),N).GetSafeNormal2D():FVector::ZeroVector;
+ const FVector Intent=Character->FieldActions ? Character->FieldActions->MovementIntent():FVector::ZeroVector;
+ const FVector Side=FVector::VectorPlaneProject(Intent,N).GetClampedToMaxSize(1.f);
  const FVector Velocity=N*WallJumpOutSpeed+Side*120.f+FVector::UpVector*WallJumpUpSpeed;
+ RestoreWallJumpMovement();
+ auto* Move=Character->GetCharacterMovement();
+ WallJumpSavedAirControl=Move->AirControl;WallJumpSavedFallingBraking=Move->BrakingDecelerationFalling;WallJumpSavedFallingFriction=Move->FallingLateralFriction;
+ bWallJumpPhysicsSaved=true;
+ // Falling braking otherwise stops an unsteered kick while held input bypasses it.
+ Move->AirControl=0;Move->BrakingDecelerationFalling=0;Move->FallingLateralFriction=0;
  Character->LaunchCharacter(Velocity,true,true);Character->SetActorRotation(Velocity.GetSafeNormal2D().Rotation());
  bAirJumpUsed=false;ParkourIgnoreUntil=GetWorld()->GetTimeSeconds()+ParkourRegrabDelay;WallJumpStartedAt=GetWorld()->GetTimeSeconds();WallJumpAge=0;
  if(Presentation) SpawnSmoke(Presentation->WireWallSmoke,Point,N,.6f);return true;
+}
+bool UBBSBTraversalComponent::IsWallJumpSteeringLocked() const
+{
+ return bWallJumpPhysicsSaved && GetWorld() && GetWorld()->GetTimeSeconds()-WallJumpStartedAt<FMath::Max(0.f,WallJumpSteeringLockSeconds);
+}
+void UBBSBTraversalComponent::RestoreWallJumpMovement()
+{
+ if(!bWallJumpPhysicsSaved) return;
+ if(IsValid(Character))
+ {
+  auto* Move=Character->GetCharacterMovement();
+  Move->AirControl=WallJumpSavedAirControl;Move->BrakingDecelerationFalling=WallJumpSavedFallingBraking;Move->FallingLateralFriction=WallJumpSavedFallingFriction;
+ }
+ bWallJumpPhysicsSaved=false;
+}
+void UBBSBTraversalComponent::TickWallJumpMovement()
+{
+ if(!bWallJumpPhysicsSaved || !Character) return;
+ auto* Move=Character->GetCharacterMovement();
+ const float Age=GetWorld()->GetTimeSeconds()-WallJumpStartedAt;
+ if(!Move->IsFalling() || Age>=FMath::Max(WallJumpMomentumSeconds,WallJumpSteeringLockSeconds) ||
+    (Character->FieldActions && !Character->FieldActions->CanMove()))
+ {
+  RestoreWallJumpMovement();return;
+ }
+ const bool Locked=IsWallJumpSteeringLocked();
+ Move->AirControl=Locked ? 0.f:WallJumpSavedAirControl;
+ if(Locked) Character->ConsumeMovementInputVector();
 }
 FVector UBBSBTraversalComponent::LedgeHand(bool Left) const
 {

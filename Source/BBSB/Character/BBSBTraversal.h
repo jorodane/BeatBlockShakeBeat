@@ -75,6 +75,7 @@ public:
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool TryLowVault();
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool TryLedgeClimb();
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool TryWallJump();
+ bool IsWallJumpSteeringLocked() const;
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool DropParkour();
  void CancelParkour();
  float ParkourMotionPhase() const { return FMath::Clamp(ParkourAge/FMath::Max(.1f,ParkourDuration),0.f,1.f); }
@@ -107,6 +108,10 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="35",ClampMax="80",Units="cm")) float LedgeHangBelow=58.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="100",Units="cm/s")) float WallJumpOutSpeed=430.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="100",Units="cm/s")) float WallJumpUpSpeed=520.f;
+ /** Let the wall kick clear the surface before directional air control resumes. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0",ClampMax="0.5",Units="s")) float WallJumpSteeringLockSeconds=.18f;
+ /** Preserve the kick even when no movement key is held. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0",ClampMax="1",Units="s")) float WallJumpMomentumSeconds=.45f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0.1",Units="s")) float ParkourRegrabDelay=.45f;
  void BeginAirWeaponHang(float Duration);
  void EndAirWeaponHang();
@@ -251,6 +256,10 @@ private:
  double ParkourJumpStartedAt=0;
  bool bParkourSavedOrient=true;
  double ParkourStartedAt=0,ParkourIgnoreUntil=0,WallJumpStartedAt=-100;
+ bool bWallJumpPhysicsSaved=false;
+ float WallJumpSavedAirControl=0,WallJumpSavedFallingBraking=0,WallJumpSavedFallingFriction=0;
+ void RestoreWallJumpMovement();
+ void TickWallJumpMovement();
  float ClimbStartPelvisZ=0,ClimbCameraZ=0;
  uint64 ClimbCameraFrame=MAX_uint64;
  bool bClimbQueued=false;

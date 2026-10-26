@@ -15,10 +15,10 @@
 #include "Engine/StaticMesh.h"
 #include "UObject/ConstructorHelpers.h"
 
-const FBBSBWeaponAnimationClip* UBBSBWeaponAnimationSet::FindClip(EBBSBFieldGesture G,int32 Channel,int32 Combo) const
+const FBBSBWeaponAnimationClip* UBBSBWeaponAnimationSet::FindClip(EBBSBFieldGesture G,int32 Channel,int32 Combo,bool bGliding) const
 {
  const FBBSBWeaponAnimationClip* Best=nullptr; int32 BestScore=-1;
- for (const auto& Clip:Clips)
+ for (const auto& Clip:bGliding && !GlideClips.IsEmpty() ? GlideClips:Clips)
  {
   if (Clip.Gesture!=G || !Clip.Sequence || (Clip.MouseChannel>=0 && Clip.MouseChannel!=Channel) || (Clip.ComboStep>0 && Clip.ComboStep!=Combo)) continue;
   const int32 Score=(Clip.MouseChannel>=0 ? 2:0)+(Clip.ComboStep>0 ? 1:0);
@@ -60,6 +60,12 @@ FTransform UBBSBWeaponAnimationSet::SampleClip(int32 Index,float Time) const
  if (Clips.IsValidIndex(Index)) SampleTransform(Clips[Index].Sequence,TEXT("WeaponMotion"),Time,Pose);
  return Pose;
 }
+FTransform UBBSBWeaponAnimationSet::SampleGlideClip(int32 Index,float Time) const
+{
+ FTransform Pose=FTransform::Identity;
+ if(GlideClips.IsValidIndex(Index)) SampleTransform(GlideClips[Index].Sequence,TEXT("WeaponMotion"),Time,Pose);
+ return Pose;
+}
 
 ABBSBWeaponAnimationPreview::ABBSBWeaponAnimationPreview()
 {
@@ -71,6 +77,8 @@ ABBSBWeaponAnimationPreview::ABBSBWeaponAnimationPreview()
  OtherGrip=CreateDefaultSubobject<USceneComponent>(TEXT("OtherGrip")); OtherGrip->SetupAttachment(CharacterBody,TEXT("HandGrip_L"));
  HitAnchor=CreateDefaultSubobject<USceneComponent>(TEXT("HitAnchor")); HitAnchor->SetupAttachment(RootComponent); HitAnchor->SetRelativeLocation(FVector(250,0,150));
  WeaponMotion=CreateDefaultSubobject<USceneComponent>(TEXT("WeaponMotion")); WeaponMotion->SetupAttachment(HitAnchor);
+ ArmAnchor=CreateDefaultSubobject<USceneComponent>(TEXT("ArmAnchor"));ArmAnchor->SetupAttachment(RootComponent);ArmAnchor->SetRelativeLocation(FVector(0,0,92));
+ ArmMotion=CreateDefaultSubobject<USceneComponent>(TEXT("ArmMotion"));ArmMotion->SetupAttachment(ArmAnchor);
  WeaponModel=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponModel")); WeaponModel->SetupAttachment(WeaponMotion);
  Full=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Full")); Full->SetupAttachment(Grip);
  Upper=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Upper")); Upper->SetupAttachment(Grip);
@@ -103,5 +111,5 @@ void ABBSBWeaponAnimationPreview::PreviewForm()
 }
 void ABBSBWeaponAnimationPreview::PreviewAction()
 {
- if (AnimationSet) WeaponMotion->SetRelativeTransform(AnimationSet->SampleClip(ClipIndex,PreviewTime));
+ if (AnimationSet) WeaponMotion->SetRelativeTransform(bPreviewGlideAttack ? AnimationSet->SampleGlideClip(ClipIndex,PreviewTime):AnimationSet->SampleClip(ClipIndex,PreviewTime));
 }

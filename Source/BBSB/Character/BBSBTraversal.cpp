@@ -59,7 +59,7 @@ void UBBSBTraversalComponent::BeginPlay()
 }
 void UBBSBTraversalComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
- RestoreParkourRunExit();EndAirWeaponHang();CancelParkour();CancelWireRecall();EndGlide();
+ RestoreWallJumpMovement();RestoreParkourRunExit();EndAirWeaponHang();CancelParkour();CancelWireRecall();EndGlide();
  for(const auto& Segment:WireSegments) if(Segment) Segment->DestroyComponent();
  if(JumpVortexComponent) JumpVortexComponent->DestroyComponent();
  if(DashDrillComponent) DashDrillComponent->DestroyComponent();
@@ -92,7 +92,7 @@ bool UBBSBTraversalComponent::BeginGlide(bool bApplyLift)
  if (!Character || !Character->FieldActions || IsParkourActive()) return false;
  auto* Buddy=Cast<ABBSBBunniarCompanion>(Character->FieldActions->BunniarEquipment);
  if (!IsValid(Buddy)) return false;
- EndAirWeaponHang();WallJumpAge=-1;
+ RestoreWallJumpMovement();EndAirWeaponHang();WallJumpAge=-1;
  // Stage-placed companions become player equipment when borrowed for traversal.
  Buddy->SetOwner(Character);
  auto* Move=Character->GetCharacterMovement();
@@ -148,9 +148,8 @@ bool UBBSBTraversalComponent::PrepareSurfaceAttachment()
 {
  if (!bGliding || !Character || !Character->FieldActions || !Character->FieldActions->CanStartJump()) return false;
  auto* Buddy=Glider.Get();
- if (!IsValid(Buddy)) return false;
+ if (!IsValid(Buddy) || Character->FieldActions->FieldEquipment!=Buddy) return false;
  ReleaseForFall();Character->FieldActions->ResetActionState();
- if(!Character->FieldActions->EquipFieldEquipment(Buddy,FName(TEXT("Bunniar")))) return false;
  // A short unpowered toss buys time to choose an anchor; it does not reset the airborne jump.
  Character->LaunchCharacter(FVector(0,0,DispatchLiftSpeed),false,true);return true;
 }
@@ -189,6 +188,7 @@ void UBBSBTraversalComponent::EndGlide()
 }
 void UBBSBTraversalComponent::Landed(const FHitResult& Hit)
 {
+ RestoreWallJumpMovement();
  const float Impact=FMath::Max(LastFallSpeed,Character ? -Character->GetCharacterMovement()->Velocity.Z:0.f);
  if(Presentation && Impact>160.f) SpawnSmoke(Presentation->LandingSmoke,Hit.ImpactPoint+Hit.ImpactNormal*3.f,Hit.ImpactNormal,FMath::Clamp(Impact/650.f,.65f,1.45f));
  if(bParkourJumping) FinishParkourJump();
@@ -268,7 +268,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
 {
  Super::TickComponent(DT,Type,Function);
  if (!IsValid(Character)) return;
- RestoreParkourRunExit();auto* Move=Character->GetCharacterMovement();
+ RestoreParkourRunExit();TickWallJumpMovement();auto* Move=Character->GetCharacterMovement();
  TickWireMovement(DT);
  TickParkour(DT);
  ParkourPoseAlpha=FMath::FInterpConstantTo(ParkourPoseAlpha,IsParkourActive() ? 1.f:0.f,DT,IsParkourActive() ? 16.f:10.f);
@@ -378,6 +378,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
 void UBBSBTraversalComponent::BeginAirWeaponHang(float Duration)
 {
  if(!Character || IsBunniarTraversalActive() || IsWireTraversalActive() || !Character->GetCharacterMovement()->IsFalling()) return;
+ RestoreWallJumpMovement();
  bAirWeaponHanging=true;AirWeaponStartedAt=GetWorld()->GetTimeSeconds();AirWeaponHangUntil=AirWeaponStartedAt+FMath::Max(.1f,Duration);
  AirWeaponStartZ=Character->GetActorLocation().Z;auto* Move=Character->GetCharacterMovement();Move->ClearAccumulatedForces();Move->GravityScale=0;Move->Velocity.Z=0;
 }

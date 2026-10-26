@@ -118,7 +118,7 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 		FieldActions->RecordMoveInput(Right, Forward);
 		if (!FieldActions->CanMove()) return;
 	}
-	if (Traversal && Traversal->bGlideDashing) return;
+	if (Traversal && (Traversal->bGlideDashing || Traversal->IsWallJumpSteeringLocked())) return;
 	if (GetController() != nullptr)
 	{
 		// find out which way is forward
