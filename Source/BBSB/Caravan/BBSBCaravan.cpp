@@ -88,6 +88,7 @@ ABBSBBunniarCompanion::ABBSBBunniarCompanion()
 void ABBSBBunniarCompanion::Tick(float DT)
 {
  Super::Tick(DT);
+ if(bRestOccluded) { SetActorHiddenInGame(false);bRestOccluded=false; }
  const float T=GetWorld()->GetTimeSeconds(); FVector Target=GetActorLocation();
  if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Traversal) P->Traversal->UpdateWirePresentation();
  if (bGliding)
@@ -200,12 +201,18 @@ void ABBSBBunniarCompanion::Tick(float DT)
    SetActorRotation(bSurfaceReturning ? FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Look,Ease):FMath::QInterpTo(GetActorQuat(),Look,DT,10));
   }
  }
- if (bSurfaceReturning)
+ if(bFollowing && !AttachedDevice)
  {
-  SetActorLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),Target,Ease));
-  if (Transit>=1) bSurfaceReturning=false;
+  if(const auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));P && P->FieldActions)
+  {
+   FTransform Pose(GetActorQuat(),Target,GetActorScale3D());
+   bRestOccluded=!P->FieldActions->ResolveRestEquipmentPose(Pose,CalculateComponentsBoundingBoxInLocalSpace(true),this,true);
+   SetActorTransform(Pose);if(bRestOccluded) SetActorHiddenInGame(true);
+  }
  }
- else SetActorLocation(bEquipped && !AttachedDevice ? Target:FMath::VInterpTo(GetActorLocation(),Target,DT,10));
+ else if(bSurfaceReturning) SetActorLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),Target,Ease));
+ else SetActorLocation(FMath::VInterpTo(GetActorLocation(),Target,DT,10));
+ if(bSurfaceReturning && Transit>=1) bSurfaceReturning=false;
  if (BandageA->GetMaterial(0)==Caravan::Mesh(TEXT("Cube"))->GetMaterial(0)) { BBSBCombatVisuals::Tint(BandageA,FLinearColor(.92f,.83f,.69f)); BBSBCombatVisuals::Tint(BandageB,FLinearColor(.92f,.83f,.69f)); }
 }
 

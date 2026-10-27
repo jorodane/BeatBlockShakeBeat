@@ -55,6 +55,17 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects") TObjectPtr<UNiagaraSystem> LandingSmoke;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects") TObjectPtr<UNiagaraSystem> DoubleJumpVortex;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects") TObjectPtr<UNiagaraSystem> AirDashDrill;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Running") TObjectPtr<UNiagaraSystem> RunFootstepSmoke;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Running") FName LeftFootSocket=TEXT("foot_l");
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Running") FName RightFootSocket=TEXT("foot_r");
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Running",meta=(ClampMin="50",Units="cm/s")) float RunSmokeMinimumSpeed=180.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Running",meta=(ClampMin="25",Units="cm")) float FootstepSpacing=90.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash") TObjectPtr<UNiagaraSystem> DashBurst;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash") TObjectPtr<UNiagaraSystem> DashWake;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash",meta=(ClampMin=".025",Units="s")) float DashWakeInterval=.055f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Wall") TObjectPtr<UNiagaraSystem> WallGrabBurst;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Wall") TObjectPtr<UNiagaraSystem> WallSlideSmoke;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Wall",meta=(ClampMin=".05",Units="s")) float WallSlideSmokeInterval=.12f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects",meta=(ClampMin="0",ClampMax="3")) float EffectScale=1.f;
 };
 
@@ -268,6 +279,11 @@ private:
  void RestoreWireMovement(bool bGrounded);
  float DashHeightAt(float Age) const;
  void SpawnSmoke(UNiagaraSystem* System,const FVector& Position,const FVector& Normal,float Strength);
+ void TickMovementEffects(float DeltaTime);
+ bool bFootContact[2]={false,false},bEffectWasDashing=false,bEffectWasOnWall=false;
+ float FootstepTravel=0;
+ double LastFootstepEffectAt=-100,LastDashWakeAt=-100,LastWallSlideEffectAt=-100;
+ int32 NextFootstep=0;
  void StartMotionEffect(UNiagaraComponent* Component,UNiagaraSystem* System);
  bool BeginGlide(bool bApplyLift);
  void ResumeGlideAfterDash();

@@ -15,6 +15,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/WorldSettings.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundWaveProcedural.h"
 #include "BBSBBladeTrail.h"
@@ -324,15 +325,7 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
   A.bRestrictToAimActor=PrototypeWeapon==EBBSBPrototypeWeapon::Spear;
  }
  A.StartPose=StartPose; A.ComboStep=Combo;
- if(SwordThrow)
- {
-  FVector Eye=Character->GetActorLocation()+FVector(0,0,50);FRotator View=Character->GetActorRotation();
-  if(const auto* PC=Cast<APlayerController>(Character->GetController())) PC->GetPlayerViewPoint(Eye,View);
-  FVector Forward=(A.Target-Eye).GetSafeNormal();if(Forward.IsNearlyZero()) Forward=View.Vector();
-  FVector Slash=FVector::VectorPlaneProject(View.RotateVector(FVector(0,Combo==2 ? .8660254f:-.8660254f,-.5f)),Forward).GetSafeNormal();
-  if(Slash.IsNearlyZero()) Slash=FVector::CrossProduct(Forward,FVector::UpVector).GetSafeNormal();
-  A.SwordThrowFrame=FRotationMatrix::MakeFromZX(Forward,Slash).ToQuat();
- }
+ if(SwordThrow) UpdateSwordTarget(A);
  bHasFollowThrough[Independent && Channel==1 ? 1:0]=false;
  A.Direction=(A.Target-Character->GetActorLocation()).GetSafeNormal2D(); if (A.Direction.IsNearlyZero()) A.Direction=Character->GetActorForwardVector();
  if(SwordThrow) A.Direction=A.SwordThrowFrame.GetAxisX();
@@ -441,6 +434,18 @@ bool UBBSBFieldActionComponent::GetWeaponArmPose(FVector& Hand,FVector& Elbow,fl
  return true;
 }
 
+void UBBSBFieldActionComponent::UpdateSwordTarget(FWeaponAction& A)
+{
+ A.Target=FindAimPoint();
+ FVector Eye=Character->GetActorLocation()+FVector(0,0,50);FRotator View=Character->GetActorRotation();
+ if(const auto* PC=Cast<APlayerController>(Character->GetController())) PC->GetPlayerViewPoint(Eye,View);
+ FVector Forward=(A.Target-Eye).GetSafeNormal();if(Forward.IsNearlyZero()) Forward=View.Vector();
+ FVector Slash=FVector::VectorPlaneProject(View.RotateVector(FVector(0,A.ComboStep==2 ? .8660254f:-.8660254f,-.5f)),Forward).GetSafeNormal();
+ if(Slash.IsNearlyZero()) Slash=FVector::CrossProduct(Forward,FVector::UpVector).GetSafeNormal();
+ A.SwordThrowFrame=FRotationMatrix::MakeFromZX(Forward,Slash).ToQuat();A.Direction=Slash;
+ LastAimPoint=A.Target;
+}
+
 FTransform UBBSBFieldActionComponent::PrototypeAttackPose(const FWeaponAction& A,float T) const
 {
  FTransform Local;
@@ -468,10 +473,13 @@ FTransform UBBSBFieldActionComponent::PrototypeAttackPose(const FWeaponAction& A
      const FVector P2=LaunchCenter-Slash*(Pull*.5f);
      Center=Start*(U*U*U)+P1*(3.f*U*U*R)+P2*(3.f*U*R*R)+LaunchCenter*(R*R*R);
     }
-    const FQuat InitialLocal=FRotator(Recoil ? 360.f:540.f,0,0).Quaternion();
-    const FQuat InitialFrame=A.StartPose.GetRotation()*InitialLocal.Inverse();
-    const FQuat Frame=FQuat::Slerp(InitialFrame,EndRotation,FMath::SmoothStep(0.f,1.f,R));
-    return FTransform((Frame*Local.GetRotation()).GetNormalized(),Center);
+    FTransform ReadyLocal;
+    UBBSBWeaponAnimationSet::SampleTransform(A.Motion.Sequence,TEXT("WeaponMotion"),A.Motion.BlendIn,ReadyLocal);
+    const FQuat ReadyRotation=(EndRotation*ReadyLocal.GetRotation()).GetNormalized();
+    const FQuat Alignment=FQuat::Slerp(A.StartPose.GetRotation(),ReadyRotation,FMath::SmoothStep(0.f,1.f,R));
+    // One complete flight turn around the same world-space axis used by the cut.
+    const FQuat Spin(EndRotation.GetAxisY(),-2.f*PI*R);
+    return FTransform((Spin*Alignment).GetNormalized(),Center);
    }
    // Constant authored keys make both ready and follow-through holds genuinely motionless.
    FVector Center=FMath::Lerp(LaunchCenter,EndCenter,FMath::Clamp(float(Local.GetLocation().X),0.f,1.f))+ArcUp*Local.GetLocation().Z;
@@ -548,6 +556,9 @@ void UBBSBFieldActionComponent::UpdateBladeTrail(FWeaponAction& A,const FTransfo
 
 void UBBSBFieldActionComponent::StopBladeTrail(FWeaponAction& A)
 {
+ FinishTravelTrail(A);
+ if(auto* Highlight=A.TargetHighlight.Get()) Highlight->DestroyComponent();
+ A.TargetHighlight.Reset();
  if(auto* Trail=A.BladeTrail.Get()) Trail->Finish();
  A.BladeTrail.Reset();A.bBladeTrailFinished=true;bBladeTrailEmitting=false;
 }
@@ -576,9 +587,13 @@ void UBBSBFieldActionComponent::TickPrototypeWeapon(float DT)
   FWeaponAction& A=Slot.GetValue(); const uint32 Revision=Arbiter.Revision;
   const float PreviousT=FMath::Clamp(A.Elapsed/A.Duration,0.f,1.f);
   A.Elapsed=GetWorld()->GetTimeSeconds()-A.StartedAt;
-  // Movement during a glide does not move the captured attack point.
-  // Explicit actor locks still follow their actor below.
   const float T=FMath::Clamp(A.Elapsed/A.Duration,0.f,1.f);
+  if(A.bSwordThrow && !A.bSwordTargetLocked)
+  {
+   UpdateSwordTarget(A);
+   // Sample once on the crossing frame as well, then freeze both the target and cut plane.
+   A.bSwordTargetLocked=T>=FMath::Clamp(A.Motion.ActiveStart,0.f,1.f);
+  }
   if(A.bAuthoredMotion && !A.bGlideAttack && A.Motion.ForwardTravel>0 && Character->GetCharacterMovement()->IsMovingOnGround())
   {
    const float Start=FMath::Clamp(A.Motion.ActiveStart,0.f,.99f),End=FMath::Clamp(A.Motion.ActiveEnd,Start+.001f,1.f);
@@ -596,6 +611,8 @@ void UBBSBFieldActionComponent::TickPrototypeWeapon(float DT)
   }
   if (PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger)
   {
+   UpdateTravelTrail(A,PreviousT,T);
+   UpdateAttackHighlight(A,T);
    Visual->SetActorTransform(PrototypeAttackPose(A,T));
    // Damage exists only while crossing the swing; the visible follow-through never adds another hit.
    const float ActiveStart=A.bAuthoredMotion ? FMath::Clamp(A.Motion.ActiveStart,0.f,1.f):0.2f;
@@ -620,8 +637,10 @@ void UBBSBFieldActionComponent::TickPrototypeWeapon(float DT)
     }
     if(PrototypeWeapon==EBBSBPrototypeWeapon::Sword && T>=ActiveEnd) StopBladeTrail(A);
    }
+   if(PreviousT<ActiveEnd && T>=ActiveEnd && !A.bImpactCuePlayed) EmitSurfaceImpact(A);
    if (T>=1.f)
    {
+    StopBladeTrail(A);
     const int32 PoseIndex=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent && A.Channel==1 ? 1:0;
     FollowThroughPose[PoseIndex]=PrototypeAttackPose(A,1.f); bHasFollowThrough[PoseIndex]=!A.bSwordThrow;
     FollowThroughUntil[PoseIndex]=GetWorld()->GetTimeSeconds()+WeaponReturnSeconds+(PrototypeWeapon==EBBSBPrototypeWeapon::Sword ? 0.75f:0.f);
@@ -669,15 +688,30 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
  const FTransform Rest=GetWeaponRestTransform();
  FVector Eye; FRotator View; Cast<APlayerController>(Character->GetController())->GetPlayerViewPoint(Eye,View);
  // The floating weapon keeps the screen-right position, independently of the hand-held conductor form.
- FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBWeaponRestWall),false,Character); Q.AddIgnoredActor(FloatingWeapon); Q.AddIgnoredActor(OtherFloatingWeapon);
  const bool Paired=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent;
  const bool Active[2]={CurrentAction.IsSet(),OtherWeaponAction.IsSet()};
  for (int32 Index=0; Index<(Paired ? 2 : 1); ++Index)
  {
-  if (Active[Index] && PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger) continue;
   AActor* Visual=Index==0 ? FloatingWeapon.Get() : OtherFloatingWeapon.Get();
   UStaticMeshComponent* Model=Index==0 ? Blade.Get() : OtherBlade.Get();
   if (!Model->GetStaticMesh()) continue;
+  const FBox LocalBounds=Model->GetStaticMesh()->GetBoundingBox().TransformBy(Model->GetRelativeTransform());
+  if (Active[Index] && PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger)
+  {
+   const FWeaponAction& Action=(Index==0 ? CurrentAction:OtherWeaponAction).GetValue();
+   if(Action.bSwordThrow && ActiveWeaponAnimationSet)
+   {
+    const float Impact=FMath::Clamp(Action.Motion.ActiveEnd,.001f,.98f);
+    const float Recall=FMath::Clamp(ActiveWeaponAnimationSet->SwordReturnStart,Impact+.001f,.99f);
+    if(Action.Elapsed>=Action.Duration*Recall)
+    {
+     FTransform Pose=Visual->GetActorTransform();
+     Visual->SetActorHiddenInGame(!ResolveRestEquipmentPose(Pose,LocalBounds,Visual,false,false));
+     Visual->SetActorTransform(Pose);
+    }
+   }
+   continue;
+  }
 
   if (Index==0 && bSpearEmbedded) continue;
 
@@ -686,26 +720,12 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
    const float Pull=75.f+WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f)*170.f;
    FTransform Ready(LockedApproach.Rotation()+FRotator(0,0,-45),LockedAimPoint-LockedApproach*Pull+FVector(0,0,35));
    FTransform Pose; Pose.Blend(AimLockWeaponFrom,Ready,FMath::SmoothStep(0.f,0.22f,float(Now-AimLockStartedAt)));
+   Visual->SetActorHiddenInGame(!ResolveRestEquipmentPose(Pose,LocalBounds,Visual,false,false));
    Visual->SetActorTransform(Pose); continue;
   }
   FTransform Pose=Rest;
   Pose.SetRotation(View.Quaternion()*FRotator(10,90,Index==0 ? -15 : 15).Quaternion());
   if (Paired) Pose.AddToTranslation(View.RotateVector(FVector(0,Index==0 ? -24 : 24,Index==0 ? 30 : -30)));
-  const FBox LocalBounds=Model->GetStaticMesh()->GetBoundingBox().TransformBy(Model->GetRelativeTransform());
-  const FVector CenterOffset=Pose.GetRotation().RotateVector(LocalBounds.GetCenter());
-  const FCollisionShape Shape=FCollisionShape::MakeBox(LocalBounds.GetExtent()+FVector(2));
-  Q.bFindInitialOverlaps=true;
-  FHitResult Wall;
-  if (GetWorld()->SweepSingleByChannel(Wall,Character->GetActorLocation()+CenterOffset,Pose.GetLocation()+CenterOffset,Pose.GetRotation(),ECC_Camera,Shape,Q))
-  {
-   Pose.SetLocation(Wall.bStartPenetrating ? Character->GetActorLocation()+Wall.Normal*(Wall.PenetrationDepth+2) : Wall.Location-CenterOffset);
-   for (int32 Resolve=0; Resolve<3; ++Resolve)
-   {
-    const FVector Center=Pose.GetLocation()+CenterOffset;
-    if (!GetWorld()->SweepSingleByChannel(Wall,Center,Center,Pose.GetRotation(),ECC_Camera,Shape,Q) || !Wall.bStartPenetrating) break;
-    Pose.AddToTranslation(Wall.Normal*(Wall.PenetrationDepth+2));
-   }
-  }
   // Resolve the actual resting pose first, including its orientation and wall clearance.
   // A canceled attack returns here without adding damage traces or jumping at the last frame.
   if(bHasFollowThrough[Index])
@@ -717,6 +737,8 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
    }
    else bHasFollowThrough[Index]=false;
   }
+  // Blending can cross the body even when both endpoints are clear.
+  Visual->SetActorHiddenInGame(!ResolveRestEquipmentPose(Pose,LocalBounds,Visual,false,!bHasFollowThrough[Index]));
   Visual->SetActorTransform(Pose);
  }
  LastWeaponPosition=FloatingWeapon->GetActorLocation();
@@ -736,6 +758,23 @@ void ABBSBPlayerWeaponProjectile::Launch(ACharacter* Shooter,FVector Target,floa
  FlightOrigin=GetActorLocation(); FlightDistance=FVector::Dist(Target,FlightOrigin); FlightSeconds=FMath::Max(0.01f,FlightDistance/Speed);
  if (AnimationSet) if (const auto* Clip=AnimationSet->FindClip(EBBSBFieldGesture::Beat,0,1)) FlightSequence=Clip->Sequence;
  FlightVelocity=(Target-FlightOrigin).GetSafeNormal()*Speed; SetActorRotation(FlightVelocity.Rotation()+FRotator(-90,0,0)); SetLifeSpan(FMath::Max(2.f,FlightSeconds+0.5f));
+ Effects=AnimationSet;
+ if(Effects && Effects->bEnableTravelTrail && Effects->TravelTrailMaterial)
+ {
+  auto* Trail=NewObject<UBBSBBladeTrailComponent>(GetWorld()->GetWorldSettings());GetWorld()->GetWorldSettings()->AddInstanceComponent(Trail);
+  Trail->SetAbsolute(true,true,true);Trail->SetWorldLocation(GetActorLocation());Trail->TrailMaterial=Effects->TravelTrailMaterial;Trail->Lifetime=Effects->TravelTrailLifetime;Trail->Color=Effects->TravelTrailColor;Trail->RegisterComponent();FlightTrail=Trail;
+ }
+ if(auto* Field=Shooter->FindComponentByClass<UBBSBFieldActionComponent>())
+ {
+  UBBSBFieldActionComponent::FWeaponAction Cue;Cue.Target=FrozenTarget;Cue.Direction=FlightVelocity.GetSafeNormal();
+  Field->UpdateAttackHighlight(Cue,0);TargetHighlight=Cue.TargetHighlight;
+ }
+}
+void ABBSBPlayerWeaponProjectile::EndPlay(const EEndPlayReason::Type Reason)
+{
+ if(auto* Trail=FlightTrail.Get()) Trail->Finish();
+ if(auto* Marker=TargetHighlight.Get()) Marker->DestroyComponent();
+ Super::EndPlay(Reason);
 }
 void ABBSBPlayerWeaponProjectile::Tick(float DT)
 {
@@ -755,6 +794,8 @@ void ABBSBPlayerWeaponProjectile::Tick(float DT)
  FHitResult Hit;
  if (GetWorld()->SweepSingleByChannel(Hit,From,To,GetActorQuat(),ECC_Visibility,FCollisionShape::MakeCapsule(16,54),Q))
  {
+  if(auto* Field=SourceCharacter->FindComponentByClass<UBBSBFieldActionComponent>())
+  { UBBSBFieldActionComponent::FWeaponAction Cue;Cue.TargetHighlight=TargetHighlight;Field->EmitAttackImpact(Cue,Hit.ImpactPoint,Hit.ImpactNormal); }
   ABBSBBreakableProp* Prop=Cast<ABBSBBreakableProp>(Hit.GetActor());
   if (Cast<ABBSBInkEnemy>(Hit.GetActor()) || Prop)
   {
@@ -769,5 +810,12 @@ void ABBSBPlayerWeaponProjectile::Tick(float DT)
   SetActorLocation(Hit.Location); Destroy(); return;
  }
  SetActorLocation(To); if (!Authored) AddActorLocalRotation(FRotator(0,0,DT*720)); Age+=DT;
+ if(auto* Trail=FlightTrail.Get();Trail && Body->GetStaticMesh())
+ {
+  const FBox Bounds=Body->GetStaticMesh()->GetBoundingBox();const FVector Extent=Bounds.GetExtent();
+  const FVector Axis=Extent.X>=Extent.Y && Extent.X>=Extent.Z ? FVector(Extent.X,0,0):Extent.Y>=Extent.Z ? FVector(0,Extent.Y,0):FVector(0,0,Extent.Z);
+  const FTransform Pose=Body->GetComponentTransform();const FVector Center=Bounds.GetCenter();
+  Trail->AddBladeSample(Pose.TransformPosition(Center-Axis*.3f),Pose.TransformPosition(Center+Axis*.3f));
+ }
  if (Arrive || Age>FlightSeconds+0.25f) Destroy();
 }

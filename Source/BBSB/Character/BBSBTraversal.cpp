@@ -274,6 +274,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
  RestoreParkourRunExit();TickWallJumpMovement();auto* Move=Character->GetCharacterMovement();
  TickWireMovement(DT);
  TickParkour(DT);
+ TickMovementEffects(DT);
  ParkourPoseAlpha=FMath::FInterpConstantTo(ParkourPoseAlpha,IsParkourActive() ? 1.f:0.f,DT,IsParkourActive() ? 16.f:10.f);
  if(WallJumpAge>=0) { WallJumpAge=GetWorld()->GetTimeSeconds()-WallJumpStartedAt;if(WallJumpAge>.5f) WallJumpAge=-1; }
  if(IsParkourActive())

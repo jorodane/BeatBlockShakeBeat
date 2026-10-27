@@ -114,6 +114,7 @@ private:
  double SurfaceTransitAt=0;
  float ReturnTransitSeconds=.40f;
  bool bLastEquipped=false;
+ bool bRestOccluded=false;
  bool bSurfaceReturning=false;
  bool bSurfaceArrived=false;
  TWeakObjectPtr<APlayerController> SurfaceLookController;

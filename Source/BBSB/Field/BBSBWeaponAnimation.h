@@ -11,6 +11,7 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class UAnimSequence;
 class UMaterialInterface;
+class UNiagaraSystem;
 class USkeletalMeshComponent;
 
 UENUM(BlueprintType)
@@ -67,6 +68,18 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(Units="cm")) FVector BladeTrailTip=FVector(0,0,89.8f);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(ClampMin="0.03",ClampMax="2",Units="s")) float BladeTrailLifetime=.28f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail") FLinearColor BladeTrailColor=FLinearColor(1.f,.7f,.82f,.65f);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Travel trail") bool bEnableTravelTrail=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Travel trail") TObjectPtr<UMaterialInterface> TravelTrailMaterial;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Travel trail",meta=(ClampMin=".03",ClampMax="1",Units="s")) float TravelTrailLifetime=.16f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Travel trail",meta=(ClampMin=".05",ClampMax="1")) float TravelTrailWidth=.3f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Travel trail") FLinearColor TravelTrailColor=FLinearColor(1.f,.62f,.84f,.38f);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack highlight") TObjectPtr<UStaticMesh> AttackHighlightMesh;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack highlight") TObjectPtr<UMaterialInterface> AttackHighlightMaterial;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack highlight",meta=(ClampMin="2",Units="cm")) float AttackHighlightRadius=14.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack highlight") FLinearColor AttackHighlightColor=FLinearColor(1.f,.24f,.52f,1.f);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact") TObjectPtr<UNiagaraSystem> AttackImpactBurst;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact") TObjectPtr<UNiagaraSystem> AttackImpactRing;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact",meta=(ClampMin="0",ClampMax="3")) float AttackImpactScale=1.f;
  /** Sword throws return after the embedded hold; flight endpoints stay frozen. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",ClampMax="1")) float SwordReturnStart=.77f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",Units="cm")) float SwordEmbedDepth=3.f;

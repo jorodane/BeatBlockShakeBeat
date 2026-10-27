@@ -88,6 +88,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="BBSB|Equipment") bool EquipFieldEquipment(AActor* Equipment,FName Name);
 	void ClearFieldEquipment();
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") FTransform FieldEquipmentRestTransform() const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Equipment",meta=(ClampMin="2",ClampMax="30",Units="cm")) float RestEquipmentGap=6.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Equipment",meta=(ClampMin="70",ClampMax="180",Units="cm")) float RestEquipmentDistance=100.f;
+ /** Applies to waiting/returning equipment, after its visual interpolation. */
+ bool ResolveRestEquipmentPose(FTransform& Pose,const FBox& LocalBounds,AActor* Equipment,bool bInterpolate=false,bool bWaiting=true) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Interaction") FVector VisualAimPoint() const;
  /** Shared ray, reach and occlusion used by highlighting and Bunniar dispatch. */
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool TraceEquipmentAim(FHitResult& Hit) const;
@@ -208,6 +212,9 @@ protected:
 
 private:
 	friend class ABBSBWeaponVerification;
+ friend class ABBSBPlayerWeaponProjectile;
+ struct FRestEquipmentPoseState { FVector OwnerOffset=FVector::ZeroVector; double UpdatedAt=-1; };
+ mutable TMap<TWeakObjectPtr<AActor>,FRestEquipmentPoseState> RestEquipmentPoses;
 	FActorComponentTickFunction WeaponViewTick;
 	bool bEquipmentTabHeld=false,bEquipmentTabCancelled=false,bWheelOriginalCursor=false,bWheelOpenedInCombat=false;
 	double EquipmentTabPressedAt=0,EquipmentLookResumeAt=0;
@@ -238,6 +245,7 @@ private:
 		bool bPrototype=false;
   bool bGlideAttack=false;
   bool bSwordThrow=false;
+  bool bSwordTargetLocked=false;
   FQuat SwordThrowFrame=FQuat::Identity;
 		float ExactDamage=0;
 		FVector Impulse=FVector::ZeroVector;
@@ -250,6 +258,9 @@ private:
 		TSet<TWeakObjectPtr<AActor>> HitActors;
   TWeakObjectPtr<UBBSBBladeTrailComponent> BladeTrail;
   bool bBladeTrailFinished=false;
+  TWeakObjectPtr<UBBSBBladeTrailComponent> TravelTrail;
+  TWeakObjectPtr<UStaticMeshComponent> TargetHighlight;
+  bool bTravelTrailFinished=false,bImpactCuePlayed=false;
 	};
 	UPROPERTY(Transient) TObjectPtr<ACharacter> Character;
 	UPROPERTY(Transient) TObjectPtr<AActor> FloatingWeapon;
@@ -346,6 +357,11 @@ private:
 	void TickPrototypeWeapon(float DT);
  void UpdateBladeTrail(FWeaponAction& Action,const FTransform& WeaponPose);
  void StopBladeTrail(FWeaponAction& Action);
+ void UpdateTravelTrail(FWeaponAction& Action,float PreviousTime,float CurrentTime);
+ void FinishTravelTrail(FWeaponAction& Action);
+ void UpdateAttackHighlight(FWeaponAction& Action,float Time);
+ void EmitAttackImpact(FWeaponAction& Action,const FVector& Point,const FVector& Normal);
+ void EmitSurfaceImpact(FWeaponAction& Action);
 	void TickPrototypeState();
 	void PresentPrototypeWeapon();
 	void ResetPrototypeState();
@@ -355,6 +371,7 @@ private:
 	void ReleaseSpearEmbed(bool bReturnToRest=false);
 	void UpdateWeaponAim();
 	FTransform PrototypeAttackPose(const FWeaponAction& Action,float Progress) const;
+ void UpdateSwordTarget(FWeaponAction& Action);
 	void WeaponOne(); void WeaponTwo(); void WeaponThree(); void WeaponFour(); void WeaponFive(); void WeaponSix();
 	void TickWeapon(float DeltaTime);
 	void TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius=-1.f);
@@ -416,6 +433,7 @@ class BBSB_API ABBSBPlayerWeaponProjectile : public AActor
 public:
 	ABBSBPlayerWeaponProjectile();
 	virtual void Tick(float DT) override;
+ virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Body;
 	UPROPERTY(VisibleAnywhere) FVector FrozenTarget;
 	UPROPERTY(VisibleAnywhere) FVector FlightVelocity;
@@ -424,6 +442,9 @@ public:
 private:
 	TWeakObjectPtr<ACharacter> SourceCharacter;
 	UPROPERTY(Transient) TObjectPtr<ULevelSequence> FlightSequence;
+ UPROPERTY(Transient) TObjectPtr<UBBSBWeaponAnimationSet> Effects;
+ TWeakObjectPtr<UBBSBBladeTrailComponent> FlightTrail;
+ TWeakObjectPtr<UStaticMeshComponent> TargetHighlight;
 	FVector FlightOrigin;
 	float FlightDistance=0, FlightSeconds=1;
 	float Age=0;

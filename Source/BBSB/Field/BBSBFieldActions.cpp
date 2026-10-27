@@ -620,6 +620,7 @@ FTransform UBBSBFieldActionComponent::GetWeaponRestTransform() const
 				Position = RayOrigin+RayDirection*((Depth-FVector::DotProduct(RayOrigin-Eye,Forward))/AlongView);
 		}
 	}
+	Position=Character->GetActorLocation()+(Position-Character->GetActorLocation()).GetClampedToMaxSize(FMath::Max(70.f,RestEquipmentDistance));
 	const FQuat Rotation = View.Quaternion()*FRotator(10,0,-15).Quaternion();
 	return FTransform(Rotation,Position);
 }
@@ -660,6 +661,7 @@ void UBBSBFieldActionComponent::UpdateWeaponPresentation()
 		RelativePose.Blend(WeaponReturnFromView,Pose.GetRelativeTransform(ViewTransform),ReturnAlpha);
 		Pose=RelativePose*ViewTransform;
 	}
+	FloatingWeapon->SetActorHiddenInGame(!ResolveRestEquipmentPose(Pose,FloatingWeapon->CalculateComponentsBoundingBoxInLocalSpace(true),FloatingWeapon,false,ReturnAlpha>=1.f));
 	FloatingWeapon->SetActorTransform(Pose);
 	LastWeaponPosition=Pose.GetLocation();
 	bWeaponWasActive=false;
@@ -821,6 +823,7 @@ void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& 
 		const EBBSBFieldGesture Gesture=Action.Gesture;
 		const FVector Direction=Action.Direction;
 		const bool bPreviouslyBroken = (Prop && Prop->bBroken) || (Object && Object->bBroken);
+		EmitAttackImpact(Action,Hit.ImpactPoint,Hit.ImpactNormal);
 		UGameplayStatics::ApplyPointDamage(Actor,Damage,Direction,Hit,Character->GetController(),Character,nullptr);
 		if (Enemy && !Enemy->bDefeated && !Impulse.IsNearlyZero()) Enemy->ApplyWeaponImpulse(Impulse);
 		const bool BrokenNow=(Prop && Prop->bBroken) || (Object && Object->bBroken);
