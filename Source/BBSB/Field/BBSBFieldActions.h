@@ -131,6 +131,8 @@ public:
  void GetWeaponStepPose(UAnimSequence*& Animation,float& Time,float& Weight) const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponRecoveryRemaining() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponActionProgress() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool IsWeaponReturning() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool CanContinueSwordCombo() const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") EBBSBActionState ActiveState = EBBSBActionState::Idle;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 RejectedActions = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 CanceledAttacks = 0;
@@ -360,7 +362,7 @@ private:
 	void FinishDodge(bool bContinueMovement=false);
 	FVector FindAimPoint() const;
 	void PlayGestureAnimation(EBBSBFieldGesture Gesture);
-	void CancelCurrentAction(bool bCancelGesture);
+	void CancelCurrentAction(bool bCancelGesture,bool bCountCancel=true);
 	void UpdateHover();
 	void ClearHover();
 };

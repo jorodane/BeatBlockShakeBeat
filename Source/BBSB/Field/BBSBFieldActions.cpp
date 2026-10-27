@@ -436,13 +436,16 @@ bool UBBSBFieldActionComponent::TryDodge()
 	Move->BrakingFrictionFactor = 0.f;
 	Move->bOrientRotationToMovement = false;
 	Character->ConsumeMovementInputVector();
-	CancelCurrentAction(true);
-	bSyntheticInput = false;
-	ExerciseMode = -1;
-	bDodging = true;bDodgeExitSettling=false;
+ // A leg-only dash must not replace the active weapon's arbiter revision or recall its model.
+ const bool PreserveWeapon=!FieldEquipment && (CurrentAction.IsSet() || OtherWeaponAction.IsSet() || bSpearEmbedded || IsWeaponReturning());
+ if(!PreserveWeapon)
+ {
+  CancelCurrentAction(true);bSyntheticInput=false;ExerciseMode=-1;
+ }
+ bDodging = true;bDodgeExitSettling=false;
 	DodgeStartedAt = LastDodgeAt = GetWorld()->GetTimeSeconds();
 	FBBSBWeaponActionRule DodgeRule; DodgeRule.Duration=DodgeDuration; DodgeRule.Priority=60;
-	Arbiter.Start(EBBSBActionState::Dodge,DodgeRule,-1,DodgeStartedAt); ActiveState=EBBSBActionState::Dodge;
+ if(!PreserveWeapon) { Arbiter.Start(EBBSBActionState::Dodge,DodgeRule,-1,DodgeStartedAt);ActiveState=EBBSBActionState::Dodge; }
 	CameraResumeAt=DodgeStartedAt+0.08;
 	if (Combat) Combat->OnDodge();
 	UE_LOG(LogBBSB, Display, TEXT("Field Dodge dir=%s"), *DodgeDirection.ToCompactString());
@@ -862,7 +865,7 @@ bool UBBSBFieldActionComponent::SetWeaponExperiment(EBBSBWeaponCommitment Preset
 }
 bool UBBSBFieldActionComponent::CanStartJump() const
 {
- return Character && GetWorld() && CanMove() && (!Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) || (CurrentAction.IsSet() && CurrentAction.GetValue().bSwordThrow));
+ return Character && GetWorld() && CanMove() && (!Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) || (CurrentAction.IsSet() && (CurrentAction.GetValue().bSwordThrow || CurrentAction.GetValue().bGlideAttack)) || (OtherWeaponAction.IsSet() && OtherWeaponAction.GetValue().bGlideAttack));
 }
 bool UBBSBFieldActionComponent::CanMove() const
 {
@@ -891,23 +894,39 @@ float UBBSBFieldActionComponent::GetLookInputScale() const
 	const float T=FMath::Clamp(float((GetWorld()->GetTimeSeconds()-CameraResumeAt)/FMath::Max(LookReturnSeconds,0.001f)),0.f,1.f);
 	return T*T*(3-2*T);
 }
-void UBBSBFieldActionComponent::CancelCurrentAction(bool bCancelGesture)
+void UBBSBFieldActionComponent::CancelCurrentAction(bool bCancelGesture,bool bCountCancel)
 {
+ // Capture the visible world pose before clearing the damaging action or detaching an embedded weapon.
+ FTransform ReturnFrom[2];bool Return[2]={false,false};
+ if(bCancelGesture && !FieldEquipment && PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy && GetWorld())
+ {
+  const double Now=GetWorld()->GetTimeSeconds();
+  for(int32 Index=0;Index<2;++Index)
+  {
+   AActor* Visual=Index==0 ? FloatingWeapon.Get():OtherFloatingWeapon.Get();
+   const bool Action=Index==0 ? CurrentAction.IsSet():OtherWeaponAction.IsSet();
+   const bool Returning=bHasFollowThrough[Index] && Now<FollowThroughUntil[Index];
+   Return[Index]=IsValid(Visual) && (Action || Returning || (Index==0 && (bSpearEmbedded || bWeaponAimLocked)));
+   if(Return[Index]) ReturnFrom[Index]=Visual->GetActorTransform();
+  }
+ }
  if(CurrentAction.IsSet()) StopBladeTrail(CurrentAction.GetValue());
  if(OtherWeaponAction.IsSet()) StopBladeTrail(OtherWeaponAction.GetValue());
-	if (CurrentAction.IsSet()) ++CanceledAttacks;
-	CurrentAction.Reset(); bWeaponWasActive=false;
-	OtherWeaponAction.Reset();
-	if (Character && ActionMontage)
-		if (UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance()) Anim->Montage_Stop(0.045f,ActionMontage);
-	ActionMontage=nullptr;
-	if (bCancelGesture)
-	{
-		ResetPrototypeState();
-		ClearWeaponAim(); bHasFollowThrough[0]=bHasFollowThrough[1]=false;
-		for (auto& Channel:Channels) Channel.Cancel();
-		bSyntheticInput=false; ExerciseMode=-1; SyntheticMotion=FVector2D::ZeroVector;
-	}
+ if(bCountCancel && (CurrentAction.IsSet() || OtherWeaponAction.IsSet())) ++CanceledAttacks;
+ CurrentAction.Reset();OtherWeaponAction.Reset();bWeaponWasActive=false;
+ if(Character && ActionMontage)
+  if(UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance()) Anim->Montage_Stop(.045f,ActionMontage);
+ ActionMontage=nullptr;
+ if(bCancelGesture)
+ {
+  ResetPrototypeState();ClearWeaponAim();bHasFollowThrough[0]=bHasFollowThrough[1]=false;
+  for(auto& Channel:Channels) Channel.Cancel();
+  bSyntheticInput=false;ExerciseMode=-1;SyntheticMotion=FVector2D::ZeroVector;
+  for(int32 Index=0;Index<2;++Index) if(Return[Index])
+  {
+   FollowThroughPose[Index]=ReturnFrom[Index];FollowThroughUntil[Index]=GetWorld()->GetTimeSeconds()+FMath::Max(.05f,WeaponReturnSeconds);bHasFollowThrough[Index]=true;
+  }
+ }
 }
 void UBBSBFieldActionComponent::InterruptAction(EBBSBActionState State,float Seconds)
 {

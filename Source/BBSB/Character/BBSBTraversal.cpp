@@ -132,6 +132,9 @@ bool UBBSBTraversalComponent::TryGlideDash()
  GlideDashDirection=Character->FieldActions->MovementDashDirection();
  if (GlideDashDirection.IsNearlyZero()) GlideDashDirection=Character->GetActorForwardVector().GetSafeNormal2D();
  GlideDashTangent=GlideDashDirection;
+ // Bunniar's whole-body air dash interrupts the conductor action, unlike a leg-only dash.
+ const int32 Pending=Character->FieldActions->PendingEquipmentId;
+ Character->FieldActions->ResetActionState();Character->FieldActions->PendingEquipmentId=Pending;
  auto* Move=Character->GetCharacterMovement();
  Character->StopJumping();Move->ClearAccumulatedForces();
  bGliding=false;bGlideDashing=true;bAirLiftPending=false;GlideDashElapsed=0;GlideDashStartedAt=GetWorld()->GetTimeSeconds();GlideDashStartZ=Character->GetActorLocation().Z;

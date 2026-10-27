@@ -67,7 +67,7 @@ void UBBSBFieldActionComponent::NextPrototypeWeapon() { SelectPrototypeWeapon(st
 
 bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
 {
- if (!Character || int32(Type)>6 || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return false;
+ if (!Character || int32(Type)>6 || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || IsWeaponReturning() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return false;
  UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
  if (Combat && !Combat->CanAttack()) return false;
  ClearFieldEquipment();
@@ -87,6 +87,25 @@ bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
  CreateWeapon(); FormUntil=GetWorld()->GetTimeSeconds()+1.5;
  if (Combat && bEnablePracticeControls) Combat->SetFeedback(TEXT("WEAPON  ")+PrototypeWeaponLabel());
  return true;
+}
+
+bool UBBSBFieldActionComponent::CanContinueSwordCombo() const
+{
+ if(!Character || !GetWorld() || FieldEquipment || PrototypeWeapon!=EBBSBPrototypeWeapon::Sword || bDodging || Channels[0].bHeld || PendingEquipmentId!=INDEX_NONE || !CurrentAction.IsSet() || !ActiveWeaponAnimationSet) return false;
+ const auto& A=CurrentAction.GetValue();
+ if(!A.bSwordThrow || A.Channel!=0 || A.ComboStep!=1 || !A.bAuthoredMotion || Arbiter.State!=EBBSBActionState::Attack) return false;
+ const auto* Next=ActiveWeaponAnimationSet->FindClip(EBBSBFieldGesture::Beat,0,2,A.bGlideAttack);
+ if(!Next || Next->ComboStep!=2) return false;
+ const float Impact=FMath::Clamp(A.Motion.ActiveEnd,.001f,.98f),Recall=FMath::Clamp(ActiveWeaponAnimationSet->SwordReturnStart,Impact+.001f,.99f);
+ // Require the rendered blade and hit sweep to have reached impact, not only the input clock.
+ return A.Elapsed>=Impact*A.Duration && GetWorld()->GetTimeSeconds()<A.StartedAt+Recall*A.Duration;
+}
+
+bool UBBSBFieldActionComponent::IsWeaponReturning() const
+{
+ if(!GetWorld() || FieldEquipment || PrototypeWeapon==EBBSBPrototypeWeapon::Legacy) return false;
+ const double Now=GetWorld()->GetTimeSeconds();
+ return (bHasFollowThrough[0] && Now<FollowThroughUntil[0]) || (bHasFollowThrough[1] && Now<FollowThroughUntil[1]);
 }
 
 void UBBSBFieldActionComponent::ResetPrototypeState()
@@ -189,7 +208,7 @@ FVector UBBSBFieldActionComponent::FindPrototypeCursorPoint(AActor** TargetActor
 
 bool UBBSBFieldActionComponent::PrototypeGesture(EBBSBFieldGesture G,int32 Channel)
 {
- if (!Character || Channel<0 || Channel>1 || bDodging) return false;
+ if (!Character || Channel<0 || Channel>1 || bDodging || IsWeaponReturning()) return false;
  UBBSBCombatComponent* C=Character->FindComponentByClass<UBBSBCombatComponent>();
  const double Now=GetWorld()->GetTimeSeconds();
  if ((C && !C->CanAttack()) || (Arbiter.IsBusy(Now) && Arbiter.State!=EBBSBActionState::Attack)) return false;
@@ -264,18 +283,20 @@ bool UBBSBFieldActionComponent::PrototypeGesture(EBBSBFieldGesture G,int32 Chann
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Sword && Channel==0)
  {
   if (!StartPrototypeAttack(G,Channel,BaseDamage,.95f)) return false;
-  SwordComboStep=1; LastSwordBeatAt=Now; return true;
+  LastSwordBeatAt=Now; return true;
  }
  return StartPrototypeAttack(G,Channel,BaseDamage,PrototypeWeapon==EBBSBPrototypeWeapon::Dagger ? 0.18f : 0.92f);
 }
 
 bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 Channel,float Damage,float Duration,FVector Impulse)
 {
+ if(IsWeaponReturning()) { ++RejectedActions;return false; }
  const double Now=GetWorld()->GetTimeSeconds(); const bool Independent=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent;
  const auto* Player=Cast<ABBSBCharacter>(Character);auto* Traversal=Player ? Player->Traversal.Get():nullptr;
  const bool GlideAttack=Traversal && Traversal->bGliding;
  const bool SwordThrow=PrototypeWeapon==EBBSBPrototypeWeapon::Sword && Channel==0 && G==EBBSBFieldGesture::Beat;
- const int32 Combo=1;
+ const bool SwordContinuation=SwordThrow && CanContinueSwordCombo();
+ const int32 Combo=SwordContinuation ? 2:1;
  const FBBSBWeaponAnimationClip* Clip=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->FindClip(G,Channel,Combo,GlideAttack) : nullptr;
  if (Clip) Duration=FMath::Max(Clip->Duration,0.05f);
  auto& Slot=Independent && Channel==1 ? OtherWeaponAction : CurrentAction;
@@ -283,10 +304,10 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  FBBSBWeaponActionRule Rule; Rule.Duration=Duration+Recovery; Rule.ChainCancelOpen=PrototypeWeapon==EBBSBPrototypeWeapon::Spear ? 0.4f : 0.65f;
  Rule.bAllowGestureChain=!SwordThrow && Recovery<=0;
  Rule.bLockMovement=!SwordThrow && !GlideAttack && PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger; Rule.bOccupyConductor=PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger;
- if ((Independent && Slot.IsSet() && Now<Slot->StartedAt+Slot->Duration) || (!Independent && !Arbiter.CanAttack(Rule,Channel,Now,true))) { ++RejectedActions; return false; }
+ if ((Independent && Slot.IsSet() && Now<Slot->StartedAt+Slot->Duration) || (!Independent && !SwordContinuation && !Arbiter.CanAttack(Rule,Channel,Now,true))) { ++RejectedActions; return false; }
  AActor* Visual=Independent && Channel==1 ? OtherFloatingWeapon.Get() : FloatingWeapon.Get();
  const FTransform StartPose=Visual->GetActorTransform();
- if (!Independent) { CancelCurrentAction(false); Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,Now); }
+ if (!Independent) { CancelCurrentAction(false,!SwordContinuation); Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,Now); }
  else if (!Arbiter.IsBusy(Now)) Arbiter.Start(EBBSBActionState::Attack,Rule,-1,Now);
  else Arbiter.Rule.Duration=FMath::Max(Arbiter.Rule.Duration,float(Now-Arbiter.StartedAt)+Duration);
  UBBSBCombatComponent* C=Character->FindComponentByClass<UBBSBCombatComponent>();
@@ -308,15 +329,15 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
   FVector Eye=Character->GetActorLocation()+FVector(0,0,50);FRotator View=Character->GetActorRotation();
   if(const auto* PC=Cast<APlayerController>(Character->GetController())) PC->GetPlayerViewPoint(Eye,View);
   FVector Forward=(A.Target-Eye).GetSafeNormal();if(Forward.IsNearlyZero()) Forward=View.Vector();
-  FVector Slash=FVector::VectorPlaneProject(View.RotateVector(FVector(0,-.8660254f,-.5f)),Forward).GetSafeNormal();
+  FVector Slash=FVector::VectorPlaneProject(View.RotateVector(FVector(0,Combo==2 ? .8660254f:-.8660254f,-.5f)),Forward).GetSafeNormal();
   if(Slash.IsNearlyZero()) Slash=FVector::CrossProduct(Forward,FVector::UpVector).GetSafeNormal();
   A.SwordThrowFrame=FRotationMatrix::MakeFromZX(Forward,Slash).ToQuat();
  }
  bHasFollowThrough[Independent && Channel==1 ? 1:0]=false;
  A.Direction=(A.Target-Character->GetActorLocation()).GetSafeNormal2D(); if (A.Direction.IsNearlyZero()) A.Direction=Character->GetActorForwardVector();
- if(SwordThrow) A.Direction=A.SwordThrowFrame.GetAxisZ();
+ if(SwordThrow) A.Direction=A.SwordThrowFrame.GetAxisX();
  A.ExactDamage=Damage*(C ? BBSBCombatRules::EcstaticDamageMultiplier(C->Ecstatic) : 1.f); A.Impulse=Impulse;
- Slot.Emplace(A); ActiveState=EBBSBActionState::Attack; LastGesture=G; ++GestureCounts[int32(G)]; GestureTimes[int32(G)]=Now; ++HandAttacks[Channel];
+ Slot.Emplace(A);if(SwordThrow) SwordComboStep=Combo; ActiveState=EBBSBActionState::Attack; LastGesture=G; ++GestureCounts[int32(G)]; GestureTimes[int32(G)]=Now; ++HandAttacks[Channel];
  LastWeaponDamage=A.ExactDamage; LastAimPoint=A.Target; LastWeaponImpulse=Impulse; FormUntil=Now+1;
  OnGesture.Broadcast(G,Channel,WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f));
  const bool Airborne=Character->GetCharacterMovement()->IsFalling();
@@ -411,8 +432,11 @@ bool UBBSBFieldActionComponent::GetWeaponArmPose(FVector& Hand,FVector& Elbow,fl
  Weight=FMath::SmoothStep(0.f,.1f,T)*(1.f-FMath::SmoothStep(.88f,1.f,T));
  if(A.bSwordThrow)
  {
-  const float Age=T*A.Duration,Impact=End*A.Duration;
-  Weight=FMath::SmoothStep(0.f,.06f,Age)*(1.f-FMath::SmoothStep(FMath::Max(.06f,Impact-.12f),Impact,Age));
+  const float Age=T*A.Duration;
+  const float Recall=ActiveWeaponAnimationSet ? FMath::Clamp(ActiveWeaponAnimationSet->SwordReturnStart,End+.001f,.99f):.77f;
+  const float Enter=A.ComboStep==2 ? 1.f:FMath::SmoothStep(0.f,.05f,Age);
+  // Keep the conductor's ending pose during the same embedded combo window as the blade.
+  Weight=Enter*(1.f-FMath::SmoothStep(Recall*A.Duration,A.Duration,Age));
  }
  return true;
 }
@@ -424,16 +448,40 @@ FTransform UBBSBFieldActionComponent::PrototypeAttackPose(const FWeaponAction& A
  {
   if(A.bSwordThrow && Blade && ActiveWeaponAnimationSet)
   {
-   const auto* Settings=ActiveWeaponAnimationSet.Get();const FQuat EndRotation=A.SwordThrowFrame;
+   const auto* Settings=ActiveWeaponAnimationSet.Get();const bool Recoil=A.ComboStep==2;
+   const FVector Slash=A.SwordThrowFrame.GetAxisX(),ArcUp=A.SwordThrowFrame.GetAxisY()*(Recoil ? 1.f:-1.f);
+   // The cutting plane faces the captured view: tip at 2/10 o'clock, then at 8/4 o'clock.
+   const FQuat EndRotation=FRotationMatrix::MakeFromZX(Slash,ArcUp).ToQuat();
    const FVector TipOffset=Blade->GetRelativeTransform().TransformPosition(Settings->BladeTrailTip);
    const FVector EndCenter=A.Target-EndRotation.RotateVector(TipOffset);
-   const FVector Forward=EndRotation.GetAxisZ(),Slash=EndRotation.GetAxisX();
+   const FVector LaunchCenter=EndCenter-Slash*FMath::Max(20.f,Settings->SwordSwingSpan);
    const float Impact=FMath::Clamp(A.Motion.ActiveEnd,.001f,.98f),Recall=FMath::Clamp(Settings->SwordReturnStart,Impact+.001f,.99f);
-   FVector Center=FMath::Lerp(A.StartPose.GetLocation(),EndCenter,FMath::Clamp(float(Local.GetLocation().X),0.f,1.f))-Slash*Local.GetLocation().Z;
-   if(T>Impact) Center+=Forward*Settings->SwordEmbedDepth*FMath::SmoothStep(Impact,Recall,T);
+   const FVector Start=A.StartPose.GetLocation();
+   if(A.Motion.BlendIn>0 && T<A.Motion.BlendIn)
+   {
+    const float R=FMath::Clamp(float(Local.GetLocation().Y),0.f,1.f),U=1.f-R;
+    FVector Center=FMath::Lerp(Start,LaunchCenter,R);
+    if(Recoil)
+    {
+     const float Pull=FMath::Max(1.f,Settings->SwordRecoilDistance);
+     const FVector P1=Start-A.StartPose.GetRotation().GetAxisZ()*Pull;
+     const FVector P2=LaunchCenter-Slash*(Pull*.5f);
+     Center=Start*(U*U*U)+P1*(3.f*U*U*R)+P2*(3.f*U*R*R)+LaunchCenter*(R*R*R);
+    }
+    const FQuat InitialLocal=FRotator(Recoil ? 360.f:540.f,0,0).Quaternion();
+    const FQuat InitialFrame=A.StartPose.GetRotation()*InitialLocal.Inverse();
+    const FQuat Frame=FQuat::Slerp(InitialFrame,EndRotation,FMath::SmoothStep(0.f,1.f,R));
+    return FTransform((Frame*Local.GetRotation()).GetNormalized(),Center);
+   }
+   // Constant authored keys make both ready and follow-through holds genuinely motionless.
+   FVector Center=FMath::Lerp(LaunchCenter,EndCenter,FMath::Clamp(float(Local.GetLocation().X),0.f,1.f))+ArcUp*Local.GetLocation().Z;
+   if(T>Impact)
+   {
+    const float SettleEnd=FMath::Min(Recall,Impact+.025f/FMath::Max(.05f,A.Duration));
+    Center+=Slash*Settings->SwordEmbedDepth*FMath::SmoothStep(Impact,SettleEnd,T);
+   }
    FTransform Pose((EndRotation*Local.GetRotation()).GetNormalized(),Center);
    if(T>=Recall) { FTransform Blend;Blend.Blend(Pose,GetWeaponRestTransform(),FMath::SmoothStep(Recall,1.f,T));return Blend; }
-   if(A.Motion.BlendIn>0 && T<A.Motion.BlendIn) { FTransform Blend;Blend.Blend(A.StartPose,Pose,FMath::SmoothStep(0.f,A.Motion.BlendIn,T));return Blend; }
    return Pose;
   }
   if (A.Motion.bMirrorLeftHand && A.Channel==1)
@@ -485,7 +533,17 @@ void UBBSBFieldActionComponent::UpdateBladeTrail(FWeaponAction& A,const FTransfo
   Trail->TrailMaterial=Settings->BladeTrailMaterial;Trail->Lifetime=FMath::Max(.03f,Settings->BladeTrailLifetime);Trail->Color=Settings->BladeTrailColor;
   Trail->RegisterComponent();A.BladeTrail=Trail;
  }
- if(auto* Trail=A.BladeTrail.Get()) { Trail->AddBladeSample(LastBladeTrailRoot,LastBladeTrailTip);bBladeTrailEmitting=true; }
+ if(auto* Trail=A.BladeTrail.Get())
+ {
+  Trail->Color=Settings->BladeTrailColor;
+  if(A.bSwordThrow)
+  {
+   const float T=FMath::Clamp(A.Elapsed/FMath::Max(.05f,A.Duration),0.f,1.f);
+   const float Cut=FMath::Clamp((T-A.Motion.ActiveStart)/FMath::Max(.001f,A.Motion.ActiveEnd-A.Motion.ActiveStart),0.f,1.f);
+   Trail->Color.A*=.35f+.65f*FMath::Sin(PI*Cut);
+  }
+  Trail->AddBladeSample(LastBladeTrailRoot,LastBladeTrailTip);bBladeTrailEmitting=true;
+ }
 }
 
 void UBBSBFieldActionComponent::StopBladeTrail(FWeaponAction& A)
@@ -542,24 +600,25 @@ void UBBSBFieldActionComponent::TickPrototypeWeapon(float DT)
    // Damage exists only while crossing the swing; the visible follow-through never adds another hit.
    const float ActiveStart=A.bAuthoredMotion ? FMath::Clamp(A.Motion.ActiveStart,0.f,1.f):0.2f;
    const float ActiveEnd=A.bAuthoredMotion ? FMath::Clamp(A.Motion.ActiveEnd,ActiveStart,1.f):0.64f;
-   if(PrototypeWeapon==EBBSBPrototypeWeapon::Sword)
-   {
-    if(T>=ActiveStart && PreviousT<=ActiveEnd) UpdateBladeTrail(A,PrototypeAttackPose(A,FMath::Min(T,ActiveEnd)));
-    else if(T>ActiveEnd) StopBladeTrail(A);
-   }
+   if(PrototypeWeapon==EBBSBPrototypeWeapon::Sword && PreviousT>ActiveEnd) StopBladeTrail(A);
    if (T>=ActiveStart && PreviousT<=ActiveEnd)
    {
     const float Begin=FMath::Max(PreviousT,ActiveStart), End=FMath::Min(T,ActiveEnd);
-    const int32 Steps=FMath::Max(1,FMath::CeilToInt(A.bSwordThrow ? (End-Begin)/FMath::Max(.001f,ActiveEnd-ActiveStart)*540.f/12.f:(End-Begin)*24.f));
+    const int32 Steps=FMath::Max(1,FMath::CeilToInt(A.bSwordThrow ? (End-Begin)/FMath::Max(.001f,ActiveEnd-ActiveStart)*180.f/12.f:(End-Begin)*24.f));
     FTransform FromPose=PrototypeAttackPose(A,Begin);
+    // Use the same angular substeps as the blade sweep so fast throws do not alias into a zigzag strip.
+    if(PrototypeWeapon==EBBSBPrototypeWeapon::Sword) UpdateBladeTrail(A,FromPose);
     FVector From=FromPose.GetLocation();
     for (int32 Step=1;Step<=Steps;++Step)
     {
      const FTransform ToPose=PrototypeAttackPose(A,FMath::Lerp(Begin,End,float(Step)/Steps));
      const FVector To=ToPose.GetLocation();
      if(A.bSwordThrow) TraceSwordBlade(FromPose,ToPose,A);else TraceWeapon(From,To,A);
-     if (Arbiter.Revision!=Revision) return;From=To;FromPose=ToPose;
+     if(Arbiter.Revision!=Revision) return;
+     if(PrototypeWeapon==EBBSBPrototypeWeapon::Sword) UpdateBladeTrail(A,ToPose);
+     From=To;FromPose=ToPose;
     }
+    if(PrototypeWeapon==EBBSBPrototypeWeapon::Sword && T>=ActiveEnd) StopBladeTrail(A);
    }
    if (T>=1.f)
    {
@@ -629,15 +688,6 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
    FTransform Pose; Pose.Blend(AimLockWeaponFrom,Ready,FMath::SmoothStep(0.f,0.22f,float(Now-AimLockStartedAt)));
    Visual->SetActorTransform(Pose); continue;
   }
-  if (bHasFollowThrough[Index])
-  {
-   if (Now<FollowThroughUntil[Index])
-   {
-    FTransform Pose; Pose.Blend(FollowThroughPose[Index],Rest,FMath::SmoothStep(0.f,1.f,float((Now-(FollowThroughUntil[Index]-WeaponReturnSeconds))/WeaponReturnSeconds)));
-    Visual->SetActorTransform(Pose); continue;
-   }
-   bHasFollowThrough[Index]=false;
-  }
   FTransform Pose=Rest;
   Pose.SetRotation(View.Quaternion()*FRotator(10,90,Index==0 ? -15 : 15).Quaternion());
   if (Paired) Pose.AddToTranslation(View.RotateVector(FVector(0,Index==0 ? -24 : 24,Index==0 ? 30 : -30)));
@@ -655,6 +705,17 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
     if (!GetWorld()->SweepSingleByChannel(Wall,Center,Center,Pose.GetRotation(),ECC_Camera,Shape,Q) || !Wall.bStartPenetrating) break;
     Pose.AddToTranslation(Wall.Normal*(Wall.PenetrationDepth+2));
    }
+  }
+  // Resolve the actual resting pose first, including its orientation and wall clearance.
+  // A canceled attack returns here without adding damage traces or jumping at the last frame.
+  if(bHasFollowThrough[Index])
+  {
+   if(Now<FollowThroughUntil[Index])
+   {
+    const float Seconds=FMath::Max(.05f,WeaponReturnSeconds);
+    FTransform Blended;Blended.Blend(FollowThroughPose[Index],Pose,FMath::SmoothStep(0.f,1.f,float((Now-(FollowThroughUntil[Index]-Seconds))/Seconds)));Pose=Blended;
+   }
+   else bHasFollowThrough[Index]=false;
   }
   Visual->SetActorTransform(Pose);
  }

@@ -181,7 +181,7 @@ void ABBSBWeaponVerification::Tick(float DT)
   {
    Check(FMath::IsNearlyEqual(HealthBefore-Target->Health,36.f,0.05f),TEXT("Two Crescent blades each physically apply their own hit"));
    Check(Actions->HandAttacks[0]==1 && Actions->HandAttacks[1]==1,TEXT("Each mouse button owns exactly one Crescent attack"));
-   Actions->FieldGesturePress(0); Check(Actions->TryDodge(),TEXT("Dodge cancels a prototype attack immediately")); HealthBefore=Target->Health; Advance(16);
+   Actions->FieldGesturePress(0); Check(Actions->TryDodge() && Actions->CurrentAction.IsSet(),TEXT("A leg-only dodge preserves the active prototype attack")); Actions->ResetActionState(); HealthBefore=Target->Health; Advance(16);
   }
   break;
  case 16:
@@ -430,8 +430,8 @@ void ABBSBWeaponVerification::Tick(float DT)
  case 41:
   if (Age>0.8)
   {
-   Check(Actions->bSpearEmbedded && Actions->TryDodge(),TEXT("An embedded spear does not prevent dodge cancellation"));
-   Check(!Actions->bSpearEmbedded && !Actions->bWeaponAimLocked && !Actions->FloatingWeapon->GetAttachParentActor(),TEXT("Dodge detaches the spear and clears its captured target")); Advance(42);
+   Check(Actions->bSpearEmbedded && Actions->TryDodge() && Actions->bSpearEmbedded,TEXT("A leg-only dodge preserves an embedded spear")); Actions->ResetActionState();
+   Check(!Actions->bSpearEmbedded && !Actions->bWeaponAimLocked && !Actions->FloatingWeapon->GetAttachParentActor(),TEXT("An explicit upper-body interruption detaches the spear and clears its captured target")); Advance(42);
   }
   break;
  case 42:

@@ -9,7 +9,7 @@
 
 bool UBBSBFieldActionComponent::EquipFieldEquipment(AActor* Equipment,FName Name)
 {
- if (!Character || !IsValid(Equipment) || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return false;
+ if (!Character || !IsValid(Equipment) || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || IsWeaponReturning() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return false;
  const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
  if (Combat && !Combat->CanAttack()) return false;
  CancelCurrentAction(true); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle;

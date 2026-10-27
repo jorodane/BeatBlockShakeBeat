@@ -67,9 +67,13 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(Units="cm")) FVector BladeTrailTip=FVector(0,0,89.8f);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(ClampMin="0.03",ClampMax="2",Units="s")) float BladeTrailLifetime=.28f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail") FLinearColor BladeTrailColor=FLinearColor(1.f,.7f,.82f,.65f);
- /** Single sword throw: return after the embedded hold; flight endpoints stay frozen. */
+ /** Sword throws return after the embedded hold; flight endpoints stay frozen. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",ClampMax="1")) float SwordReturnStart=.77f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",Units="cm")) float SwordEmbedDepth=3.f;
+ /** Second Beat: draw backward along the embedded blade before curling toward 10 o'clock. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="1",Units="cm")) float SwordRecoilDistance=65.f;
+ /** Center travel of the actual diagonal cut; the blade adds its own physical reach. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword cut",meta=(ClampMin="20",Units="cm")) float SwordSwingSpan=140.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade hit",meta=(ClampMin="1",ClampMax="20",Units="cm")) float BladeHitRadius=5.f;
  /** Independent weapon curves and upper-body animation while supported by Bunniar. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Glide attacks",meta=(TitleProperty="Sequence")) TArray<FBBSBWeaponAnimationClip> GlideClips;
