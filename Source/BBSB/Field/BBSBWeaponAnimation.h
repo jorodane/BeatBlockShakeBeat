@@ -10,6 +10,7 @@ class ULevelSequence;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UAnimSequence;
+class UMaterialInterface;
 class USkeletalMeshComponent;
 
 UENUM(BlueprintType)
@@ -59,6 +60,17 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Reparaton") bool bKeepFormEquipped=true;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Reparaton", meta=(ClampMin="0.01")) float FormTransitionSeconds=0.18f;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Actions", meta=(TitleProperty="Sequence")) TArray<FBBSBWeaponAnimationClip> Clips;
+ /** Blade-local endpoints exclude the guard and hilt. Ribbon samples stay in world space. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail") bool bEnableBladeTrail=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail") TObjectPtr<UMaterialInterface> BladeTrailMaterial;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(Units="cm")) FVector BladeTrailRoot=FVector(0,0,34);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(Units="cm")) FVector BladeTrailTip=FVector(0,0,89.8f);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail",meta=(ClampMin="0.03",ClampMax="2",Units="s")) float BladeTrailLifetime=.28f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade trail") FLinearColor BladeTrailColor=FLinearColor(1.f,.7f,.82f,.65f);
+ /** Single sword throw: return after the embedded hold; flight endpoints stay frozen. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",ClampMax="1")) float SwordReturnStart=.77f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",Units="cm")) float SwordEmbedDepth=3.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade hit",meta=(ClampMin="1",ClampMax="20",Units="cm")) float BladeHitRadius=5.f;
  /** Independent weapon curves and upper-body animation while supported by Bunniar. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Glide attacks",meta=(TitleProperty="Sequence")) TArray<FBBSBWeaponAnimationClip> GlideClips;
  const FBBSBWeaponAnimationClip* FindClip(EBBSBFieldGesture Gesture,int32 Channel,int32 Combo,bool bGliding=false) const;

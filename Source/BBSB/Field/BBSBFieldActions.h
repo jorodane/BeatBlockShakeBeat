@@ -23,6 +23,7 @@ class USoundWaveProcedural;
 class ABBSBWeaponVerification;
 class UDecalComponent;
 class UMaterialInterface;
+class UBBSBBladeTrailComponent;
 
 UENUM(BlueprintType)
 enum class EBBSBAimPresentation : uint8 { Hidden, Air, Surface, Interactive };
@@ -62,6 +63,9 @@ public:
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") float WeaponChargeSeconds=0;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") int32 SwordComboStep=0;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") float LastWeaponDamage=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Weapon|Trail") FVector LastBladeTrailRoot=FVector::ZeroVector;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Weapon|Trail") FVector LastBladeTrailTip=FVector::ZeroVector;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Weapon|Trail") bool bBladeTrailEmitting=false;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") bool bLastWeaponOnBeat=false;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") TArray<int32> HandAttacks={0,0};
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Weapon") FVector LastWeaponImpulse;
@@ -126,6 +130,7 @@ public:
  bool GetWeaponArmPose(FVector& Hand,FVector& Elbow,float& Weight,float& BodyTurn) const;
  void GetWeaponStepPose(UAnimSequence*& Animation,float& Time,float& Weight) const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponRecoveryRemaining() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponActionProgress() const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") EBBSBActionState ActiveState = EBBSBActionState::Idle;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 RejectedActions = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 CanceledAttacks = 0;
@@ -230,6 +235,8 @@ private:
 		FVector Direction = FVector::ForwardVector;
 		bool bPrototype=false;
   bool bGlideAttack=false;
+  bool bSwordThrow=false;
+  FQuat SwordThrowFrame=FQuat::Identity;
 		float ExactDamage=0;
 		FVector Impulse=FVector::ZeroVector;
 		FVector PreviousPosition=FVector::ZeroVector;
@@ -239,6 +246,8 @@ private:
 		FBBSBWeaponAnimationClip Motion;
 		bool bAuthoredMotion=false;
 		TSet<TWeakObjectPtr<AActor>> HitActors;
+  TWeakObjectPtr<UBBSBBladeTrailComponent> BladeTrail;
+  bool bBladeTrailFinished=false;
 	};
 	UPROPERTY(Transient) TObjectPtr<ACharacter> Character;
 	UPROPERTY(Transient) TObjectPtr<AActor> FloatingWeapon;
@@ -333,6 +342,8 @@ private:
 	bool PrototypeGesture(EBBSBFieldGesture Gesture,int32 Channel);
 	bool StartPrototypeAttack(EBBSBFieldGesture Gesture,int32 Channel,float Damage,float Duration,FVector Impulse=FVector::ZeroVector);
 	void TickPrototypeWeapon(float DT);
+ void UpdateBladeTrail(FWeaponAction& Action,const FTransform& WeaponPose);
+ void StopBladeTrail(FWeaponAction& Action);
 	void TickPrototypeState();
 	void PresentPrototypeWeapon();
 	void ResetPrototypeState();
@@ -344,7 +355,8 @@ private:
 	FTransform PrototypeAttackPose(const FWeaponAction& Action,float Progress) const;
 	void WeaponOne(); void WeaponTwo(); void WeaponThree(); void WeaponFour(); void WeaponFive(); void WeaponSix();
 	void TickWeapon(float DeltaTime);
-	void TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action);
+	void TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius=-1.f);
+ void TraceSwordBlade(const FTransform& From,const FTransform& To,FWeaponAction& Action);
 	void FinishDodge(bool bContinueMovement=false);
 	FVector FindAimPoint() const;
 	void PlayGestureAnimation(EBBSBFieldGesture Gesture);

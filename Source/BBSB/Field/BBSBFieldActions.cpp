@@ -153,6 +153,9 @@ void UBBSBFieldActionComponent::BeginPlay()
 
 void UBBSBFieldActionComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+ if(CurrentAction.IsSet()) StopBladeTrail(CurrentAction.GetValue());
+ if(OtherWeaponAction.IsSet()) StopBladeTrail(OtherWeaponAction.GetValue());
+
  bBunniarZoomHeld=false;
  if(Camera) Camera->SetFieldOfView(OriginalFOV);
 	CancelEquipmentSelection();
@@ -788,12 +791,12 @@ void UBBSBFieldActionComponent::TickWeapon(float DT)
 	if (T >= 1.f) { CurrentAction.Reset(); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle; }
 }
 
-void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action)
+void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius)
 {
 	FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBFieldWeapon),false,Character);
 	Query.AddIgnoredActor(FloatingWeapon);
 	TArray<FHitResult> Hits;
-	GetWorld()->SweepMultiByChannel(Hits,From,To,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(WeaponHitRadius),Query);
+	GetWorld()->SweepMultiByChannel(Hits,From,To,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(Radius>=0 ? Radius:WeaponHitRadius),Query);
 	if (!Hits.IsEmpty()) LastTraceSummary=FString::Printf(TEXT("%d hits: %s point=%s"),Hits.Num(),*GetNameSafe(Hits[0].GetActor()),*Hits[0].ImpactPoint.ToCompactString());
 	for (const FHitResult& Hit : Hits)
 	{
@@ -806,7 +809,7 @@ void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& 
   if ((!Prop || Prop->bBroken) && (!Enemy || Enemy->bDefeated) && (!Object || Object->bBroken)) continue;
 		// Check each target from the player as well; sweeping around a corner cannot bypass a wall.
 		FHitResult Obstruction;
-		const FVector Origin = Character->GetActorLocation()+FVector(0,0,30);
+		const FVector Origin = Action.bSwordThrow ? Action.StartPose.GetLocation():Character->GetActorLocation()+FVector(0,0,30);
 		if (GetWorld()->LineTraceSingleByChannel(Obstruction,Origin,Hit.ImpactPoint,ECC_Visibility,Query) && Obstruction.GetActor()!=Actor) continue;
 		Action.HitActors.Add(Actor);
 		const float Damage = Action.bPrototype ? Action.ExactDamage : BaseDamage*Action.DamageScale*(1.f+Action.Charge);
@@ -859,7 +862,7 @@ bool UBBSBFieldActionComponent::SetWeaponExperiment(EBBSBWeaponCommitment Preset
 }
 bool UBBSBFieldActionComponent::CanStartJump() const
 {
- return Character && GetWorld() && CanMove() && !Arbiter.IsBusy(GetWorld()->GetTimeSeconds());
+ return Character && GetWorld() && CanMove() && (!Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) || (CurrentAction.IsSet() && CurrentAction.GetValue().bSwordThrow));
 }
 bool UBBSBFieldActionComponent::CanMove() const
 {
@@ -890,6 +893,8 @@ float UBBSBFieldActionComponent::GetLookInputScale() const
 }
 void UBBSBFieldActionComponent::CancelCurrentAction(bool bCancelGesture)
 {
+ if(CurrentAction.IsSet()) StopBladeTrail(CurrentAction.GetValue());
+ if(OtherWeaponAction.IsSet()) StopBladeTrail(OtherWeaponAction.GetValue());
 	if (CurrentAction.IsSet()) ++CanceledAttacks;
 	CurrentAction.Reset(); bWeaponWasActive=false;
 	OtherWeaponAction.Reset();
@@ -1101,7 +1106,6 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 		if (Actions->PendingEquipmentId!=INDEX_NONE) DrawText(TEXT("행동 종료 후 → ")+Actions->EquipmentLabel(Actions->PendingEquipmentId),FLinearColor(.98f,.80f,.58f),X,58*Scale,GEngine->GetSmallFont(),1.15f*Scale);
 		if (!Actions->FieldEquipment)
 		{
-			if (Actions->PrototypeWeapon==EBBSBPrototypeWeapon::Sword) DrawText(FString::Printf(TEXT("Combo %d / 3"),Actions->SwordComboStep),FLinearColor(0.9f,0.8f,0.95f),X,38*Scale,GEngine->GetSmallFont(),Scale);
 			if (Charge>0) DrawText(FString::Printf(TEXT("Charge %.2f / 2 s"),Actions->WeaponChargeSeconds),FLinearColor(0.94f,0.8f,0.87f),X,38*Scale,GEngine->GetSmallFont(),Scale);
 			else if (Actions->bLastWeaponOnBeat && GetWorld()->GetTimeSeconds()-Actions->GestureTimes[int32(Actions->LastGesture)]<0.7) DrawText(TEXT("ON BEAT  x1.5"),FLinearColor(0.98f,0.78f,0.86f),X,38*Scale,GEngine->GetSmallFont(),Scale);
 		}

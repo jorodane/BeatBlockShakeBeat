@@ -150,19 +150,19 @@ void ABBSBWeaponVerification::Tick(float DT)
   }
   break;
  case 12:
-  if (Age>0.72)
+  if (Age>1.05)
   {
    Actions->FieldGesturePress(0); Actions->FieldGestureRelease(0); ++Counter;
-   Check(Actions->SwordComboStep==Counter,TEXT("Sword Beat advances the three-step combo without Release attacks"));
+   Check(Actions->SwordComboStep==1 && Actions->CanMove(),TEXT("Repeated sword Beats use one throw while allowing locomotion"));
    if (Counter==3) Advance(13); else Advance(12);
   }
   break;
  case 13:
   if (Age>2.05)
   {
-   Check(FMath::IsNearlyEqual(HealthBefore-Target->Health,63.f,0.05f),TEXT("Three sword Beats deliver three actual hits"));
+   Check(FMath::IsNearlyEqual(HealthBefore-Target->Health,54.f,0.05f),TEXT("Three independent sword Beats deliver equal-damage blade hits"));
    Actions->FieldGesturePress(0); Actions->FieldGestureRelease(0);
-   Check(Actions->SwordComboStep==1,TEXT("An expired combo restarts at its first hit")); Advance(14);
+   Check(Actions->SwordComboStep==1,TEXT("A later sword Beat still selects the same single action")); Advance(14);
   }
   break;
  case 14:
