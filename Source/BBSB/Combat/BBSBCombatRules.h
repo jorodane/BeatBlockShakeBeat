@@ -165,6 +165,20 @@ namespace BBSBCombatRules
 		if (A < 0 || B > 0 || FMath::Abs(A-B)<UE_SMALL_NUMBER) return false;
 		Out=FMath::Lerp(From,To,A/(A-B)); return true;
 	}
+ /** Earliest swept projectile contact with the physical character capsule, not a remote plane. */
+ inline bool SweptCapsuleContact(const FVector& From,const FVector& To,const FVector& Center,float Radius,float HalfHeight,float ProjectileRadius,FVector& Contact,float& Fraction)
+ {
+  const float Shaft=FMath::Max(0.f,HalfHeight-Radius),R=Radius+ProjectileRadius;
+  const FVector A=Center-FVector::UpVector*Shaft,B=Center+FVector::UpVector*Shaft;
+  FVector OnShot,OnCapsule;FMath::SegmentDistToSegmentSafe(From,To,A,B,OnShot,OnCapsule);
+  if(FVector::DistSquared(OnShot,OnCapsule)>R*R) return false;
+  const FVector Delta=To-From;
+  auto Inside=[&](float T) { const FVector P=From+Delta*T;return FVector::DistSquared(P,FMath::ClosestPointOnSegment(P,A,B))<=R*R; };
+  if(Inside(0.f)) { Fraction=0;Contact=From;return true; }
+  float Lo=0,Hi=Delta.SizeSquared()>UE_SMALL_NUMBER ? FMath::Clamp(float(FVector::DotProduct(OnShot-From,Delta)/Delta.SizeSquared()),0.f,1.f):0;
+  for(int32 I=0;I<16;++I) { const float Mid=(Lo+Hi)*.5f;if(Inside(Mid)) Hi=Mid;else Lo=Mid; }
+  Fraction=Hi;Contact=From+Delta*Hi;return true;
+ }
 	inline double BeatAt(double Now, double Epoch, float BPM) { return (Now-Epoch)*FMath::Max(BPM,1.f)/60.0; }
 	inline float EcstaticDamageMultiplier(float Progress) { return 1.f+0.15f*FMath::Clamp(FMath::FloorToInt(Progress/100.f),0,5); }
 

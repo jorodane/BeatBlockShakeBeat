@@ -137,7 +137,7 @@ void ABBSBCombatStage::Tick(float DT)
 	else if (Now<MusicEpoch) Phase=EBBSBStagePhase::CountIn;
 	else if (Phase==EBBSBStagePhase::Forming || Phase==EBBSBStagePhase::CountIn)
 	{
-		Phase=EBBSBStagePhase::Fighting; Player->SetFeedback(TEXT("GO!  WASD / X parry | Shift dash | Space jump / glide | Q E target"));
+		Phase=EBBSBStagePhase::Fighting; Player->SetFeedback(TEXT("GO!"));
 	}
 	if (Phase==EBBSBStagePhase::Replacing && IsValid(Front))
 	{
@@ -225,7 +225,6 @@ void ABBSBCombatStage::UpdateFormation(float DT)
 void ABBSBCombatStage::CreateInk()
 {
 	for (int32 Index=0; Index<40; ++Index) RingInk.Add(Ink(this,FName(*FString::Printf(TEXT("Ring_%d"),Index))));
-	for (int32 Index=0; Index<5; ++Index) ParryInk.Add(Ink(this,FName(*FString::Printf(TEXT("Parry_%d"),Index))));
 }
 void ABBSBCombatStage::UpdateInk()
 {
@@ -238,16 +237,6 @@ void ABBSBCombatStage::UpdateInk()
 		Segment->SetWorldLocationAndRotation(Position,FRotator(0,Angle+90,0));
 		Segment->SetWorldScale3D(FVector((2*PI*RingRadius/RingInk.Num()+2)/100.f,0.032f,0.015f));
 	}
-	if (!Player || !Player->GetOwner()) return;
-	FVector Origin,Normal,Right; Player->GetParryPlane(Origin,Normal,Right);
-	FVector Floor; Ground(GetWorld(),Player->GetOwner()->GetActorLocation(),Floor);
-	for (int32 Index=0; Index<ParryInk.Num(); ++Index)
-	{
-		UStaticMeshComponent* Segment=ParryInk[Index].Get(); if (!Segment) continue;
-		const FVector Position=FVector(Origin.X,Origin.Y,Floor.Z+3)+Right*((Index-2)*55.f);
-		Segment->SetWorldLocationAndRotation(Position,Right.Rotation());
-		Segment->SetWorldScale3D(FVector(0.5f,0.045f,0.02f)); Segment->SetVisibility(Player->bCombatStance);
-	}
 }
 
 void ABBSBCombatStage::PlanBar(int32 Bar)
@@ -255,7 +244,7 @@ void ABBSBCombatStage::PlanBar(int32 Bar)
 	if (!IsValid(Front) || Front->bDefeated) return;
 	BBSBCombatRules::FSocketLedger Ledger;
 	const float Start=2.f+Bar*8.f;
-	const EBBSBInkPattern Main=Front->MainPattern;
+	const EBBSBInkPattern Main=ExperimentPreset==0 && bPreferStraightAttacks && Front->MainPattern!=EBBSBInkPattern::Hold ? EBBSBInkPattern::Tap:Front->MainPattern;
 	for (int32 Index=0; Index<4; ++Index)
 	{
 		const float Offset=Index*2.f;
@@ -287,7 +276,7 @@ void ABBSBCombatStage::PlanBar(int32 Bar)
 			const uint8 Mask=uint8(1<<((Bar+Socket+1)%4));
 			if (!Ledger.Reserve(float(Socket),Mask)) continue;
 			FNote Note; Note.ImpactBeat=Start+Socket; Note.Directions=Mask; Note.Source=Backer;
-			Note.Pattern=Backer->MainPattern==EBBSBInkPattern::Hold ? EBBSBInkPattern::Zigzag : Backer->MainPattern;
+			Note.Pattern=ExperimentPreset==0 && bPreferStraightAttacks ? EBBSBInkPattern::Tap : (Backer->MainPattern==EBBSBInkPattern::Hold ? EBBSBInkPattern::Zigzag:Backer->MainPattern);
 			PendingNotes.Add(Note);
 		}
 	}
@@ -302,9 +291,7 @@ void ABBSBCombatStage::Launch(const FNote& Note)
 	for (int32 Direction=0; Direction<4; ++Direction)
 	{
 		if ((Note.Directions&(1<<Direction))==0) continue;
-		FVector Target=Origin;
-		if (Direction==0) Target.Z+=85; else if (Direction==2) Target.Z-=80;
-		else Target+=Right*(Direction==1 ? 100.f : -100.f);
+		FVector Target=Player->DefenseTarget(Direction);
 		if (Note.Pattern==EBBSBInkPattern::Area)
 		{
 			FVector Floor; if (Ground(GetWorld(),Player->GetOwner()->GetActorLocation(),Floor)) Target=Floor+FVector(0,0,3);
@@ -375,7 +362,6 @@ void ABBSBCombatStage::Dissolve(bool bAllDefeated)
 	if (bAllDefeated) ClearStageProjectiles();
 	for (ABBSBInkEnemy* Member:Members) if (IsValid(Member)) { Member->Stage=nullptr; Member->bFront=false; Member->UpdateLabel(); }
 	for (auto& Part:RingInk) if (Part.IsValid()) Part->SetVisibility(false);
-	for (auto& Part:ParryInk) if (Part.IsValid()) Part->SetVisibility(false);
 	Metronome->Stop();
 	if (Player && Player->Stage==this) Player->LeaveStage(bAllDefeated);
 	SetLifeSpan(16.f);

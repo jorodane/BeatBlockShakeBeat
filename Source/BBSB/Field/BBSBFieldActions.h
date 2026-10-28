@@ -213,7 +213,7 @@ protected:
 private:
 	friend class ABBSBWeaponVerification;
  friend class ABBSBPlayerWeaponProjectile;
- struct FRestEquipmentPoseState { FVector OwnerOffset=FVector::ZeroVector; double UpdatedAt=-1; };
+ struct FRestEquipmentPoseState { FVector OwnerOffset=FVector::ZeroVector,CollisionOffset=FVector::ZeroVector; double UpdatedAt=-1; };
  mutable TMap<TWeakObjectPtr<AActor>,FRestEquipmentPoseState> RestEquipmentPoses;
 	FActorComponentTickFunction WeaponViewTick;
 	bool bEquipmentTabHeld=false,bEquipmentTabCancelled=false,bWheelOriginalCursor=false,bWheelOpenedInCombat=false;

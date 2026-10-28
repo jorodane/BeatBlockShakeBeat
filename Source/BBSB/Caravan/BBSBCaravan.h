@@ -106,6 +106,8 @@ public:
  UFUNCTION(BlueprintCallable, Category="Bunniar|Surface") bool AttachFromCursor();
  UFUNCTION(BlueprintCallable, Category="Bunniar|Surface") void ReleaseSurface();
  void ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& View);
+ // Release only camera ownership; surface and wire attachment remain intact.
+ void ReleaseSurfaceView();
  bool HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool bInitialPress);
  void HandleSurfaceDrag(FVector2D Delta);
 private:
@@ -133,7 +135,6 @@ private:
  void ApplySurfaceCameraBlend(float DeltaTime,FMinimalViewInfo& View);
  bool ApplySurfaceRetreat(float DeltaTime,float Required,FMinimalViewInfo& View);
  void LockSurfaceView(APlayerController* Controller);
- void ReleaseSurfaceView();
 };
 
 UCLASS()

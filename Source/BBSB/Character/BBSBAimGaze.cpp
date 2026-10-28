@@ -64,6 +64,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
  FQuat WireTilt=FQuat::Identity;
  float HangWeight=0,MotionWeight=0,MotionTime=0;
  FQuat AirSpin=FQuat::Identity;
+ UAnimSequence* DefenseClip=nullptr;float DefenseTime=0,DefenseWeight=0;
  UAnimSequence* MotionClip=nullptr;
  UBlendSpace* DashBlend=nullptr;
  float DashPhase=0,DashAngle=0,DashWeight=0;
@@ -88,6 +89,8 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   const auto* Player=Cast<ABBSBCharacter>(Instance->GetOwningActor());
   Offset=Player && Player->AimGaze ? Player->AimGaze->ComponentAimRotation:FQuat::Identity;
   const auto* Traversal=Player ? Player->Traversal.Get():nullptr;
+  DefenseClip=nullptr;DefenseTime=DefenseWeight=0;
+  if(Player && Player->Combat) Player->Combat->GetDefensePose(DefenseClip,DefenseTime,DefenseWeight);
   WeaponArmWeight=WeaponBodyTurn=0;
   WeaponStepClip=nullptr;WeaponStepTime=WeaponStepWeight=0;
   if(Player && Player->FieldActions)
@@ -108,7 +111,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   LimbExtension=Traversal ? FMath::Clamp(Traversal->RelaxedLimbExtension,.9f,.999f):.99f;
   GlideAttackClip=nullptr;GlideAttackTime=GlideAttackWeight=0;
   if(Player && Player->FieldActions) Player->FieldActions->GetGlideAttackPose(GlideAttackClip,GlideAttackTime,GlideAttackWeight);
-  if (Traversal && GlideWeight>.0001f)
+  if (Traversal && (GlideWeight>.0001f || Traversal->bWireRecovering))
   {
    const FTransform Mesh=Player->GetMesh()->GetComponentTransform();
    Forward=Mesh.InverseTransformVectorNoScale(Player->GetActorForwardVector());
@@ -152,7 +155,17 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     if(Traversal->bWireArrival && Traversal->WireArrival==EBBSBWireArrival::Wall && Traversal->WireMotionAge>=Traversal->WireWallSlideStartsAt && Library->WallSlide)
     { MotionClip=Library->WallSlide;MotionTime=FMath::Clamp(Traversal->WireMotionAge-Traversal->WireWallSlideStartsAt,0.f,MotionClip->GetPlayLength()); }
    }
-   if(Traversal->bWirePulling || Traversal->WireArrival==EBBSBWireArrival::Air)
+   if(Traversal->bWireRecovering)
+   {
+    const auto* Library=Traversal->Presentation.Get();const float Age=Traversal->WireRecoveryAge,Duration=FMath::Max(.35f,Traversal->WireRecoverySeconds);
+    MotionClip=Library ? Library->DoubleJump.Get():nullptr;
+    MotionTime=MotionClip ? FMath::Clamp(Age/Duration,0.f,1.f)*MotionClip->GetPlayLength():0;
+    MotionWeight=WireWeight*(1.f-FMath::SmoothStep(Duration-.12f,Duration,Age));
+    HangWeight=WireWeight*Traversal->WireCatchAlpha;GlideWeight=FMath::Max(GlideWeight,HangWeight);
+    const FVector Up=Player->GetMesh()->GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector);
+    AirSpin=FQuat(Up,FMath::DegreesToRadians(Traversal->WireRecoveryYaw));
+   }
+   else if(Traversal->bWirePulling || Traversal->WireArrival==EBBSBWireArrival::Air)
    {
     const FTransform Mesh=Player->GetMesh()->GetComponentTransform();
     const FVector Side=Mesh.InverseTransformVectorNoScale(Player->GetActorRightVector());
@@ -240,7 +253,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
  {
   if (!Input) return false;
   Input->Evaluate_AnyThread(Output);
-  if (Offset.Equals(FQuat::Identity,.00001f) && GlideWeight<.0001f && WireWeight<.0001f && MotionWeight<.0001f && DashWeight<.0001f && WeaponArmWeight<.0001f && WeaponStepWeight<.0001f && FMath::IsNearlyZero(WeaponBodyTurn)) return true;
+  if (Offset.Equals(FQuat::Identity,.00001f) && GlideWeight<.0001f && WireWeight<.0001f && MotionWeight<.0001f && DashWeight<.0001f && WeaponArmWeight<.0001f && WeaponStepWeight<.0001f && DefenseWeight<.0001f && FMath::IsNearlyZero(WeaponBodyTurn)) return true;
   if (GlidePose && GlideWeight>.0001f)
   {
    FPoseContext Authored(this);Authored.ResetToRefPose();
@@ -289,6 +302,20 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     const FCompactPoseBoneIndex Index=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Bone));if(Index.GetInt()==INDEX_NONE) continue;
     auto& Transform=Output.Pose[Index];Transform.SetRotation(FQuat::Slerp(Transform.GetRotation(),Step.Pose[Index].GetRotation(),WeaponStepWeight).GetNormalized());
    }
+  }
+  if(DefenseClip && DefenseWeight>.0001f)
+  {
+   FPoseContext Authored(this);Authored.ResetToRefPose();FAnimationPoseData Data(Authored);
+   DefenseClip->GetAnimationPose(Data,FAnimExtractContext(double(DefenseTime),false));
+   const FBoneContainer& Bones=Output.Pose.GetBoneContainer();const int32 SpineBone=Bones.GetPoseBoneIndexForBoneName(TEXT("spine_01"));
+   const FCompactPoseBoneIndex Spine=SpineBone!=INDEX_NONE ? Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(SpineBone)):FCompactPoseBoneIndex(INDEX_NONE);
+   if(Spine.GetInt()!=INDEX_NONE) for(int32 Bone=0;Bone<Bones.GetCompactPoseNumBones();++Bone)
+   {
+    const FCompactPoseBoneIndex Index(Bone);bool Upper=false;
+    for(auto Parent=Index;Parent.GetInt()!=INDEX_NONE;Parent=Bones.GetParentBoneIndex(Parent)) if(Parent==Spine) { Upper=true;break; }
+    if(Upper) { FTransform Mixed;Mixed.Blend(Output.Pose[Index],Authored.Pose[Index],DefenseWeight);Output.Pose[Index]=Mixed; }
+   }
+   WeaponArmWeight*=1.f-DefenseWeight;
   }
   FCSPose<FCompactPose> Pose;Pose.InitPose(Output.Pose);
   const FBoneContainer& Bones=Output.Pose.GetBoneContainer();
@@ -393,7 +420,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
    FTransform Transform=Pose.GetComponentSpaceTransform(Index);
    Transform.SetRotation((FQuat::Slerp(FQuat::Identity,Offset,Shares[I])*Transform.GetRotation()).GetNormalized());
    const FBoneTransform Change(Index,Transform);
-   Pose.LocalBlendCSBoneTransforms(MakeArrayView(&Change,1),1.f-MotionWeight*.9f);
+   Pose.LocalBlendCSBoneTransforms(MakeArrayView(&Change,1),(1.f-MotionWeight*.9f)*(1.f-DefenseWeight*.9f));
   }
   if(WeaponArmWeight>.0001f)
   {

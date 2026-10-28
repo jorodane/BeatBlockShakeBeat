@@ -66,10 +66,13 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
 {
  if(!Character || !GetWorld() || !Bounds.IsValid || !IsValid(Equipment)) return false;
  const float Gap=FMath::Max(2.f,RestEquipmentGap);
- const FVector Scale=Pose.GetScale3D(),Extents=Bounds.GetExtent()*Scale.GetAbs()+FVector(Gap);
- const FCollisionShape Shape=FCollisionShape::MakeBox(Extents);
+ const FVector Scale=Pose.GetScale3D(),HalfSize=Bounds.GetExtent()*Scale.GetAbs(),Extents=HalfSize+FVector(Gap);
+ // A turning, round companion needs a stable clearance volume. Rotating an
+ // ear-sized box makes a previously safe gap disappear from one frame to the next.
+ const FCollisionShape Shape=bInterpolate ? FCollisionShape::MakeSphere(HalfSize.Size()+Gap):FCollisionShape::MakeBox(Extents);
  const FQuat Rotation=Pose.GetRotation();
- const FVector Offset=Rotation.RotateVector(Bounds.GetCenter()*Scale),Origin=Character->GetActorLocation();
+ const FVector LocalCenter=Bounds.GetCenter()*Scale;
+ const FVector Offset=bInterpolate ? FVector(0,0,LocalCenter.Z):Rotation.RotateVector(LocalCenter),Origin=Character->GetActorLocation();
  const FVector Desired=Pose.GetLocation()+Offset;
  const float MaximumDistance=FMath::Max(RestEquipmentDistance+35.f,float(Character->GetCapsuleComponent()->GetScaledCapsuleRadius()+Extents.Size()+Gap));
  FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBEquipmentRestClearance),false,Character);
@@ -78,7 +81,7 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
  auto Clear=[&](const FVector& Center)
  {
   if(Character->GetCapsuleComponent()->OverlapComponent(Center,Rotation,Shape)) return false;
-  if(Character->GetMesh() && Character->GetMesh()->OverlapComponent(Center,Rotation,Shape)) return false;
+  if(!bInterpolate && Character->GetMesh() && Character->GetMesh()->OverlapComponent(Center,Rotation,Shape)) return false;
   if(GetWorld()->OverlapBlockingTestByChannel(Center,Rotation,ECC_Camera,Shape,Query)) return false;
   FHitResult Obstruction;
   return !bWaiting || (FVector::DistSquared(Center,Origin)<=FMath::Square(MaximumDistance)
@@ -96,7 +99,7 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
     if(Body && Body->OverlapComponent(Center,Rotation,Shape) && Body->ComputePenetration(MTD,Shape,Center,Rotation))
     { Center+=MTD.Direction*(MTD.Distance+.5f);Changed=true; }
    };
-   PushOut(Character->GetCapsuleComponent());PushOut(Character->GetMesh());
+   PushOut(Character->GetCapsuleComponent());if(!bInterpolate) PushOut(Character->GetMesh());
    FHitResult Wall;
    if(GetWorld()->SweepSingleByChannel(Wall,Center,Center,Rotation,ECC_Camera,Shape,Query) && Wall.bStartPenetrating)
    { Center+=Wall.Normal*(Wall.PenetrationDepth+.5f);Changed=true; }
@@ -114,11 +117,31 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
  if(RestEquipmentPoses.Num()>16) for(auto It=RestEquipmentPoses.CreateIterator();It;++It) if(!It.Key().IsValid()) It.RemoveCurrent();
  auto& State=RestEquipmentPoses.FindOrAdd(Equipment);
  const bool HasHistory=State.UpdatedAt>=0 && Now-State.UpdatedAt<.25;
- const FVector Previous=Origin+State.OwnerOffset;
- FVector Center=Desired;bool Found=Clear(Center);
- // A safe offset remains on the same side while the preferred anchor is obstructed.
+ const FVector Previous=Origin+State.OwnerOffset+Offset;
+ // Sweep continuously along the obstacle instead of pinning the previous safe goal.
+ auto Slide=[&](FVector From,const FVector& To,FVector& Result)
+ {
+  if(!Project(From)) return false;
+  FVector End=To;
+  for(int32 I=0;I<3;++I)
+  {
+   FHitResult Hit;
+   bool Blocked=GetWorld()->SweepSingleByChannel(Hit,From,End,Rotation,ECC_Camera,Shape,Query);
+   for(UPrimitiveComponent* Body:{static_cast<UPrimitiveComponent*>(Character->GetCapsuleComponent()),static_cast<UPrimitiveComponent*>(Character->GetMesh())})
+   {
+    FHitResult OwnerHit;
+    if(Body && (!bInterpolate || Body!=Character->GetMesh()) && Body->SweepComponent(OwnerHit,From,End,Rotation,Shape) && (!Blocked || OwnerHit.Time<Hit.Time)) { Hit=OwnerHit;Blocked=true; }
+   }
+   if(!Blocked) { From=End;break; }
+   if(Hit.bStartPenetrating) { if(!Project(From)) return false;break; }
+   From=Hit.Location+Hit.Normal*.5f;
+   End=From+FVector::VectorPlaneProject(End-From,Hit.Normal);
+  }
+  Result=From;return Project(Result);
+ };
+ FVector Center=Desired;bool Found=Project(Center);
+ if(!Found && HasHistory) Found=Slide(Previous,Desired,Center);
  if(!Found && HasHistory) { Center=Previous;Found=Project(Center); }
- if(!Found) { Center=Desired;Found=Project(Center); }
  if(!Found)
  {
   double Best=MAX_dbl;
@@ -139,20 +162,29 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
  }
  if(!Found) return false;
  const FVector Goal=Center;
- const float DT=GetWorld()->GetDeltaSeconds();
+ const float DT=FMath::Max(0.f,GetWorld()->GetDeltaSeconds());
  if(bInterpolate || HasHistory)
  {
-  const FVector From=bInterpolate ? Equipment->GetActorLocation()+Offset:Previous;
-  FVector Smoothed=FMath::VInterpTo(From,Center,DT,10.f);
-  if(Project(Smoothed)) Center=Smoothed;
-  else
+  const FVector From=HasHistory ? Previous:Equipment->GetActorLocation()+Offset;
+  const float Alpha=1.f-FMath::Exp(-(bInterpolate ? 18.f:24.f)*DT);
+  // The sword follows the current camera immediately in free space. Only its
+  // collision correction eases out; the small companion eases its actual pose.
+  FVector Smoothed=Desired+FMath::Lerp(State.CollisionOffset,Goal-Desired,Alpha);
+  if(bInterpolate)
   {
-   FVector Stationary=From;
-   if(Project(Stationary)) Center=Stationary;
+   // A companion circles the pawn; a straight chord cuts through the body
+   // and makes penetration correction repeatedly stop and release it.
+   const FVector A=From-Offset-Origin,B=Goal-Offset-Origin;
+   const float Angle=FMath::Atan2(A.Y,A.X)+FMath::FindDeltaAngleRadians(FMath::Atan2(A.Y,A.X),FMath::Atan2(B.Y,B.X))*Alpha;
+   const float Radius=FMath::Lerp(A.Size2D(),B.Size2D(),Alpha);
+   Smoothed=Origin+Offset+FVector(FMath::Cos(Angle)*Radius,FMath::Sin(Angle)*Radius,FMath::Lerp(A.Z,B.Z,Alpha));
   }
+  if((!bInterpolate && Clear(Smoothed)) || Slide(From,Smoothed,Smoothed)) Center=Smoothed;
+  else { FVector Safe=From;if(Project(Safe)) Center=Safe; }
  }
  Pose.SetLocation(Center-Offset);
- State.OwnerOffset=(bInterpolate ? Goal:Center)-Origin;State.UpdatedAt=Now;
+ // Keep the rendered position as history, never an unreached future goal.
+ State.OwnerOffset=Center-Offset-Origin;State.CollisionOffset=Center-Desired;State.UpdatedAt=Now;
  return true;
 }
 

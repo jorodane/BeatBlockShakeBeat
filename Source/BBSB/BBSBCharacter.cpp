@@ -166,8 +166,9 @@ void ABBSBCharacter::DoDash()
 {
  if(Traversal && Traversal->IsParkourActive()) { Traversal->DropParkour();return; }
  if(Traversal && Traversal->IsWireTraversalActive()) return;
- if (Traversal && Traversal->IsBunniarTraversalActive()) { Traversal->TryGlideDash();return; }
- if (FieldActions) FieldActions->TryDodge();
+ // Shift always uses the same directional dash, including when leaving glide.
+ if (FieldActions && FieldActions->TryDodge())
+  if(Traversal && Traversal->IsBunniarTraversalActive()) Traversal->EndGlide();
 }
 void ABBSBCharacter::Landed(const FHitResult& Hit)
 {

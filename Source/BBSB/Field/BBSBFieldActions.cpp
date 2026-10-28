@@ -14,6 +14,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/Canvas.h"
+#include "CanvasItem.h"
+#include "RenderUtils.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -415,7 +417,7 @@ bool UBBSBFieldActionComponent::TryDodge()
  if (!Character || bDodging || GetDodgeCooldownRemaining() > 0.f) return false;
 	if (!Arbiter.CanDodge(GetWorld()->GetTimeSeconds())) return false;
 	UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
-	if (Combat && (!Combat->CanAttack() || Combat->bDead)) return false;
+	if (Combat && (!Combat->CanDodge() || Combat->bDead)) return false;
 	UCharacterMovementComponent* Move = Character->GetCharacterMovement();
 	if (!Move->IsMovingOnGround() && !Move->IsFalling()) return false;
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
@@ -888,9 +890,11 @@ bool UBBSBFieldActionComponent::IsConductorAvailable() const
 }
 float UBBSBFieldActionComponent::GetLookInputScale() const
 {
-	if (bEquipmentWheelOpen || bEquipmentPointerCaptured || FPlatformTime::Seconds()<EquipmentLookResumeAt) return 0.f;
 	const UBBSBCombatComponent* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
 	if (Combat && Combat->IsStageLocked()) return 0.f;
+ // Wire commits actions, never the view; skip the old attachment/gesture look-return delay.
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) return 1.f;
+	if (bEquipmentWheelOpen || bEquipmentPointerCaptured || FPlatformTime::Seconds()<EquipmentLookResumeAt) return 0.f;
 	if (bWeaponAimLocked) return 0.f;
 	for (int32 Channel=0;Channel<2;++Channel) if (Channels[Channel].bHeld && RequiresMouseGesture(Channel)) return 0.f;
 	if (!GetWorld()) return 1.f;
@@ -1117,6 +1121,59 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	const float CX=W*0.5f, CY=H*0.5f;
 	Actions->DrawContextAim(this,Canvas);
 	Actions->DrawAimFeedback(this);
+ if(const auto* Player=Cast<ABBSBCharacter>(Pawn);Player && Player->Traversal &&
+  (Actions->FieldEquipment==Actions->BunniarEquipment || Player->Traversal->IsWireTraversalActive()))
+ {
+  const auto* T=Player->Traversal.Get();
+  float AimX=CX,AimY=CY;
+  if(const auto* PC=GetOwningPlayerController();PC && PC->bShowMouseCursor) PC->GetMousePosition(AimX,AimY);
+  const float AimScale=FMath::Clamp(W/1280.f,.7f,1.4f);
+  const float OuterRadius=30.f*AimScale,InnerRadius=23.f*AimScale;
+  const FVector2D Center(AimX,AimY);
+  auto Point=[&](float Angle,float Radius) { return Center+FVector2D(FMath::Cos(Angle),FMath::Sin(Angle))*Radius; };
+  auto Arc=[&](float Start,float End,float Fill,const FLinearColor& Color)
+  {
+   if(Fill<=0.f) return;
+   const int32 Segments=FMath::Max(1,FMath::CeilToInt(48.f*Fill));
+   TArray<FCanvasUVTri> Tris;Tris.Reserve(Segments*2);
+   auto Triangle=[&](const FVector2D& A,const FVector2D& B,const FVector2D& C)
+   {
+    FCanvasUVTri Tri;Tri.V0_Pos=A;Tri.V1_Pos=B;Tri.V2_Pos=C;
+    Tri.V0_UV=Tri.V1_UV=Tri.V2_UV=FVector2D::ZeroVector;
+    Tri.V0_Color=Tri.V1_Color=Tri.V2_Color=Color;Tris.Add(Tri);
+   };
+   for(int32 Edge=0;Edge<Segments;++Edge)
+   {
+    const float A=FMath::Lerp(Start,End,Fill*float(Edge)/Segments);
+    const float B=FMath::Lerp(Start,End,Fill*float(Edge+1)/Segments);
+    const FVector2D IA=Point(A,InnerRadius),OA=Point(A,OuterRadius),IB=Point(B,InnerRadius),OB=Point(B,OuterRadius);
+    Triangle(IA,OA,OB);Triangle(IA,OB,IB);
+   }
+   FCanvasTriangleItem Item(Tris,GWhiteTexture);Item.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Item);
+  };
+  auto Border=[&](const FVector2D& From,const FVector2D& To,float Alpha)
+  {
+   DrawLine(From.X,From.Y,To.X,To.Y,FLinearColor(.12f,.1f,.16f,.85f),2.5f*AimScale);
+   DrawLine(From.X,From.Y,To.X,To.Y,FLinearColor(.9f,.9f,.98f,Alpha),.85f*AimScale);
+  };
+  // Two separate annular bars cup the reticle, with a clear gap at six o'clock.
+  for(int32 I=0;I<2;++I)
+  {
+   const float Start=FMath::DegreesToRadians(I==0 ? 154.f:84.f),End=FMath::DegreesToRadians(I==0 ? 96.f:26.f);
+   const float Fill=I<T->WireCharges ? 1.f:I==T->WireCharges ? FMath::Clamp(T->WireRechargeProgress,0.f,1.f):0.f;
+   Arc(Start,End,1.f,FLinearColor(.14f,.12f,.19f,.8f));
+   Arc(Start,End,Fill,FLinearColor(.82f,.89f,.98f));
+   const float Alpha=Fill>=1.f ? .95f:.6f;
+   for(int32 Edge=0;Edge<48;++Edge)
+   {
+    const float A=FMath::Lerp(Start,End,float(Edge)/48.f),B=FMath::Lerp(Start,End,float(Edge+1)/48.f);
+    Border(Point(A,OuterRadius),Point(B,OuterRadius),Alpha);
+    Border(Point(A,InnerRadius),Point(B,InnerRadius),Alpha);
+   }
+   Border(Point(Start,InnerRadius),Point(Start,OuterRadius),Alpha);
+   Border(Point(End,InnerRadius),Point(End,OuterRadius),Alpha);
+  }
+ }
 	const double Now=GetWorld()->GetTimeSeconds();
 	if (Now-Actions->LastHitAt<1.2)
 		DrawText(Actions->LastHitLabel,FLinearColor(0.98f,0.7f,0.8f),CX-80*Scale,CY+28*Scale,GEngine->GetMediumFont(),Scale);
@@ -1126,6 +1183,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 		const float X=Canvas->ClipX-260*Scale;
 		DrawText(Actions->EquipmentLabel(Actions->EquippedEquipmentId())+TEXT("  |  Tab 전환 · 길게 선택"),FLinearColor(0.94f,0.82f,0.9f),X,18*Scale,GEngine->GetSmallFont(),Scale);
 		if (Actions->PendingEquipmentId!=INDEX_NONE) DrawText(TEXT("행동 종료 후 → ")+Actions->EquipmentLabel(Actions->PendingEquipmentId),FLinearColor(.98f,.80f,.58f),X,58*Scale,GEngine->GetSmallFont(),1.15f*Scale);
+
 		if (!Actions->FieldEquipment)
 		{
 			if (Charge>0) DrawText(FString::Printf(TEXT("Charge %.2f / 2 s"),Actions->WeaponChargeSeconds),FLinearColor(0.94f,0.8f,0.87f),X,38*Scale,GEngine->GetSmallFont(),Scale);
@@ -1143,6 +1201,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	UBBSBCombatComponent* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>();
 	if (Combat)
 	{
+		Combat->DrawDefenseFeedback(this,Canvas);
 		const float BarW=260*Scale;
 		DrawRect(FLinearColor(0.13f,0.1f,0.16f,0.8f),14*Scale,14*Scale,BarW+16*Scale,70*Scale);
 		DrawRect(FLinearColor(0.28f,0.2f,0.27f),22*Scale,23*Scale,BarW,10*Scale);
@@ -1183,37 +1242,8 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 			const float Pulse=Stage->BeatPulse();
 			DrawRect(FLinearColor(0.84f,0.7f,0.9f,0.4f+0.5f*Pulse),CX-60*Scale,H-180*Scale,120*Scale,4*Scale);
 			DrawText(FString::Printf(TEXT("%.0f BPM  |  %s"),Stage->BPM,Stage->Front ? *Stage->Front->EnemyName.ToString() : TEXT("")),FLinearColor(0.9f,0.83f,0.94f),CX-73*Scale,H-174*Scale,GEngine->GetSmallFont(),Scale);
-			if (Combat->bCombatStance)
-			{
-				FVector Origin,Normal,Right; Combat->GetParryPlane(Origin,Normal,Right);
-				const FVector Gates[]={Origin+FVector(0,0,85),Origin+Right*100,Origin-FVector(0,0,80),Origin-Right*100};
-				const TCHAR* Keys[]={TEXT("W"),TEXT("D"),TEXT("S / X"),TEXT("A")};
-				for (int32 Dir=0; Dir<4; ++Dir)
-				{
-					FVector2D Screen;
-					if (!GetOwningPlayerController()->ProjectWorldLocationToScreen(Gates[Dir],Screen,true)) continue;
-					const float X=Screen.X,Y=Screen.Y;
-					const bool bHeld=Combat->IsDirectionHeld(Dir);
-					DrawRect(bHeld ? FLinearColor(0.59f,0.8f,0.75f,0.8f) : FLinearColor(0.25f,0.2f,0.31f,0.65f),X-22*Scale,Y-14*Scale,44*Scale,28*Scale);
-					DrawText(Keys[Dir],FLinearColor(0.96f,0.9f,0.96f),X-15*Scale,Y-7*Scale,GEngine->GetSmallFont(),Scale);
-				}
-			}
-			if (Combat->FeedbackExperiment>0 && Now-Combat->LastParryAt<0.28 && Combat->LastParry==EBBSBParryResult::Block)
-			{
-				FVector Origin,Normal,Right; Combat->GetParryPlane(Origin,Normal,Right);
-				const int32 Dir=int32(Combat->LastDirection);
-				const FVector Gate=Origin+(Dir==0 ? FVector(0,0,85) : Dir==2 ? FVector(0,0,-80) : Right*(Dir==1 ? 100.f : -100.f));
-				FVector2D Screen;
-				if (GetOwningPlayerController()->ProjectWorldLocationToScreen(Gate,Screen,true))
-				{
-					const float T=(Now-Combat->LastParryAt)/0.28f, Radius=(20+T*35)*Scale;
-					for (int32 Edge=0; Edge<12; ++Edge)
-					{
-						const float A=Edge*2*PI/12,B=(Edge+1)*2*PI/12;
-						DrawLine(Screen.X+FMath::Cos(A)*Radius,Screen.Y+FMath::Sin(A)*Radius,Screen.X+FMath::Cos(B)*Radius,Screen.Y+FMath::Sin(B)*Radius,FLinearColor(0.7f,0.94f,0.84f,1-T),1.8f*Scale);
-					}
-				}
-			}
+
+
 			if (Combat->FeedbackExperiment==2)
 			{
 				FVector Eye; FRotator View; GetOwningPlayerController()->GetPlayerViewPoint(Eye,View);

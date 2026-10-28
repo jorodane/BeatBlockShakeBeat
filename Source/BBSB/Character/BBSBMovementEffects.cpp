@@ -6,6 +6,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 void UBBSBTraversalComponent::TickMovementEffects(float DT)
 {
@@ -16,11 +17,12 @@ void UBBSBTraversalComponent::TickMovementEffects(float DT)
  const FVector Position=Character->GetActorLocation();
  const float HalfHeight=Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
  const bool Dashing=Alive && Character->FieldActions && Character->FieldActions->IsDodging();
+ UpdateDashSmear(DT,Dashing);
  if(Dashing)
  {
   const FVector Direction=Move->Velocity.GetSafeNormal2D().IsNearlyZero() ? Character->GetActorForwardVector():Move->Velocity.GetSafeNormal();
   if(!bEffectWasDashing && Move->IsMovingOnGround()) SpawnSmoke(Presentation->DashBurst,Position-FVector::UpVector*(HalfHeight-3.f),FVector::UpVector,1.f);
-  if(!bEffectWasDashing || Now-LastDashWakeAt>=Presentation->DashWakeInterval)
+  if((!Presentation->bEnableDashSmear || !Presentation->DashSmearMaterial) && (!bEffectWasDashing || Now-LastDashWakeAt>=Presentation->DashWakeInterval))
   { SpawnSmoke(Presentation->DashWake,Position-FVector::UpVector*20.f,Direction,1.f);LastDashWakeAt=Now; }
  }
  bEffectWasDashing=Dashing;
@@ -70,4 +72,46 @@ void UBBSBTraversalComponent::TickMovementEffects(float DT)
   }
  }
  bEffectWasOnWall=OnWall;
+}
+
+void UBBSBTraversalComponent::UpdateDashSmear(float DT,bool bDashing)
+{
+ auto* Mesh=Character ? Character->GetMesh():nullptr;
+ if(!Mesh || !Presentation || !Presentation->bEnableDashSmear || !Presentation->DashSmearMaterial || Presentation->EffectScale<=0 || (Character->Combat && Character->Combat->bDead))
+ { ResetDashSmear();return; }
+ const float Age=Character->FieldActions ? Character->FieldActions->GetDodgeAge():0.f;
+ const float Duration=Character->FieldActions ? Character->FieldActions->DodgeDuration:.3f;
+ const float Envelope=bDashing ? FMath::SmoothStep(0.f,.045f,Age)*FMath::SmoothStep(0.f,.075f,Duration-Age):0.f;
+ DashSmearAlpha=bDashing ? Envelope:FMath::Max(0.f,DashSmearAlpha-DT/.065f);
+ if(bDashing)
+ {
+  const FVector Motion=Character->GetCharacterMovement()->Velocity.GetSafeNormal();
+  if(!Motion.IsNearlyZero()) DashSmearDirection=Motion;
+ }
+ if(DashSmearAlpha<=KINDA_SMALL_NUMBER) { ResetDashSmear();return; }
+ if(!DashSmearMID || DashSmearMID->Parent!=Presentation->DashSmearMaterial)
+  DashSmearMID=UMaterialInstanceDynamic::Create(Presentation->DashSmearMaterial,this);
+ if(!bDashSmearOverlaySaved)
+ {
+  SavedDashOverlay=Mesh->GetOverlayMaterial();DashSmearSavedBounds=Mesh->BoundsScale;bDashSmearOverlaySaved=true;
+  Mesh->SetBoundsScale(FMath::Max(DashSmearSavedBounds,1.5f));
+ }
+ Mesh->SetOverlayMaterial(DashSmearMID);
+ DashSmearMID->SetVectorParameterValue(TEXT("DashDirection"),FLinearColor(DashSmearDirection.X,DashSmearDirection.Y,DashSmearDirection.Z,0));
+ const FVector Center=Character->GetActorLocation();
+ DashSmearMID->SetVectorParameterValue(TEXT("DashCenter"),FLinearColor(Center.X,Center.Y,Center.Z,0));
+ DashSmearMID->SetScalarParameterValue(TEXT("SmearAlpha"),DashSmearAlpha);
+ DashSmearMID->SetScalarParameterValue(TEXT("SmearLength"),Presentation->DashSmearLength);
+ DashSmearMID->SetScalarParameterValue(TEXT("Opacity"),Presentation->DashSmearOpacity*FMath::Min(Presentation->EffectScale,1.f));
+}
+
+void UBBSBTraversalComponent::ResetDashSmear()
+{
+ if(bDashSmearOverlaySaved && Character && Character->GetMesh())
+ {
+  auto* Mesh=Character->GetMesh();
+  if(Mesh->GetOverlayMaterial()==DashSmearMID) Mesh->SetOverlayMaterial(SavedDashOverlay);
+  Mesh->SetBoundsScale(DashSmearSavedBounds);
+ }
+ bDashSmearOverlaySaved=false;SavedDashOverlay=nullptr;DashSmearAlpha=0;
 }

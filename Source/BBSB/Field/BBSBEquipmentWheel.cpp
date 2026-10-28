@@ -58,6 +58,7 @@ bool UBBSBFieldActionComponent::IsEquipmentActionBusy() const
 
 bool UBBSBFieldActionComponent::RequestEquipment(int32 Id)
 {
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) return false;
  EnsureBunniarEquipment();
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  if (!Character || bEquipmentInputBlocked || (Combat && Combat->bDead)) return false;
@@ -70,6 +71,7 @@ bool UBBSBFieldActionComponent::RequestEquipment(int32 Id)
 
 void UBBSBFieldActionComponent::EquipmentTabDown()
 {
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) return;
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  if (!Character || bEquipmentTabHeld || bEquipmentInputBlocked || (Combat && Combat->bDead)) return;
  bEquipmentTabHeld=true; bEquipmentTabCancelled=false; EquipmentTabPressedAt=FPlatformTime::Seconds();
@@ -147,6 +149,7 @@ void UBBSBFieldActionComponent::CancelEquipmentSelection()
 
 void UBBSBFieldActionComponent::TickEquipmentSelection()
 {
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) { CancelEquipmentSelection();return; }
  EnsureBunniarEquipment();
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  if (!Character || bEquipmentInputBlocked || (Combat && Combat->bDead) || (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()))

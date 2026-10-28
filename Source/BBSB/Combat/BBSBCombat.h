@@ -18,6 +18,10 @@ class UAudioComponent;
 class USoundWaveProcedural;
 class UCameraComponent;
 class APlayerController;
+class UAnimSequence;
+class UBBSBDefensePresentation;
+class AHUD;
+class UCanvas;
 
 UCLASS(ClassGroup=(BBSB), meta=(BlueprintSpawnableComponent))
 class BBSB_API UBBSBCombatComponent : public UActorComponent
@@ -63,9 +67,30 @@ public:
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|TimingCoach") float CoachMinMs=0.f;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|TimingCoach") float CoachMaxMs=0.f;
 
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Defense") TSoftObjectPtr<UBBSBDefensePresentation> DefenseLibrary;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") TObjectPtr<UBBSBDefensePresentation> DefensePresentation;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") TObjectPtr<UAnimSequence> DefenseAnimation;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 ActiveDefenseMask=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") float DefensePoseTime=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") float DefensePoseWeight=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") bool bDefenseHitReaction=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 DefenseMotionSerial=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 DefenseCombo=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 BestDefenseCombo=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 BrokenDefenseCombo=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 DefenseEffectsSpawned=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") double LastDefenseImpactAt=-100;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") FVector LastDefenseImpact=FVector::ZeroVector;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") bool bLastDefenseBlocked=false;
+ UFUNCTION(BlueprintPure,Category="BBSB|Defense") uint8 HeldParryMask() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Defense") bool IsDefenseMotionActive() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Defense") FVector DefenseTarget(int32 Direction) const;
+ void GetDefensePose(UAnimSequence*& Clip,float& Time,float& Weight) const;
+ void DrawDefenseFeedback(AHUD* HUD,UCanvas* Canvas) const;
 	bool BlocksMovement() const;
 	bool IsStageLocked() const;
 	bool CanAttack() const;
+ bool CanDodge() const;
 	float DamageMultiplier() const;
 	FVector AimPoint() const;
 	void OnAttackStarted();
@@ -117,6 +142,12 @@ private:
 	void NextCameraExperiment();
 	void NextFeedbackExperiment();
 	void NextWeaponExperiment();
+ double DefenseStartedAt=-100;
+ float DefenseDuration=0;
+ void StartDefenseMotion(uint8 Mask,bool bHit=false);
+ void CancelDefenseMotion();
+ void UpdateDefensePresentation();
+ void DefenseImpact(const FVector& Point,bool bBlock);
 	void ClearParry();
 };
 
@@ -169,6 +200,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DT) override;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Rhythm") float BPM=110.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Pattern") bool bPreferStraightAttacks=true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage") float RingRadius=220.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage") float ParryDistance=570.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage") float JoinRadius=1000.f;
@@ -178,7 +210,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage", meta=(ClampMin="0.5")) float ReplacementStallSeconds=3.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Rhythm") bool bAudibleMetronome=true;
 	/** Used by deterministic PIE verification; normal encounters always emit their schedule. */
-	UPROPERTY(Transient) bool bPausePatternEmission=false;
+	UPROPERTY(Transient,EditAnywhere,BlueprintReadWrite,Category="BBSB|Practice") bool bPausePatternEmission=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Stage") EBBSBStagePhase Phase=EBBSBStagePhase::Forming;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Stage") TObjectPtr<ABBSBInkEnemy> Front;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Stage") TArray<TObjectPtr<ABBSBInkEnemy>> Members;
@@ -210,7 +242,6 @@ private:
 	};
 	TArray<FNote> PendingNotes;
 	TArray<TWeakObjectPtr<UStaticMeshComponent>> RingInk;
-	TArray<TWeakObjectPtr<UStaticMeshComponent>> ParryInk;
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> Metronome;
 	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> ClickSound;
 	double EnteredAt=0, MusicEpoch=0, AggroLostAt=-1, NextJoinCheck=0;

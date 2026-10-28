@@ -655,9 +655,12 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
 {
  if (!Character || !Character->IsLocallyControlled() || !IsValid(FloatingWeapon) || !OtherFloatingWeapon || !ConductorWeapon || !FormUpper) return;
  const double Now=GetWorld()->GetTimeSeconds(); const bool Dual=IsDual(PrototypeWeapon);
- const bool Split=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->bSplitReparaton && (ActiveWeaponAnimationSet->bKeepFormEquipped || IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil)
+ const auto* Defense=Character->FindComponentByClass<UBBSBCombatComponent>();
+ const bool Defending=Defense && Defense->IsDefenseMotionActive();
+ const bool AuthoredSplit=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->bSplitReparaton && (ActiveWeaponAnimationSet->bKeepFormEquipped || IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil)
   : Dual || (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && (IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil));
- ConductorFull->SetVisibility(!Split); FormUpper->SetVisibility(Split); FormLower->SetVisibility(Split && !Dual); OtherFormLower->SetVisibility(Dual);
+ const bool Split=!Defending && AuthoredSplit;
+ ConductorFull->SetVisibility(!Split); FormUpper->SetVisibility(Split); FormLower->SetVisibility(Split && !Dual); OtherFormLower->SetVisibility(Dual && !Defending);
  Blade->SetVisibility(PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger || Now>=DaggerAwayUntil[0]);
  OtherBlade->SetVisibility(PrototypeWeapon==EBBSBPrototypeWeapon::Crescent);
  FTransform Top(FRotator::ZeroRotator,FVector(0,0,-6)), Bottom(FRotator::ZeroRotator,FVector(0,0,-90));

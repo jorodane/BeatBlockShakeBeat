@@ -65,9 +65,7 @@ ABBSBInkProjectile* ABBSBCombatVerification::Shot(int32 Direction,float Flight,i
 {
 	if (!Stage || !First) return nullptr;
 	FVector Origin,Normal,Right; Combat->GetParryPlane(Origin,Normal,Right);
-	FVector Target=Origin;
-	if (Direction==4) Target+=Right*600;
-	else if (Direction==0) Target.Z+=85; else if (Direction==2) Target.Z-=80; else Target+=Right*(Direction==1 ? 100.f : -100.f);
+	FVector Target=Direction==4 ? Origin+Right*600:Combat->DefenseTarget(Direction);
 	ABBSBInkEnemy* Source=IsValid(Stage->Front) && !Stage->Front->bDefeated ? Stage->Front.Get() : First.Get();
 	ABBSBInkProjectile* Projectile=GetWorld()->SpawnActor<ABBSBInkProjectile>(ABBSBInkProjectile::StaticClass(),Source->GetAimPoint(),FRotator::ZeroRotator);
 	if (Projectile) Projectile->Initialize(Stage,Source,Target,HoldGroup<0 ? EBBSBInkPattern::Tap : EBBSBInkPattern::Hold,Flight,HoldGroup);

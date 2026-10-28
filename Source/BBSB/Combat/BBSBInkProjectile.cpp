@@ -86,23 +86,19 @@ void ABBSBInkProjectile::Tick(float DT)
 		if (Pattern==EBBSBInkPattern::Zigzag) Next+=Side*(55.f*FMath::Sin(4*PI*Age/TravelSeconds));
 		FHitResult WorldHit;
 		const bool bWorldHit=GetWorld()->SweepSingleByChannel(WorldHit,PreviousPosition,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(10.f),Query);
-		FVector Contact; bool bPlaneHit=false; float PlaneDistance=FLT_MAX;
-		if (Combat && Combat->IsStageLocked() && Combat->bCombatStance && !Combat->bDead)
-		{
-			FVector Origin,Normal,Right; Combat->GetParryPlane(Origin,Normal,Right);
-			if (BBSBCombatRules::PlaneIntersection(PreviousPosition,Next,Origin,Normal,Contact))
-			{
-				const FVector Local=Contact-Origin;
-				if (FMath::Abs(FVector::DotProduct(Local,Right))<=Combat->ParryHalfSize.X && FMath::Abs(Local.Z)<=Combat->ParryHalfSize.Y)
-				{
-					bPlaneHit=true; PlaneDistance=FVector::Dist(PreviousPosition,Contact);
-				}
-			}
-		}
-		if (bPlaneHit && (!bWorldHit || PlaneDistance<WorldHit.Distance))
-		{
-			if (Combat->ResolveContact(Contact,HoldGroup,Damage,this)!=EBBSBParryResult::Evade) { SetActorLocation(Contact); ResolveAndFade(); return; }
-		}
+  FVector Contact;float BodyFraction=1.f;bool bBodyHit=false;
+  if(Combat && !Combat->bDead)
+  {
+   const auto* Character=Cast<ACharacter>(Pawn);const auto* Capsule=Character ? Character->GetCapsuleComponent():nullptr;
+   bBodyHit=BBSBCombatRules::SweptCapsuleContact(PreviousPosition,Next,Pawn->GetActorLocation(),Capsule ? Capsule->GetScaledCapsuleRadius():35.f,
+    Capsule ? Capsule->GetScaledCapsuleHalfHeight():92.f,10.f,Contact,BodyFraction);
+  }
+  // A real body contact is the only parry/hit event. A nearer wall still intercepts first.
+  if(bBodyHit && (!bWorldHit || FVector::Dist(PreviousPosition,Contact)<=WorldHit.Distance))
+  {
+   SetActorLocation(Contact);
+   if(Combat->ResolveContact(Contact,HoldGroup,Damage,this)!=EBBSBParryResult::Evade) { ResolveAndFade();return; }
+  }
 		if (bWorldHit)
 		{
 			if (Pattern==EBBSBInkPattern::Bounce && Bounces<2)
@@ -111,20 +107,6 @@ void ABBSBInkProjectile::Tick(float DT)
 				Next=WorldHit.Location+WorldHit.ImpactNormal*0.5f;
 			}
 			else { SetActorLocation(WorldHit.Location); ResolveAndFade(); return; }
-		}
-		if (Combat && !Combat->bDead)
-		{
-			ACharacter* Character=Cast<ACharacter>(Pawn);
-			const float Radius=Character ? Character->GetCapsuleComponent()->GetScaledCapsuleRadius() : 35;
-			const float Half=Character ? Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()-Radius : 40;
-			FVector OnBullet,OnBody;
-			FMath::SegmentDistToSegmentSafe(PreviousPosition,Next,Pawn->GetActorLocation()-FVector(0,0,Half),Pawn->GetActorLocation()+FVector(0,0,Half),OnBullet,OnBody);
-			if (FVector::DistSquared(OnBullet,OnBody)<FMath::Square(Radius+10))
-			{
-				const UBBSBFieldActionComponent* Actions=Pawn->FindComponentByClass<UBBSBFieldActionComponent>();
-				// I-frames let ink pass through. Dodging must never consume a bullet that is already flying.
-				if (!Actions || !Actions->IsDodgeInvulnerable()) { Combat->TakeCombatDamage(Damage,this); ResolveAndFade(); return; }
-			}
 		}
 		SetActorLocation(Next); PreviousPosition=Next;
 	}

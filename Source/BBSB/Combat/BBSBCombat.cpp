@@ -1,5 +1,6 @@
 #include "BBSBCombat.h"
 #include "BBSBCombatVisuals.h"
+#include "Combat/BBSBDefensePresentation.h"
 #include "BBSB.h"
 #include "Field/BBSBFieldActions.h"
 #include "AIController.h"
@@ -23,6 +24,7 @@ UBBSBCombatComponent::UBBSBCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick=true;
 	PrimaryComponentTick.TickGroup=TG_PrePhysics;
+ DefenseLibrary=TSoftObjectPtr<UBBSBDefensePresentation>(FSoftObjectPath(TEXT("/Game/BBSB/AnimationAuthoring/Defense/DA_PlayerDefense.DA_PlayerDefense")));
 }
 
 void UBBSBCombatComponent::BeginPlay()
@@ -31,6 +33,7 @@ void UBBSBCombatComponent::BeginPlay()
 	Character=Cast<ACharacter>(GetOwner());
 	if (!Character) { SetComponentTickEnabled(false); return; }
 	Health=MaximumHealth;
+ DefensePresentation=DefenseLibrary.LoadSynchronous();
 	Boom=Character->FindComponentByClass<USpringArmComponent>();
 	if (Boom) { OriginalArmLength=Boom->TargetArmLength; OriginalSocketOffset=Boom->SocketOffset; bOriginalCameraLag=Boom->bEnableCameraLag; bOriginalRotationLag=Boom->bEnableCameraRotationLag; }
 	if (FMath::IsNearlyEqual(CombatCameraDistance,640.f)) CombatCameraDistance=OriginalArmLength;
@@ -110,7 +113,7 @@ void UBBSBCombatComponent::TickComponent(float DT,ELevelTick TickType,FActorComp
 {
 	Super::TickComponent(DT,TickType,TickFunction);
 	if (!Character || !Character->IsLocallyControlled() || !Cast<APlayerController>(Character->GetController())) { BoundInput.Reset(); return; }
-	BindControls();
+	BindControls();UpdateDefensePresentation();
 	if (Stage && !IsValid(Stage)) LeaveStage(false);
 	if (IsStageLocked() && (!IsValid(SelectedEnemy) || SelectedEnemy->bDefeated || SelectedEnemy->Stage!=Stage)) CycleTarget(1);
 	if (BlocksMovement())
@@ -176,7 +179,11 @@ bool UBBSBCombatComponent::BlocksMovement() const
 }
 bool UBBSBCombatComponent::CanAttack() const
 {
-	return !bDead && (!IsStageLocked() || (Stage->Phase!=EBBSBStagePhase::Forming && Stage->Phase!=EBBSBStagePhase::CountIn));
+ return CanDodge() && !IsDefenseMotionActive();
+}
+bool UBBSBCombatComponent::CanDodge() const
+{
+ return !bDead && (!IsStageLocked() || (Stage->Phase!=EBBSBStagePhase::Forming && Stage->Phase!=EBBSBStagePhase::CountIn));
 }
 float UBBSBCombatComponent::DamageMultiplier() const
 {
@@ -190,7 +197,7 @@ void UBBSBCombatComponent::OnAttackStarted()
 	if (IsStageLocked() && !bCombatStance)
 	{
 		bCombatStance=true; ClearParry();
-		SetFeedback(TEXT("STANCE  |  WASD / X parry"));
+		SetFeedback(TEXT("STANCE"));
 	}
 }
 
@@ -232,7 +239,7 @@ void UBBSBCombatComponent::EnemyStruck(ABBSBInkEnemy* Enemy)
 
 void UBBSBCombatComponent::AttachStage(ABBSBCombatStage* NewStage)
 {
-	Stage=NewStage; bCombatStance=true; ClearParry();
+	Stage=NewStage; bCombatStance=true; ClearParry();DefenseCombo=BrokenDefenseCombo=0;
 	CombatViewRotation=FRotator(0,(Stage->GetActorLocation()-Character->GetActorLocation()).Rotation().Yaw,0);
 	SetStageCameraLock(true);
 	if (IsValid(SelectedEnemy)) SelectedEnemy->SetSelected(false);
@@ -262,6 +269,9 @@ void UBBSBCombatComponent::TakeCombatDamage(float Damage,AActor* Causer,bool bIn
 	UBBSBFieldActionComponent* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>();
 	if (Actions && Actions->IsDodgeInvulnerable()) return;
 	Health=FMath::Max(0.f,Health-Damage);
+ const FVector Impact=Causer && FVector::DistSquared(Causer->GetActorLocation(),Character->GetActorLocation())<FMath::Square(180.f) ?
+  Causer->GetActorLocation():Character->GetActorLocation()+Character->GetActorForwardVector()*25.f;
+ DefenseImpact(Impact,false);
 	Ecstatic=FMath::Max(0.f,Ecstatic-MissLoss);
 	if (bInterrupt && Actions) Actions->InterruptAction(EBBSBActionState::Hit,0.2f);
 	if (Health<=0)
@@ -280,7 +290,7 @@ void UBBSBCombatComponent::GetParryPlane(FVector& Origin,FVector& Normal,FVector
 	if (IsStageLocked()) Normal=(Stage->GetActorLocation()-Character->GetActorLocation()).GetSafeNormal2D();
 	if (Normal.IsNearlyZero()) Normal=FVector::ForwardVector;
 	Right=FVector::CrossProduct(FVector::UpVector,Normal).GetSafeNormal();
-	Origin=(Character ? Character->GetActorLocation() : FVector::ZeroVector)+Normal*65.f;
+	Origin=Character ? Character->GetActorLocation() : FVector::ZeroVector;
 }
 
 void UBBSBCombatComponent::ParryDown(int32 Direction)
@@ -288,11 +298,11 @@ void UBBSBCombatComponent::ParryDown(int32 Direction)
 	if (Direction<0 || Direction>3 || !IsStageLocked() || !bCombatStance || bDead || (Stage->Phase!=EBBSBStagePhase::Fighting && Stage->Phase!=EBBSBStagePhase::Replacing)) return;
 	const UBBSBFieldActionComponent* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>();
 	if (Actions && !Actions->IsConductorAvailable()) return;
-	Inputs[Direction].Down(GetWorld()->GetTimeSeconds());
+	Inputs[Direction].Down(GetWorld()->GetTimeSeconds());StartDefenseMotion(HeldParryMask());
 }
 void UBBSBCombatComponent::ParryUp(int32 Direction) { if (Direction>=0 && Direction<4) Inputs[Direction].Up(); }
 bool UBBSBCombatComponent::IsDirectionHeld(int32 Direction) const { return Direction>=0 && Direction<4 && Inputs[Direction].bHeld; }
-void UBBSBCombatComponent::ClearParry() { for (auto& Input:Inputs) Input=FBBSBParryInput(); bDownS=bDownX=false; }
+void UBBSBCombatComponent::ClearParry() { for (auto& Input:Inputs) Input=FBBSBParryInput(); bDownS=bDownX=false;CancelDefenseMotion(); }
 void UBBSBCombatComponent::UpDown() { ParryDown(0); } void UBBSBCombatComponent::UpUp() { ParryUp(0); }
 void UBBSBCombatComponent::RightDown() { ParryDown(1); } void UBBSBCombatComponent::RightUp() { ParryUp(1); }
 void UBBSBCombatComponent::LeftDown() { ParryDown(3); } void UBBSBCombatComponent::LeftUp() { ParryUp(3); }
@@ -319,7 +329,7 @@ EBBSBParryResult UBBSBCombatComponent::ResolveContact(const FVector& Contact,int
 		LastParry=Inputs[Index].Resolve(GetWorld()->GetTimeSeconds(),HoldGroup,BlockWindow,EarlyWindow);
 	if (LastParry==EBBSBParryResult::Block)
 	{
-		++Blocks; Ecstatic=FMath::Clamp(Ecstatic+BlockGain,0.f,MaximumEcstatic);
+		++Blocks; Ecstatic=FMath::Clamp(Ecstatic+BlockGain,0.f,MaximumEcstatic);DefenseImpact(Contact,true);
 		SetFeedback(FString::Printf(TEXT("BLOCK!  %s%s"),DirectionName(Index),HoldGroup==INDEX_NONE ? TEXT("") : TEXT("  HOLD")));
 	}
 	else
@@ -364,7 +374,7 @@ void UBBSBCombatComponent::ResetEncounter()
 	for (TActorIterator<ABBSBInkProjectile> It(GetWorld()); It; ++It) It->Destroy();
 	for (TActorIterator<ABBSBInkEnemy> It(GetWorld()); It; ++It) It->ResetEnemy();
 	for (TActorIterator<ABBSBCombatStage> It(GetWorld()); It; ++It) It->Destroy();
-	LeaveStage(false); bDead=false; Health=MaximumHealth; Ecstatic=0; Blocks=Misses=0; RewardedEncounters.Reset();
+	LeaveStage(false); bDead=false; Health=MaximumHealth; Ecstatic=0; Blocks=Misses=0;DefenseCombo=BrokenDefenseCombo=0;LastDefenseImpactAt=-100; RewardedEncounters.Reset();
 	TimingHistory.Reset(); SyncTimingCoach();
 	if (Character)
 	{
@@ -530,7 +540,7 @@ void ABBSBCombatPracticeArea::BeginPlay()
 		ABBSBInkEnemy* Enemy=GetWorld()->SpawnActorDeferred<ABBSBInkEnemy>(ABBSBInkEnemy::StaticClass(),Transform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 		if (!Enemy) continue;
 		Enemy->EnemyName=Names[Index]; Enemy->EncounterID=EncounterID; Enemy->MaximumHealth=EnemyHealth;
-		Enemy->MainPattern=Index==0 ? EBBSBInkPattern::Tap : Index==1 ? EBBSBInkPattern::Curve : EBBSBInkPattern::Hold;
+		Enemy->MainPattern=Index<2 ? EBBSBInkPattern::Tap : EBBSBInkPattern::Hold;
 		Enemy->Tint=Index==0 ? FLinearColor(0.43f,0.35f,0.51f) : Index==1 ? FLinearColor(0.36f,0.5f,0.53f) : FLinearColor(0.58f,0.38f,0.44f);
 		UGameplayStatics::FinishSpawningActor(Enemy,Transform);
 	}

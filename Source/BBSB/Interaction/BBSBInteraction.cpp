@@ -1,5 +1,6 @@
 #include "Interaction/BBSBInteraction.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBTraversal.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombatVisuals.h"
 #include "Camera/CameraActor.h"
@@ -52,6 +53,7 @@ void UBBSBInteractionComponent::EndPlay(const EEndPlayReason::Type Reason)
 }
 bool UBBSBInteractionComponent::BeginDialogue(ABBSBInteractionNPC* NPC)
 {
+ if(Player && Player->Traversal && Player->Traversal->IsWireTraversalActive()) return false;
  auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
  if(!PC || !IsValid(NPC) || Player->Combat->bDead || Player->Combat->IsStageLocked()) return false;
  if(bDialogueActive && ActiveNPC==NPC) return true;

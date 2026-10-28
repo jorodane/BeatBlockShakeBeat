@@ -42,6 +42,7 @@ void UBBSBTraversalComponent::BeginPlay()
 {
  Super::BeginPlay();Character=Cast<ABBSBCharacter>(GetOwner());
  if (!Character) return;
+ WireCharges=2;WireRechargeProgress=0;bWireOnRechargeSurface=bWireRechargeArmed=false;
  Character->JumpMaxCount=1;
  BaseGravityScale=Character->GetCharacterMovement()->GravityScale;
  if (Character->FieldActions) AddTickPrerequisiteComponent(Character->FieldActions);
@@ -59,7 +60,7 @@ void UBBSBTraversalComponent::BeginPlay()
 }
 void UBBSBTraversalComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
- RestoreWallJumpMovement();RestoreParkourRunExit();EndAirWeaponHang();CancelParkour();CancelWireRecall();EndGlide();
+ ResetDashSmear();RestoreWallJumpMovement();RestoreParkourRunExit();EndAirWeaponHang();CancelParkour();CancelWireRecall();EndGlide();
  for(const auto& Segment:WireSegments) if(Segment) Segment->DestroyComponent();
  if(JumpVortexComponent) JumpVortexComponent->DestroyComponent();
  if(DashDrillComponent) DashDrillComponent->DestroyComponent();
@@ -69,7 +70,7 @@ bool UBBSBTraversalComponent::TryJump()
 {
  if (!IsValid(Character)) return false;
  const auto* PC=Cast<APlayerController>(Character->GetController());
- if (!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored()) return false;
+ if (!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || IsWireTraversalActive()) return false;
  if(ParkourMode==EBBSBParkourMode::LedgeHang)
  {
   const FVector Input=Character->FieldActions ? Character->FieldActions->MovementDashDirection():-LedgeNormal;
@@ -77,8 +78,6 @@ bool UBBSBTraversalComponent::TryJump()
  }
  if(ParkourMode==EBBSBParkourMode::WallSlide) return TryWallJump();
  if(IsParkourActive()) return false;
- if(bWireArrival) return WireArrival==EBBSBWireArrival::Wall ? TryWallJump():false;
- if(bWirePulling) { CancelWireRecall();return true; }
  if (Character->FieldActions && !Character->FieldActions->CanStartJump()) return false;
  if (Character->Combat && (!Character->Combat->CanAttack() || Character->Combat->bDead)) return false;
  if (IsBunniarTraversalActive()) { ReleaseForFall();return true; }
@@ -123,29 +122,8 @@ void UBBSBTraversalComponent::ReleaseForFall()
 }
 bool UBBSBTraversalComponent::TryGlideDash()
 {
- if (!bGliding || bGlideDashing || bAirLiftPending || !Character || !Character->FieldActions || !IsValid(Glider)) return false;
- const auto* PC=Cast<APlayerController>(Character->GetController());
- if (!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored()) return false;
- if(bWireArrival) return false;
- if(bWirePulling) { CancelWireRecall();return true; }
- if (Character->FieldActions && !Character->FieldActions->CanStartJump()) return false;
- GlideDashDirection=Character->FieldActions->MovementDashDirection();
- if (GlideDashDirection.IsNearlyZero()) GlideDashDirection=Character->GetActorForwardVector().GetSafeNormal2D();
- GlideDashTangent=GlideDashDirection;
- // Bunniar's whole-body air dash interrupts the conductor action, unlike a leg-only dash.
- const int32 Pending=Character->FieldActions->PendingEquipmentId;
- Character->FieldActions->ResetActionState();Character->FieldActions->PendingEquipmentId=Pending;
- auto* Move=Character->GetCharacterMovement();
- Character->StopJumping();Move->ClearAccumulatedForces();
- bGliding=false;bGlideDashing=true;bAirLiftPending=false;GlideDashElapsed=0;GlideDashStartedAt=GetWorld()->GetTimeSeconds();GlideDashStartZ=Character->GetActorLocation().Z;
- DoubleJumpAge=-1;DoubleJumpYaw=0;GlideHandAlpha=1;
- if(JumpVortexComponent) JumpVortexComponent->DeactivateImmediate();
- StartMotionEffect(DashDrillComponent,Presentation ? Presentation->AirDashDrill.Get():nullptr);
- SavedFallingBraking=Move->BrakingDecelerationFalling;SavedFallingFriction=Move->FallingLateralFriction;bDashPhysicsSaved=true;
- Move->BrakingDecelerationFalling=0;Move->FallingLateralFriction=0;Move->AirControl=0;
- Move->GravityScale=0;Move->Velocity.Z=0;
- DashInitialVelocity=Move->Velocity;PreviousDashPosition=Character->GetActorLocation();PreviousDashStep=0;DashDistanceTravelled=0;
- Character->ConsumeMovementInputVector();return true;
+ // Kept for old Blueprint references. The dedicated air drill has been retired.
+ return false;
 }
 bool UBBSBTraversalComponent::PrepareSurfaceAttachment()
 {
@@ -272,7 +250,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
  Super::TickComponent(DT,Type,Function);
  if (!IsValid(Character)) return;
  RestoreParkourRunExit();TickWallJumpMovement();auto* Move=Character->GetCharacterMovement();
- TickWireMovement(DT);
+ TickWireMovement(DT);TickWireRecharge(DT);
  TickParkour(DT);
  TickMovementEffects(DT);
  ParkourPoseAlpha=FMath::FInterpConstantTo(ParkourPoseAlpha,IsParkourActive() ? 1.f:0.f,DT,IsParkourActive() ? 16.f:10.f);

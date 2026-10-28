@@ -14,6 +14,7 @@ class UNiagaraSystem;
 class UNiagaraComponent;
 class USplineMeshComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UPrimitiveComponent;
 struct FMinimalViewInfo;
 
@@ -62,6 +63,11 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Running",meta=(ClampMin="25",Units="cm")) float FootstepSpacing=90.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash") TObjectPtr<UNiagaraSystem> DashBurst;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash") TObjectPtr<UNiagaraSystem> DashWake;
+ /** A skinned overlay stretches the current full-body pose opposite the dash. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash smear") bool bEnableDashSmear=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash smear") TObjectPtr<UMaterialInterface> DashSmearMaterial;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash smear",meta=(ClampMin="0",ClampMax="120",Units="cm")) float DashSmearLength=65.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash smear",meta=(ClampMin="0",ClampMax="1")) float DashSmearOpacity=.28f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Dash",meta=(ClampMin=".025",Units="s")) float DashWakeInterval=.055f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Wall") TObjectPtr<UNiagaraSystem> WallGrabBurst;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects|Wall") TObjectPtr<UNiagaraSystem> WallSlideSmoke;
@@ -131,10 +137,25 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Air attack",meta=(ClampMin="0.05",ClampMax="0.4",Units="s")) float AirWeaponLiftSeconds=.16f;
  UFUNCTION(BlueprintCallable,Category="BBSB|Wire") bool TryWireRecall(ABBSBBunniarCompanion* Buddy);
  UFUNCTION(BlueprintCallable,Category="BBSB|Wire") void CancelWireRecall();
- UFUNCTION(BlueprintPure,Category="BBSB|Wire") bool IsWireTraversalActive() const { return bWirePulling || bWireArrival; }
+ UFUNCTION(BlueprintPure,Category="BBSB|Wire") bool IsWireTraversalActive() const { return bWirePulling || bWireArrival || bWireRecovering; }
  void UpdateWirePresentation();
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWirePulling=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWireArrival=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWireRecovering=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") int32 WireCharges=2;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") float WireRechargeProgress=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") bool bWireOnRechargeSurface=false;
+ // A fresh ground/wall contact starts recharge; it continues in air until a wire is spent.
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") bool bWireRechargeArmed=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire charges",meta=(ClampMin=".5",Units="s")) float WireRechargeSeconds=2.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire recovery",meta=(ClampMin=".35",ClampMax="1",Units="s")) float WireRecoverySeconds=.5f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire recovery",meta=(ClampMin=".15",ClampMax=".5",Units="s")) float WireSpinSeconds=.3f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire recovery",meta=(ClampMin="0",ClampMax="1")) float WireMomentumRetention=.65f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire recovery",meta=(ClampMin="50",ClampMax="300",Units="cm/s")) float WireCatchFallSpeed=140.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire recovery") float WireRecoveryAge=-1;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire recovery") float WireRecoveryYaw=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire recovery") float WireCatchAlpha=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire recovery") FVector WireRecoveryVelocity=FVector::ZeroVector;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") EBBSBWireArrival WireArrival=EBBSBWireArrival::Air;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") FVector WireDirection=FVector::ForwardVector;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") FVector WireAnchor=FVector::ZeroVector;
@@ -142,7 +163,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") float WirePoseAlpha=0;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="100",Units="cm/s")) float WireSpeed=1800.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="100",Units="cm/s^2")) float WireAcceleration=5500.f;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0",Units="cm/s")) float WireAirExitSpeed=240.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0",Units="cm/s")) float WireAirExitSpeed=950.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0.1",ClampMax="1",Units="s")) float WireArrivalSeconds=.25f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0.1",ClampMax="2",Units="s")) float WireWallContactSeconds=.5f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0",ClampMax="1",Units="s")) float WireWallSlideStartsAt=.3f;
@@ -275,11 +296,21 @@ private:
  uint64 ClimbCameraFrame=MAX_uint64;
  bool bClimbQueued=false;
  void TickWireMovement(float DeltaTime);
+ void TickWireRecharge(float DeltaTime);
+ void FinishWireRecovery();
+ double WireRecoveryStartedAt=0;
  void ArriveFromWire();
  void RestoreWireMovement(bool bGrounded);
  float DashHeightAt(float Age) const;
  void SpawnSmoke(UNiagaraSystem* System,const FVector& Position,const FVector& Normal,float Strength);
  void TickMovementEffects(float DeltaTime);
+ void UpdateDashSmear(float DeltaTime,bool bDashing);
+ void ResetDashSmear();
+ UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> DashSmearMID;
+ UPROPERTY(Transient) TObjectPtr<UMaterialInterface> SavedDashOverlay;
+ FVector DashSmearDirection=FVector::ForwardVector;
+ float DashSmearAlpha=0,DashSmearSavedBounds=1;
+ bool bDashSmearOverlaySaved=false;
  bool bFootContact[2]={false,false},bEffectWasDashing=false,bEffectWasOnWall=false;
  float FootstepTravel=0;
  double LastFootstepEffectAt=-100,LastDashWakeAt=-100,LastWallSlideEffectAt=-100;

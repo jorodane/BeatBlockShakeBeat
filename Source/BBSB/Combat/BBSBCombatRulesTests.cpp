@@ -140,4 +140,16 @@ bool FBBSBRhythmSocketTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Each complete Ecstatic level increases later damage"),BBSBCombatRules::EcstaticDamageMultiplier(175)>1.f);
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBBSBBodyContactTest,"BBSB.Combat.Projectile.PhysicalBodyContact",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBBSBBodyContactTest::RunTest(const FString& Parameters)
+{
+ FVector Hit;float T=0;
+ TestTrue(TEXT("A high-speed shot finds the first physical capsule surface"),BBSBCombatRules::SweptCapsuleContact(FVector(1000,0,0),FVector(-1000,0,0),FVector::ZeroVector,42,92,10,Hit,T) && FMath::Abs(Hit.X-52)<.04f && T>0 && T<1);
+ TestFalse(TEXT("A path through the former wide input plane can miss the player"),BBSBCombatRules::SweptCapsuleContact(FVector(1000,100,0),FVector(-1000,100,0),FVector::ZeroVector,42,92,10,Hit,T));
+ TestTrue(TEXT("The rounded head of the capsule is hittable"),BBSBCombatRules::SweptCapsuleContact(FVector(1000,0,80),FVector(-1000,0,80),FVector::ZeroVector,42,92,10,Hit,T) && Hit.X>40 && Hit.X<44);
+ TestFalse(TEXT("An overhead near miss causes no body contact"),BBSBCombatRules::SweptCapsuleContact(FVector(1000,0,140),FVector(-1000,0,140),FVector::ZeroVector,42,92,10,Hit,T));
+ TestFalse(TEXT("Moving off the frozen trajectory avoids collision"),BBSBCombatRules::SweptCapsuleContact(FVector(1000,0,0),FVector(-1000,0,0),FVector(0,150,0),42,92,10,Hit,T));
+ return true;
+}
+
 #endif
