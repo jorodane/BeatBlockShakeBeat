@@ -123,7 +123,7 @@ void UBBSBCombatComponent::TickComponent(float DT,ELevelTick TickType,FActorComp
 		Move->Velocity.X=Move->Velocity.Y=0;
 	}
 	SetStageCameraLock(IsStageLocked());
-	if (Boom) { Boom->TargetArmLength=IsStageLocked() ? CombatCameraDistance:OriginalArmLength; Boom->SocketOffset=OriginalSocketOffset; }
+	if (Boom) { Boom->TargetArmLength=IsStageLocked() ? CombatCameraDistance:OriginalArmLength; Boom->SocketOffset=OriginalSocketOffset+(IsStageLocked() ? CombatCameraOffset:FVector::ZeroVector); }
 	if (Camera) Camera->SetRelativeRotation(CameraRelativeRotation);
 	if (!IsStageLocked() && PracticeFocus.IsValid() && GetWorld()->GetTimeSeconds()<PracticeFocusUntil)
 	{
@@ -160,6 +160,7 @@ void UBBSBCombatComponent::SetStageCameraLock(bool bLocked)
 			PC->SetInputMode(FInputModeGameAndUI().SetHideCursorDuringCapture(false).SetLockMouseToViewportBehavior(EMouseLockMode::LockInFullscreen));
 		}
 		PC->RotationInput=FRotator::ZeroRotator;
+		CombatViewRotation.Pitch=CombatCameraPitch;
 		PC->SetControlRotation(CombatViewRotation);
 		if (Boom) { Boom->bEnableCameraLag=false; Boom->bEnableCameraRotationLag=false; }
 	}
@@ -175,7 +176,7 @@ void UBBSBCombatComponent::SetStageCameraLock(bool bLocked)
 bool UBBSBCombatComponent::IsStageLocked() const { return IsValid(Stage) && Stage->IsActive(); }
 bool UBBSBCombatComponent::BlocksMovement() const
 {
-	return bDead || (IsStageLocked() && (bCombatStance || Stage->Phase==EBBSBStagePhase::Forming || Stage->Phase==EBBSBStagePhase::CountIn));
+	return bDead || (IsStageLocked() && ((bCombatStance && !Stage->IsCounterWindow()) || Stage->Phase==EBBSBStagePhase::Forming || Stage->Phase==EBBSBStagePhase::CountIn));
 }
 bool UBBSBCombatComponent::CanAttack() const
 {
@@ -240,7 +241,7 @@ void UBBSBCombatComponent::EnemyStruck(ABBSBInkEnemy* Enemy)
 void UBBSBCombatComponent::AttachStage(ABBSBCombatStage* NewStage)
 {
 	Stage=NewStage; bCombatStance=true; ClearParry();DefenseCombo=BrokenDefenseCombo=0;
-	CombatViewRotation=FRotator(0,(Stage->GetActorLocation()-Character->GetActorLocation()).Rotation().Yaw,0);
+	CombatViewRotation=FRotator(CombatCameraPitch,(Stage->GetActorLocation()-Character->GetActorLocation()).Rotation().Yaw,0);
 	SetStageCameraLock(true);
 	if (IsValid(SelectedEnemy)) SelectedEnemy->SetSelected(false);
 	SelectedEnemy=Stage->Front;
@@ -390,6 +391,7 @@ void UBBSBCombatComponent::GoToPractice()
 	ResetEncounter();
 	for (TActorIterator<ABBSBCombatPracticeArea> It(GetWorld()); It; ++It)
 	{
+	 if(!It->bSpawnEnemies) continue;
 		Character->SetActorLocation(It->EntryLocation(),false,nullptr,ETeleportType::TeleportPhysics);
 		if (AController* PC=Character->GetController())
 		{
@@ -400,7 +402,7 @@ void UBBSBCombatComponent::GoToPractice()
 		for (TActorIterator<ABBSBInkEnemy> Enemy(GetWorld()); Enemy; ++Enemy)
 		{
 			const float Distance=FVector::DistSquared(Enemy->GetActorLocation(),Character->GetActorLocation());
-			if (!Enemy->bDefeated && Enemy->EncounterID==It->EncounterID && Distance<Closest) { Closest=Distance; PracticeFocus=*Enemy; }
+			if (!Enemy->bDefeated && (Enemy->PracticeArea==*It || Enemy->EncounterID==It->EncounterID) && Distance<Closest) { Closest=Distance; PracticeFocus=*Enemy; }
 		}
 		PracticeFocusUntil=GetWorld()->GetTimeSeconds()+0.45;
 		return;
@@ -410,7 +412,7 @@ void UBBSBCombatComponent::GoToPractice()
 void UBBSBCombatComponent::NextExperiment()
 {
 	ResetEncounter();
-	for (TActorIterator<ABBSBCombatPracticeArea> It(GetWorld()); It; ++It) { It->CycleExperiment(); break; }
+	for (TActorIterator<ABBSBCombatPracticeArea> It(GetWorld()); It; ++It) if(It->bSpawnEnemies) { It->CycleExperiment(); break; }
 }
 void UBBSBCombatComponent::NextCameraExperiment()
 {
@@ -480,12 +482,14 @@ void ABBSBInkEnemy::Tick(float DT)
 		const FRotator Facing=(Stage->Player->GetOwner()->GetActorLocation()-GetActorLocation()).Rotation();
 		SetActorRotation(FMath::RInterpTo(GetActorRotation(),FRotator(0,Facing.Yaw,0),DT,5));
 	}
-	BBSBCombatVisuals::Tint(Body,GetWorld()->GetTimeSeconds()<HitFlashUntil ? FLinearColor(0.9f,0.65f,0.7f) : this->Tint);
+ const bool Counter=Stage && Stage->IsCounterWindow();
+	BBSBCombatVisuals::Tint(Body,GetWorld()->GetTimeSeconds()<HitFlashUntil ? FLinearColor(0.9f,0.65f,0.7f) : Counter ? FLinearColor(.94f,.73f,.34f):this->Tint);
 	if (APlayerCameraManager* Camera=UGameplayStatics::GetPlayerCameraManager(this,0)) Label->SetWorldRotation((Camera->GetCameraLocation()-Label->GetComponentLocation()).Rotation());
 }
 float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AController* InstigatorController,AActor* Causer)
 {
 	if (bDefeated || Amount<=0) return 0;
+ if(Stage && Stage->IsCounterWindow()) Amount*=Stage->CounterDamageMultiplier;
 	LastDamageTaken=FMath::Min(Amount,Health); Health=FMath::Max(0.f,Health-Amount);
 	HitFlashUntil=GetWorld()->GetTimeSeconds()+0.13; UpdateLabel();
 	if (Health<=0)
@@ -520,7 +524,7 @@ void ABBSBInkEnemy::ResetEnemy()
 }
 FVector ABBSBInkEnemy::GetAimPoint() const { return GetActorLocation()+FVector(0,0,10); }
 void ABBSBInkEnemy::SetSelected(bool bSelected) { Body->SetRenderCustomDepth(bSelected); Body->SetCustomDepthStencilValue(bSelected ? 3 : 0); }
-void ABBSBInkEnemy::UpdateLabel() { Label->SetText(FText::FromString(FString::Printf(TEXT("%s%s  %.0f"),bFront ? TEXT("FRONT  ") : TEXT(""),*EnemyName.ToString(),Health))); }
+void ABBSBInkEnemy::UpdateLabel() { Label->SetText(FText::FromString(FString::Printf(TEXT("%s%s  %.0f"),Stage && Stage->IsCounterWindow() ? TEXT("OPEN!  "):bFront ? TEXT("FRONT  ") : TEXT(""),*EnemyName.ToString(),Health))); }
 
 ABBSBCombatPracticeArea::ABBSBCombatPracticeArea()
 {
@@ -530,6 +534,10 @@ void ABBSBCombatPracticeArea::BeginPlay()
 {
 	Super::BeginPlay();
 	if (!bSpawnEnemies) return;
+ SpawnPracticeEnemies();
+}
+void ABBSBCombatPracticeArea::SpawnPracticeEnemies()
+{
 	const FVector Offsets[]={FVector(0,0,0),FVector(210,-170,0),FVector(240,180,0),FVector(700,150,0)};
 	const FName Names[]={TEXT("Quill"),TEXT("Waver"),TEXT("Ribbon"),TEXT("Latecomer")};
 	for (int32 Index=0; Index<FMath::Clamp(EnemyCount,1,4); ++Index)
@@ -539,7 +547,7 @@ void ABBSBCombatPracticeArea::BeginPlay()
 		const FTransform Transform(GetActorRotation()+FRotator(0,180,0),Location);
 		ABBSBInkEnemy* Enemy=GetWorld()->SpawnActorDeferred<ABBSBInkEnemy>(ABBSBInkEnemy::StaticClass(),Transform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 		if (!Enemy) continue;
-		Enemy->EnemyName=Names[Index]; Enemy->EncounterID=EncounterID; Enemy->MaximumHealth=EnemyHealth;
+		Enemy->PracticeArea=this; Enemy->EnemyName=Names[Index]; Enemy->EncounterID=EncounterID; Enemy->MaximumHealth=EnemyHealth;
 		Enemy->MainPattern=Index<2 ? EBBSBInkPattern::Tap : EBBSBInkPattern::Hold;
 		Enemy->Tint=Index==0 ? FLinearColor(0.43f,0.35f,0.51f) : Index==1 ? FLinearColor(0.36f,0.5f,0.53f) : FLinearColor(0.58f,0.38f,0.44f);
 		UGameplayStatics::FinishSpawningActor(Enemy,Transform);
@@ -555,7 +563,7 @@ void ABBSBCombatPracticeArea::CycleExperiment()
 	ExperimentPreset=(ExperimentPreset+1)%5;
 	for (TActorIterator<ABBSBInkEnemy> It(GetWorld()); It; ++It)
 	{
-		if (It->EncounterID!=EncounterID) continue;
+		if (It->PracticeArea!=this && It->EncounterID!=EncounterID) continue;
 		It->MainPattern=ExperimentPreset==1 ? EBBSBInkPattern::Curve : ExperimentPreset==2 ? EBBSBInkPattern::Hold : ExperimentPreset==3 ? EBBSBInkPattern::Bounce : ExperimentPreset==4 ? EBBSBInkPattern::Area : It->AuthoredPattern;
 	}
 	if (APlayerController* PC=UGameplayStatics::GetPlayerController(this,0))

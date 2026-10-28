@@ -129,6 +129,8 @@ struct FBBSBParryTimingHistory
 
 namespace BBSBCombatRules
 {
+ inline bool CanOpenCounter(double Beat,double EarliestBeat,bool bHasPendingNotes,int32 IncomingAttacks)
+ { return Beat>=EarliestBeat && !bHasPendingNotes && IncomingAttacks==0; }
 	/** Runtime comparison only. Authored arrays and movement/conductor permissions stay intact. */
 	inline FBBSBWeaponActionRule WeaponRuleForPreset(const FBBSBWeaponActionRule& Authored, EBBSBWeaponCommitment Preset)
 	{

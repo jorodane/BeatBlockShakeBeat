@@ -11,6 +11,7 @@
 class ABBSBInkEnemy;
 class ABBSBCombatStage;
 class ABBSBInkProjectile;
+class ABBSBCombatPracticeArea;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class USpringArmComponent;
@@ -44,7 +45,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Parry") float BlockWindow=0.15f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Parry") float EarlyWindow=0.28f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Parry") FVector2D ParryHalfSize=FVector2D(145,125);
+ // Mid-flight separation (horizontal / vertical) returns to the frozen physical body target at impact.
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Parry",meta=(ClampMin="0",Units="cm")) FVector2D IncomingPathSpread=FVector2D(110,75);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Camera") float CombatCameraDistance=250.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Camera",meta=(Units="cm")) FVector CombatCameraOffset=FVector(0,60,65);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Camera",meta=(ClampMin="-30",ClampMax="10",Units="deg")) float CombatCameraPitch=-7.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Camera") float CameraFollowSpeed=3.0f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Combat") bool bCombatStance=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Combat") bool bDead=false;
@@ -85,8 +90,15 @@ public:
  UFUNCTION(BlueprintPure,Category="BBSB|Defense") uint8 HeldParryMask() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Defense") bool IsDefenseMotionActive() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Defense") FVector DefenseTarget(int32 Direction) const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Defense|Cues") bool bShowDefenseDirectionCues=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Defense|Cues",meta=(ClampMin=".5",ClampMax="2")) float DefenseCueScale=1.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Defense|Cues") FLinearColor DefenseCueColor=FLinearColor(1.f,.83f,.32f);
+ /** Up/right/down/left: seconds to physical contact inside BlockWindow; -1 means no available parry. */
+ UFUNCTION(BlueprintPure,Category="BBSB|Defense|Cues") TArray<float> DefenseCueTimes() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Defense|Cues") int32 DefenseCueMask() const;
  void GetDefensePose(UAnimSequence*& Clip,float& Time,float& Weight) const;
  void DrawDefenseFeedback(AHUD* HUD,UCanvas* Canvas) const;
+ void DrawDefenseDirectionCues(AHUD* HUD,UCanvas* Canvas) const;
 	bool BlocksMovement() const;
 	bool IsStageLocked() const;
 	bool CanAttack() const;
@@ -171,7 +183,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Enemy") float MoveSpeed=210.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Enemy") FLinearColor Tint=FLinearColor(0.42f,0.36f,0.55f);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Enemy") EBBSBInkPattern MainPattern=EBBSBInkPattern::Tap;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Attack phrase") TArray<EBBSBParryDirection> AttackDirections={EBBSBParryDirection::Up,EBBSBParryDirection::Right,EBBSBParryDirection::Left};
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Enemy") int32 EncounterID=1;
+ // Possession assigns Actor.Owner to the AI controller; keep the spawning area's identity separately.
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Practice") TObjectPtr<ABBSBCombatPracticeArea> PracticeArea;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") bool bDefeated=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") bool bFront=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") TObjectPtr<ABBSBCombatStage> Stage;
@@ -201,6 +216,18 @@ public:
 	virtual void Tick(float DT) override;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Rhythm") float BPM=110.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Pattern") bool bPreferStraightAttacks=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Exchange") bool bUseCombatExchanges=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Exchange",meta=(ClampMin="2",ClampMax="4")) float EnemyWindupBeats=2.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Exchange",meta=(ClampMin="2",ClampMax="8")) float CounterWindowBeats=3.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Exchange",meta=(ClampMin="1",ClampMax="3")) float CounterDamageMultiplier=1.35f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Exchange") bool bCounterAttackOpen=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Exchange") int32 ExchangeNumber=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Exchange") FString EnemyPatternHint;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Stage") int32 EncounterID=INDEX_NONE;
+ UFUNCTION(BlueprintPure,Category="BBSB|Exchange") bool IsCounterWindow() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Exchange") float CounterSecondsRemaining() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Exchange") int32 UnresolvedAttackCount() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Exchange") FString ExchangeHint() const;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage") float RingRadius=220.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage") float ParryDistance=570.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Stage") float JoinRadius=1000.f;
@@ -241,6 +268,11 @@ private:
 		TWeakObjectPtr<ABBSBInkEnemy> Source;
 	};
 	TArray<FNote> PendingNotes;
+ TArray<TWeakObjectPtr<ABBSBInkProjectile>> ExchangeProjectiles;
+ double ExchangeStartedBeat=0,EarliestCounterBeat=0,CounterStartedBeat=-1;
+ void BeginExchange();
+ void TickExchange();
+ void RefreshExchangeLabels();
 	TArray<TWeakObjectPtr<UStaticMeshComponent>> RingInk;
 	UPROPERTY(Transient) TObjectPtr<UAudioComponent> Metronome;
 	UPROPERTY(Transient) TObjectPtr<USoundWaveProcedural> ClickSound;
@@ -275,6 +307,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") FVector LaunchOrigin;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") FVector FrozenTarget;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") FVector FlightVelocity;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") FVector ApproachOffset=FVector::ZeroVector;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") EBBSBInkPattern Pattern=EBBSBInkPattern::Tap;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") float Age=0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") int32 HoldGroup=INDEX_NONE;
@@ -284,11 +317,14 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") TWeakObjectPtr<ABBSBInkEnemy> Source;
 	void Initialize(ABBSBCombatStage* InStage, ABBSBInkEnemy* InSource, FVector Target, EBBSBInkPattern InPattern, float FlightSeconds, int32 InHoldGroup);
 	float TimeToTarget() const { return FMath::Max(0.f,TravelSeconds-Age); }
+ /** Read-only forecast using the same trajectory, body sweep and world obstruction rules as flight. */
+ UFUNCTION(BlueprintPure,Category="BBSB|Ink") bool PredictBodyContact(ACharacter* Target,float MaxSeconds,FVector& Contact,float& Seconds) const;
 private:
 	float TravelSeconds=1.f;
 	int32 Bounces=0;
 	FVector Side=FVector::RightVector;
 	FVector PreviousPosition=FVector::ZeroVector;
+ FVector FlightPosition(float AtAge) const;
 	void ResolveAndFade();
 };
 
@@ -306,5 +342,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Practice") float EnemyHealth=110.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Practice") int32 ExperimentPreset=0;
 	void CycleExperiment();
-	FVector EntryLocation() const;
+	virtual FVector EntryLocation() const;
+ virtual void SpawnPracticeEnemies();
 };

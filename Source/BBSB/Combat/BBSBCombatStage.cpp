@@ -26,7 +26,7 @@ void ABBSBCombatStage::BeginPlay() { Super::BeginPlay(); }
 bool ABBSBCombatStage::Initialize(UBBSBCombatComponent* Combat,ABBSBInkEnemy* First)
 {
 	if (!Combat || !First || First->bDefeated) return false;
-	Player=Combat; Front=First;
+	Player=Combat; Front=First;EncounterID=First->EncounterID;
 	ACharacter* Character=Cast<ACharacter>(Combat->GetOwner());
 	if (!Character) return false;
 	FVector Center;
@@ -40,7 +40,7 @@ bool ABBSBCombatStage::Initialize(UBBSBCombatComponent* Combat,ABBSBInkEnemy* Fi
 	Character->SetActorLocation(PlayerLocation,false,nullptr,ETeleportType::TeleportPhysics);
 	Character->SetActorRotation(PlayerLineFacing.Rotation());
 	Character->GetCharacterMovement()->StopMovementImmediately();
-	for (TActorIterator<ABBSBCombatPracticeArea> It(GetWorld()); It; ++It) if (It->EncounterID==First->EncounterID) { SetExperiment(It->ExperimentPreset); break; }
+	for (TActorIterator<ABBSBCombatPracticeArea> It(GetWorld()); It; ++It) if (First->PracticeArea==*It || It->EncounterID==First->EncounterID) { SetExperiment(It->ExperimentPreset); break; }
 	EnteredAt=GetWorld()->GetTimeSeconds(); MusicEpoch=EnteredAt+0.18+3.0*60.0/BPM;
 	if (UBBSBFieldActionComponent* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>()) Actions->InterruptAction(EBBSBActionState::Transition,float(MusicEpoch-EnteredAt));
 	AddMember(First);
@@ -91,7 +91,7 @@ bool ABBSBCombatStage::FindFormation(ACharacter* Character,FVector& OutPlayer)
 
 void ABBSBCombatStage::AddMember(ABBSBInkEnemy* Enemy)
 {
-	if (!IsValid(Enemy) || Enemy->bDefeated || Members.Contains(Enemy) || (Enemy->Stage && Enemy->Stage!=this)) return;
+	if (!IsValid(Enemy) || Enemy->bDefeated || Enemy->EncounterID!=EncounterID || Members.Contains(Enemy) || (Enemy->Stage && Enemy->Stage!=this)) return;
 	Members.Add(Enemy); Enemy->JoinStage(this,Enemy==Front);
 	if (Members.Num()>1) ++Joins;
 	RingRadius=220.f+FMath::Max(0,Members.Num()-2)*45.f;
@@ -163,6 +163,9 @@ void ABBSBCombatStage::Tick(float DT)
 	if (ClickBeat!=LastClickBeat) { LastClickBeat=ClickBeat; Click(ClickBeat); }
 	if (Phase==EBBSBStagePhase::Fighting && !bPausePatternEmission)
 	{
+	 if(bUseCombatExchanges && ExperimentPreset==0) TickExchange();
+	 else
+	 {
 		while (NextBar*8.0<=CurrentBeat+0.25) PlanBar(NextBar++);
 		for (int32 Index=0; Index<PendingNotes.Num();)
 		{
@@ -172,12 +175,17 @@ void ABBSBCombatStage::Tick(float DT)
 			}
 			else ++Index;
 		}
+	 }
 	}
 	if (Now>=NextJoinCheck)
 	{
 		NextJoinCheck=Now+0.5;
 		for (TActorIterator<ABBSBInkEnemy> It(GetWorld()); It; ++It)
-			if (!It->Stage && !It->bDefeated && FVector::DistSquared(It->GetActorLocation(),GetActorLocation())<FMath::Square(JoinRadius)) AddMember(*It);
+			if (!It->Stage && !It->bDefeated && It->EncounterID==EncounterID && FVector::DistSquared(It->GetActorLocation(),GetActorLocation())<FMath::Square(JoinRadius))
+   {
+    FHitResult Cover;FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBReinforcementCover),false,*It);Q.AddIgnoredActor(Front);
+    if(!GetWorld()->LineTraceSingleByObjectType(Cover,It->GetAimPoint(),GetActorLocation()+FVector(0,0,70),GeometryTypes(),Q)) AddMember(*It);
+   }
 	}
 	const float Distance=FVector::Dist2D(Player->GetOwner()->GetActorLocation(),GetActorLocation());
 	FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBAggro),false,this); Query.AddIgnoredActor(Player->GetOwner());
@@ -199,7 +207,7 @@ void ABBSBCombatStage::UpdateFormation(float DT)
 	FVector TowardPlayer=(PlayerPosition-GetActorLocation()).GetSafeNormal2D();
 	if (TowardPlayer.IsNearlyZero()) TowardPlayer=-PlayerLineFacing;
 	const float Distance=FVector::Dist2D(PlayerPosition,GetActorLocation());
-	if (!Player->bCombatStance && Distance>ParryDistance+140 && Phase==EBBSBStagePhase::Fighting)
+	if (!IsCounterWindow() && !Player->bCombatStance && Distance>ParryDistance+140 && Phase==EBBSBStagePhase::Fighting)
 	{
 		const FVector Proposed=GetActorLocation()+TowardPlayer*FMath::Min(ChaseSpeed*DT,Distance-ParryDistance);
 		FVector Floor; FHitResult Obstacle;
@@ -297,7 +305,21 @@ void ABBSBCombatStage::Launch(const FNote& Note)
 			FVector Floor; if (Ground(GetWorld(),Player->GetOwner()->GetActorLocation(),Floor)) Target=Floor+FVector(0,0,3);
 		}
 		ABBSBInkProjectile* Shot=GetWorld()->SpawnActor<ABBSBInkProjectile>(ABBSBInkProjectile::StaticClass(),Source->GetAimPoint(),FRotator::ZeroRotator);
-		if (Shot) { Shot->Initialize(this,Source,Target,Note.Pattern,Flight,Note.HoldGroup); ++ShotsFired; }
+		if (Shot)
+  {
+   Shot->Initialize(this,Source,Target,Note.Pattern,Flight,Note.HoldGroup);
+   if(Note.Pattern!=EBBSBInkPattern::Area && Note.Pattern!=EBBSBInkPattern::Bounce)
+   {
+    const float Width=FMath::Max(0.f,float(Player->IncomingPathSpread.X)),Height=FMath::Max(0.f,float(Player->IncomingPathSpread.Y));
+    // Raise the fan's center so the lower lane remains above the floor.
+    Shot->ApproachOffset=FVector::UpVector*Height;
+    if(Direction==0) Shot->ApproachOffset+=FVector::UpVector*Height;
+    else if(Direction==2) Shot->ApproachOffset-=FVector::UpVector*Height;
+    else Shot->ApproachOffset+=Right*(Direction==1 ? Width:-Width);
+   }
+   if(bUseCombatExchanges && ExperimentPreset==0) ExchangeProjectiles.Add(Shot);
+   ++ShotsFired;
+  }
 	}
 }
 
@@ -342,6 +364,8 @@ bool ABBSBCombatStage::StartReplacement(bool bRequireClear,ABBSBInkEnemy* Exclud
 	if (IsValid(Front) && Front!=Next) { Front->bFront=false; Front->UpdateLabel(); }
 	Front=Next; Front->JoinStage(this,true); ++FrontReplacements; Phase=EBBSBStagePhase::Replacing;
 	PendingNotes.Reset(); UpdateFormation(0);
+ bCounterAttackOpen=false;ExchangeNumber=0;CounterStartedBeat=-1;
+ RefreshExchangeLabels();
 	ReplacementBestDistance=FVector::Dist2D(Front->GetActorLocation(),GetActorLocation());
 	ReplacementProgressAt=GetWorld()->GetTimeSeconds();
 	if (Player) Player->SetFeedback(TEXT("FRONT CHANGE  |  incoming ink keeps flying"));
@@ -359,6 +383,7 @@ void ABBSBCombatStage::Dissolve(bool bAllDefeated)
 	if (!IsActive()) return;
 	Phase=bAllDefeated ? EBBSBStagePhase::Victory : EBBSBStagePhase::Dissolved;
 	PendingNotes.Reset();
+ bCounterAttackOpen=false;CounterStartedBeat=-1;
 	if (bAllDefeated) ClearStageProjectiles();
 	for (ABBSBInkEnemy* Member:Members) if (IsValid(Member)) { Member->Stage=nullptr; Member->bFront=false; Member->UpdateLabel(); }
 	for (auto& Part:RingInk) if (Part.IsValid()) Part->SetVisibility(false);

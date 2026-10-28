@@ -8,6 +8,17 @@
 
 using namespace BBSBCombatVisuals;
 
+namespace
+{
+ FCollisionQueryParams InkFlightQuery(const ABBSBInkProjectile* Shot,const APawn* Pawn)
+ {
+  FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBInkFlight),false,Shot);
+  if(Pawn) Query.AddIgnoredActor(Pawn);
+  for(TActorIterator<ABBSBInkEnemy> It(Shot->GetWorld());It;++It) Query.AddIgnoredActor(*It);
+  return Query;
+ }
+}
+
 ABBSBInkProjectile::ABBSBInkProjectile()
 {
 	PrimaryActorTick.bCanEverTick=true; PrimaryActorTick.TickGroup=TG_PostPhysics;
@@ -46,15 +57,62 @@ void ABBSBInkProjectile::ResolveAndFade()
 	if (bResolved) return; bResolved=true;
 	Body->SetVisibility(false); SetLifeSpan(0.06f);
 }
+FVector ABBSBInkProjectile::FlightPosition(float AtAge) const
+{
+ FVector Position=LaunchOrigin+FlightVelocity*AtAge;
+ const float Progress=FMath::Clamp(AtAge/TravelSeconds,0.f,1.f);
+ // Settle before body contact: decorative motion must not change the authored defense direction.
+ const float ShapeWeight=1.f-FMath::SmoothStep(.65f,.85f,Progress);
+ if(Pattern==EBBSBInkPattern::Curve)
+ {
+  const FVector CurveSide=FVector::DotProduct(Side,ApproachOffset)<0 ? -Side:Side;
+  Position+=CurveSide*(140.f*FMath::Sin(PI*AtAge/TravelSeconds)*ShapeWeight);
+ }
+ if(Pattern==EBBSBInkPattern::Zigzag) Position+=Side*(55.f*FMath::Sin(4*PI*AtAge/TravelSeconds)*ShapeWeight);
+ return Position+ApproachOffset*(FMath::Sin(PI*Progress)*ShapeWeight);
+}
+bool ABBSBInkProjectile::PredictBodyContact(ACharacter* Target,float MaxSeconds,FVector& Contact,float& Seconds) const
+{
+ Contact=FVector::ZeroVector;Seconds=-1.f;
+ if(bResolved || Pattern==EBBSBInkPattern::Area || !IsValid(Target) || !GetWorld() || !FMath::IsFinite(MaxSeconds) || MaxSeconds<=0) return false;
+ const auto* Capsule=Target->GetCapsuleComponent();
+ const float Radius=Capsule ? Capsule->GetScaledCapsuleRadius():35.f,Half=Capsule ? Capsule->GetScaledCapsuleHalfHeight():92.f;
+ const float Horizon=GetLifeSpan()>0 ? FMath::Min(MaxSeconds,GetLifeSpan()):MaxSeconds;
+ const float Reach=FlightVelocity.Size()*Horizon+2.f*ApproachOffset.Size()+280.f+Half+Radius;
+ if(FVector::DistSquared(GetActorLocation(),Target->GetActorLocation())>FMath::Square(Reach)) return false;
+ const auto Query=InkFlightQuery(this,Target);
+ const int32 Steps=FMath::Clamp(FMath::CeilToInt(Horizon/.0125f),1,128);
+ const float Step=Horizon/Steps;
+ FVector Previous=GetActorLocation(),Velocity=FlightVelocity;int32 ForecastBounces=Bounces;
+ for(int32 Index=0;Index<Steps;++Index)
+ {
+  const float Elapsed=(Index+1)*Step;
+  FVector Next=Pattern==EBBSBInkPattern::Bounce ? Previous+Velocity*Step:FlightPosition(Age+Elapsed);
+  FHitResult WorldHit;
+  const bool WorldBlocked=GetWorld()->SweepSingleByChannel(WorldHit,Previous,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(10.f),Query);
+  FVector BodyContact;float Fraction=1.f;
+  if(BBSBCombatRules::SweptCapsuleContact(Previous,Next,Target->GetActorLocation(),Radius,Half,10.f,BodyContact,Fraction)
+   && (!WorldBlocked || FVector::Dist(Previous,BodyContact)<=WorldHit.Distance))
+  {
+   Contact=BodyContact;Seconds=Index*Step+Fraction*Step;return true;
+  }
+  if(WorldBlocked)
+  {
+   if(Pattern!=EBBSBInkPattern::Bounce || ForecastBounces>=2) return false;
+   Velocity=FMath::GetReflectionVector(Velocity,WorldHit.ImpactNormal);++ForecastBounces;
+   Next=WorldHit.Location+WorldHit.ImpactNormal*.5f;
+  }
+  Previous=Next;
+ }
+ return false;
+}
 void ABBSBInkProjectile::Tick(float DT)
 {
 	Super::Tick(DT);
 	if (bResolved) return;
 	APawn* Pawn=UGameplayStatics::GetPlayerPawn(this,0);
 	UBBSBCombatComponent* Combat=Pawn ? Pawn->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
-	FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBInkFlight),false,this);
-	if (Pawn) Query.AddIgnoredActor(Pawn);
-	for (TActorIterator<ABBSBInkEnemy> It(GetWorld()); It; ++It) Query.AddIgnoredActor(*It);
+	const auto Query=InkFlightQuery(this,Pawn);
 	if (Pattern==EBBSBInkPattern::Area)
 	{
 		Age+=DT;
@@ -80,10 +138,7 @@ void ABBSBInkProjectile::Tick(float DT)
 	for (int32 Index=0; Index<Steps && !bResolved; ++Index)
 	{
 		Age+=Step;
-		FVector Next=LaunchOrigin+FlightVelocity*Age;
-		if (Pattern==EBBSBInkPattern::Bounce) Next=PreviousPosition+FlightVelocity*Step;
-		if (Pattern==EBBSBInkPattern::Curve) Next+=Side*(140.f*FMath::Sin(PI*Age/TravelSeconds));
-		if (Pattern==EBBSBInkPattern::Zigzag) Next+=Side*(55.f*FMath::Sin(4*PI*Age/TravelSeconds));
+		FVector Next=Pattern==EBBSBInkPattern::Bounce ? PreviousPosition+FlightVelocity*Step:FlightPosition(Age);
 		FHitResult WorldHit;
 		const bool bWorldHit=GetWorld()->SweepSingleByChannel(WorldHit,PreviousPosition,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(10.f),Query);
   FVector Contact;float BodyFraction=1.f;bool bBodyHit=false;

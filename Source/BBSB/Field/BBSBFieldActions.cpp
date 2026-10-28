@@ -1242,6 +1242,16 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 			const float Pulse=Stage->BeatPulse();
 			DrawRect(FLinearColor(0.84f,0.7f,0.9f,0.4f+0.5f*Pulse),CX-60*Scale,H-180*Scale,120*Scale,4*Scale);
 			DrawText(FString::Printf(TEXT("%.0f BPM  |  %s"),Stage->BPM,Stage->Front ? *Stage->Front->EnemyName.ToString() : TEXT("")),FLinearColor(0.9f,0.83f,0.94f),CX-73*Scale,H-174*Scale,GEngine->GetSmallFont(),Scale);
+   if(Stage->Phase==EBBSBStagePhase::Fighting && Stage->bUseCombatExchanges && Stage->ExperimentPreset==0)
+   {
+    const bool Open=Stage->IsCounterWindow();
+    const FLinearColor Color=Open ? FLinearColor(1.f,.83f,.38f):FLinearColor(.95f,.7f,.79f);
+    const float Width=360.f*Scale,Y=H-226.f*Scale;
+    DrawRect(FLinearColor(.10f,.08f,.13f,.85f),CX-Width*.5f-8*Scale,Y-5*Scale,Width+16*Scale,42*Scale);
+    DrawText(Stage->ExchangeHint(),Color,CX-Width*.5f,Y,GEngine->GetSmallFont(),Scale);
+    const float Fill=Open ? Stage->CounterSecondsRemaining()/FMath::Max(.01f,Stage->CounterWindowBeats*60.f/Stage->BPM):1.f;
+    DrawRect(Color,CX-Width*.5f,Y+26*Scale,Width*FMath::Clamp(Fill,0.f,1.f),4*Scale);
+   }
 
 
 			if (Combat->FeedbackExperiment==2)

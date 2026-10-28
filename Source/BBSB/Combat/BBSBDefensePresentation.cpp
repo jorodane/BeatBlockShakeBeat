@@ -96,9 +96,9 @@ FVector UBBSBCombatComponent::DefenseTarget(int32 Direction) const
  FVector Origin,Normal,Right;GetParryPlane(Origin,Normal,Right);
  const auto* Capsule=Character ? Character->GetCapsuleComponent():nullptr;
  const float Radius=Capsule ? Capsule->GetScaledCapsuleRadius():42.f,Half=Capsule ? Capsule->GetScaledCapsuleHalfHeight():92.f;
- if(Direction==0) return Origin+FVector::UpVector*(Half*.55f);
- if(Direction==2) return Origin-FVector::UpVector*(Half*.50f);
- return Origin+Right*(Radius*.66f*(Direction==1 ? 1.f:-1.f));
+ if(Direction==0) return Origin+FVector::UpVector*(Half*.70f);
+ if(Direction==2) return Origin-FVector::UpVector*(Half*.62f);
+ return Origin+Right*(Radius*.88f*(Direction==1 ? 1.f:-1.f));
 }
 void UBBSBCombatComponent::DefenseImpact(const FVector& Point,bool bBlock)
 {
@@ -121,6 +121,7 @@ void UBBSBCombatComponent::DefenseImpact(const FVector& Point,bool bBlock)
 void UBBSBCombatComponent::DrawDefenseFeedback(AHUD* HUD,UCanvas* Canvas) const
 {
  if(!HUD || !Canvas || !GetWorld()) return;
+ DrawDefenseDirectionCues(HUD,Canvas);
  const float Age=GetWorld()->GetTimeSeconds()-LastDefenseImpactAt;
  if((!IsStageLocked() && Age>2.f) || (DefenseCombo==0 && Age>2.f)) return;
  const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.35f),X=Canvas->SizeX*.5f-75.f*S,Y=70.f*S;

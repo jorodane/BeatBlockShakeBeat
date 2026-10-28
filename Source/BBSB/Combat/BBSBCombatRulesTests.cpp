@@ -2,6 +2,16 @@
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBBSBCounterSafetyTest,"BBSB.Combat.Exchange.CounterWaitsForPacket",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBBSBCounterSafetyTest::RunTest(const FString& Parameters)
+{
+ TestFalse(TEXT("No early opening before the final contact and settling beat"),BBSBCombatRules::CanOpenCounter(4.99,5.,false,0));
+ TestFalse(TEXT("An unlaunched attack cannot be hidden by a recovery cue"),BBSBCombatRules::CanOpenCounter(5.,5.,true,0));
+ TestFalse(TEXT("A missed or bouncing projectile delays recovery until it is harmless"),BBSBCombatRules::CanOpenCounter(6.,5.,false,1));
+ TestTrue(TEXT("The opening becomes available once the complete packet is harmless"),BBSBCombatRules::CanOpenCounter(6.5,5.,false,0));
+ return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBBSBTimingHistoryTest,"BBSB.Combat.Parry.TimingCoachObservation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FBBSBTimingHistoryTest::RunTest(const FString& Parameters)
 {
