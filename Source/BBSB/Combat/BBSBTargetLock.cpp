@@ -143,9 +143,13 @@ void UBBSBCombatComponent::ApplyTargetLockCamera(FMinimalViewInfo& View)
  if(HasTargetLock())
  {
   const FVector Aim=FieldLockedTarget->GetAimPoint()-View.Location;
-  // Only the rendered view points at the exact target. It must not steer the
-  // next frame's boom; movement uses this displayed view separately.
-  if(!Aim.IsNearlyZero()) View.Rotation=Aim.Rotation();
+  // Compose below the target to keep the player's feet and nearby floor visible.
+  // Rendered pitch must not steer the next frame's orbit.
+  if(!Aim.IsNearlyZero())
+  {
+   View.Rotation=Aim.Rotation();
+   View.Rotation.Pitch=FMath::ClampAngle(View.Rotation.Pitch-FMath::Clamp(TargetLockLookDownDegrees,0.f,30.f),-85.f,85.f);
+  }
   PC->RotationInput=FRotator::ZeroRotator;return;
  }
  if(!bTargetReleaseBlending) return;

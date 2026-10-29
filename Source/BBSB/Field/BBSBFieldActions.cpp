@@ -1142,6 +1142,13 @@ void ABBSBFieldPracticeHUD::DrawHUD()
   if(const auto* PC=GetOwningPlayerController();PC && PC->bShowMouseCursor) PC->GetMousePosition(AimX,AimY);
   const float AimScale=FMath::Clamp(W/1280.f,.7f,1.4f);
   const bool Locked=Player->Combat && Player->Combat->HasTargetLock();
+  if(Locked)
+   if(const auto* PC=GetOwningPlayerController())
+   {
+    FVector2D TargetScreen;
+    if(PC->ProjectWorldLocationToScreen(Player->Combat->FieldLockedTarget->GetAimPoint(),TargetScreen,true))
+    { AimX=TargetScreen.X;AimY=TargetScreen.Y; }
+   }
   const float Radius=Locked ? FMath::Clamp(T->LockedWireGaugeRadius,40.f,180.f):34.f;
   const float OuterRadius=Radius*AimScale,InnerRadius=(Radius-8.f)*AimScale;
   const FVector2D Center(AimX,AimY+2.f*AimScale);
@@ -1174,9 +1181,10 @@ void ABBSBFieldPracticeHUD::DrawHUD()
   for(int32 I=0;I<2;++I)
   {
    const float Start=FMath::DegreesToRadians(I==0 ? 154.f:84.f),End=FMath::DegreesToRadians(I==0 ? 96.f:26.f);
-   const float Fill=I<T->WireCharges ? 1.f:I==T->WireCharges ? FMath::Clamp(T->WireRechargeProgress,0.f,1.f):0.f;
-   Arc(Start,End,1.f,FLinearColor(.24f,.20f,.31f,.85f));
-   Arc(Start,End,Fill,FLinearColor(.72f,.62f,.88f,1.f));
+   const bool Ready=I<T->WireCharges;
+   const float Fill=Ready ? 1.f:I==T->WireCharges ? FMath::Clamp(T->WireRechargeProgress,0.f,1.f):0.f;
+   Arc(Start,End,1.f,FLinearColor(.16f,.15f,.18f,.85f));
+   Arc(Start,End,Fill,Ready ? FLinearColor::White:FLinearColor(.48f,.48f,.51f,1.f));
    for(int32 Edge=0;Edge<48;++Edge)
    {
     const float A=FMath::Lerp(Start,End,float(Edge)/48.f),B=FMath::Lerp(Start,End,float(Edge+1)/48.f);
@@ -1185,6 +1193,57 @@ void ABBSBFieldPracticeHUD::DrawHUD()
    }
    Border(Point(Start,InnerRadius),Point(Start,OuterRadius));
    Border(Point(End,InnerRadius),Point(End,OuterRadius));
+   if(Ready)
+   {
+    const float Age=GetWorld()->GetTimeSeconds()-T->WireChargeReadyAt[I];
+    const float Duration=FMath::Clamp(T->WireReadyPulseSeconds,.25f,1.2f);
+    const int32 Count=FMath::Clamp(T->WireReadyPulseCount,1,5);
+    for(int32 Pulse=0;Pulse<Count;++Pulse)
+    {
+     const float Phase=(Age-Pulse*.18f)/Duration;
+     if(Phase<0.f || Phase>=1.f) continue;
+     const float Ease=1.f-FMath::Pow(1.f-Phase,3.f);
+     const float Expansion=(1.f+12.f*Ease)*AimScale;
+     // Offset the slot's own boundary: its centerline stays fixed rather than scaling away from the reticle.
+     const float RI=FMath::Max(1.f,InnerRadius-Expansion),RO=OuterRadius+Expansion;
+     const FLinearColor Color(1.f,1.f,1.f,.8f*FMath::Square(1.f-Phase));
+     const float Thickness=FMath::Lerp(2.f,.8f,Phase)*AimScale;
+     TArray<FCanvasUVTri> WaveTris;WaveTris.Reserve(260);
+     auto WaveTriangle=[&](const FVector2D& A,const FVector2D& B,const FVector2D& C)
+     {
+      FCanvasUVTri Tri;Tri.V0_Pos=A;Tri.V1_Pos=B;Tri.V2_Pos=C;
+      Tri.V0_UV=Tri.V1_UV=Tri.V2_UV=FVector2D::ZeroVector;
+      Tri.V0_Color=Tri.V1_Color=Tri.V2_Color=Color;WaveTris.Add(Tri);
+     };
+     auto WaveLine=[&](const FVector2D& A,const FVector2D& B)
+     {
+      const FVector2D D=(B-A).GetSafeNormal(),N=FVector2D(-D.Y,D.X)*(Thickness*.5f);
+      WaveTriangle(A-N,A+N,B+N);WaveTriangle(A-N,B+N,B-N);
+     };
+     for(int32 Edge=0;Edge<48;++Edge)
+     {
+      const float A=FMath::Lerp(Start,End,float(Edge)/48.f),B=FMath::Lerp(Start,End,float(Edge+1)/48.f);
+      WaveLine(Point(A,RO),Point(B,RO));WaveLine(Point(A,RI),Point(B,RI));
+     }
+     const FVector2D StartNormal(-FMath::Sin(Start),FMath::Cos(Start)),EndNormal(FMath::Sin(End),-FMath::Cos(End));
+     WaveLine(Point(Start,InnerRadius)+StartNormal*Expansion,Point(Start,OuterRadius)+StartNormal*Expansion);
+     WaveLine(Point(End,InnerRadius)+EndNormal*Expansion,Point(End,OuterRadius)+EndNormal*Expansion);
+     auto Corner=[&](const FVector2D& At,float A,float B)
+     {
+      for(int32 Edge=0;Edge<8;++Edge)
+      {
+       const float From=FMath::Lerp(A,B,float(Edge)/8.f),To=FMath::Lerp(A,B,float(Edge+1)/8.f);
+       WaveLine(At+FVector2D(FMath::Cos(From),FMath::Sin(From))*Expansion,At+FVector2D(FMath::Cos(To),FMath::Sin(To))*Expansion);
+      }
+     };
+     Corner(Point(Start,OuterRadius),Start,Start+HALF_PI);
+     Corner(Point(Start,InnerRadius),Start+HALF_PI,Start+PI);
+     Corner(Point(End,InnerRadius),End+PI,End+PI+HALF_PI);
+     Corner(Point(End,OuterRadius),End+PI+HALF_PI,End+2.f*PI);
+     // Canvas lines ignore alpha; translucent triangles give the pulse a real fade-out.
+     FCanvasTriangleItem Wave(WaveTris,GWhiteTexture);Wave.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Wave);
+    }
+   }
   }
  }
 	const double Now=GetWorld()->GetTimeSeconds();

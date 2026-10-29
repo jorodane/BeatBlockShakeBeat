@@ -35,7 +35,7 @@ bool UBBSBTraversalComponent::BeginWirePull(ABBSBBunniarCompanion* Buddy,bool Sk
   WireLocalAnchor=Surface->GetComponentTransform().InverseTransformPosition(Anchor);
   WireLocalNormal=Surface->GetComponentTransform().InverseTransformVectorNoScale(WireNormal);
  }
- --WireCharges;bWireRechargeArmed=false;Character->FieldActions->CancelEquipmentSelection();
+ --WireCharges;WireChargeReadyAt[WireCharges]=-100.;bWireRechargeArmed=false;Character->FieldActions->CancelEquipmentSelection();
  // Keep the committed anchor, but free the camera even when the anchor came from a surface lock.
  Buddy->ReleaseSurfaceView();
  if(Character->Combat) for(int32 Direction=0;Direction<4;++Direction) Character->Combat->ParryUp(Direction);
@@ -246,6 +246,10 @@ void UBBSBTraversalComponent::TickWireRecharge(float DT)
  if(WireCharges>=2) { WireRechargeProgress=0;return; }
  if(!bWireRechargeArmed) return;
  WireRechargeProgress+=FMath::Max(0.f,DT)/FMath::Max(.5f,WireRechargeSeconds);
- while(WireRechargeProgress>=1.f && WireCharges<2) { ++WireCharges;WireRechargeProgress-=1.f; }
+ while(WireRechargeProgress>=1.f && WireCharges<2)
+ {
+  WireChargeReadyAt[WireCharges]=GetWorld()->GetTimeSeconds();
+  ++WireCharges;WireRechargeProgress-=1.f;
+ }
  if(WireCharges>=2) WireRechargeProgress=0;
 }

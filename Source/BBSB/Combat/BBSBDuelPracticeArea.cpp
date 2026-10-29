@@ -51,7 +51,7 @@ void ABBSBDuelPracticeArea::RebuildField()
  Mesh(TEXT("Cube"),FVector(0,0,1),FVector(X-500,360,2),PathMaterial);
  for(const FVector& Point:DuelPositions) Mesh(TEXT("Cube"),FVector(Point.X,Point.Y*.5f,1.2f),FVector(280,FMath::Abs(Point.Y),2),PathMaterial);
  const TCHAR* Names[]={TEXT("QUILL / UP > RIGHT > LEFT"),TEXT("RIBBON / LEFT > HOLD UP > RIGHT"),TEXT("WAVER / RIGHT > DOWN > UP"),TEXT("SKIPPER / LEFT > RIGHT > DOWN"),TEXT("SPLASH / TWO GROUND MARKS")};
- const TCHAR* BulletNames[]={TEXT("QUILL / AIMED FAN"),TEXT("RIBBON / QUICK BURSTS"),TEXT("WAVER / SWEEPING FAN"),TEXT("SKIPPER / STAGGERED FAN"),TEXT("SPLASH / RING + AIMED SHOTS")};
+ const TCHAR* BulletNames[]={TEXT("RIDGEBACK / RISING STONE CHAIN"),TEXT("GLAIVE / STRAFE + CRESCENT WAVES"),TEXT("MAUL / PURSUIT + OVERHEAD SLAM"),TEXT("MORTAR / RETREAT + LOBBED SALVO"),TEXT("HALO / ORBIT + HOLLOW SHOCKWAVE")};
  for(int32 Index=0;Index<DuelPositions.Num();++Index)
  {
   const FVector P=DuelPositions[Index];
@@ -67,12 +67,16 @@ void ABBSBDuelPracticeArea::RebuildField()
  }
  for(float WallX:{-1400.f,1400.f}) Mesh(TEXT("Cube"),FVector(WallX,-1500,120),FVector(120,1150,240),BoundaryMaterial);
  for(float WallX:{-2900.f,2900.f}) Mesh(TEXT("Cube"),FVector(WallX,350,120),FVector(1500,120,240),BoundaryMaterial);
- Label(FVector(-4000,-1500,240),bFieldBulletHell ? TEXT("BULLET FIELD\nApproach or hit / move and dodge\nFree camera / no combat stance"):TEXT("RHYTHM DUELS\nRead the phrase / defend / counter\nOne opponent per pocket"),32.f);
+ Label(FVector(-4000,-1500,240),bFieldBulletHell ? TEXT("BULLET FIELD\nAmber: incoming / Red: active\nGold enemy: counterattack opening"):TEXT("RHYTHM DUELS\nRead the phrase / defend / counter\nOne opponent per pocket"),32.f);
 }
 void ABBSBDuelPracticeArea::SpawnPracticeEnemies()
 {
  const EBBSBInkPattern Patterns[]={EBBSBInkPattern::Tap,EBBSBInkPattern::Hold,EBBSBInkPattern::Curve,EBBSBInkPattern::Zigzag,EBBSBInkPattern::Area};
  const TCHAR* Names[]={TEXT("Quill"),TEXT("Ribbon"),TEXT("Waver"),TEXT("Skipper"),TEXT("Splash")};
+ const TCHAR* FieldNames[]={TEXT("Ridgeback"),TEXT("Glaive"),TEXT("Maul"),TEXT("Mortar"),TEXT("Halo")};
+ const EBBSBFieldAttackKind Attacks[]={EBBSBFieldAttackKind::GroundSpikes,EBBSBFieldAttackKind::SwordWave,EBBSBFieldAttackKind::Slam,EBBSBFieldAttackKind::Artillery,EBBSBFieldAttackKind::Donut};
+ const EBBSBFieldMotion Motions[]={EBBSBFieldMotion::Guard,EBBSBFieldMotion::Strafe,EBBSBFieldMotion::Pursue,EBBSBFieldMotion::Skirmish,EBBSBFieldMotion::Orbit};
+ const FLinearColor Colors[]={FLinearColor(.48f,.34f,.25f),FLinearColor(.2f,.56f,.65f),FLinearColor(.65f,.26f,.32f),FLinearColor(.5f,.43f,.23f),FLinearColor(.5f,.3f,.7f)};
  const TArray<EBBSBParryDirection> Directions[]={
   {EBBSBParryDirection::Up,EBBSBParryDirection::Right,EBBSBParryDirection::Left},
   {EBBSBParryDirection::Left,EBBSBParryDirection::Up,EBBSBParryDirection::Right},
@@ -91,11 +95,14 @@ void ABBSBDuelPracticeArea::SpawnPracticeEnemies()
   if(bFieldBulletHell)
   {
    Enemy->ShotDamage=6.f;
-   Enemy->FieldBulletsPerVolley=Index==1 ? 7:Index==4 ? 18:9;
-   Enemy->FieldVolleyInterval=Index==1 ? .75f:Index==4 ? 1.5f:1.05f;
-   Enemy->FieldShotSpeed=Index==4 ? 540.f:650.f;
+   Enemy->EnemyName=FieldNames[Index%5];Enemy->FieldAttack=Attacks[Index%5];Enemy->FieldMotion=Motions[Index%5];
+   Enemy->FieldVolleyInterval=Index==0 ? 2.8f:Index==1 ? 2.3f:Index==2 ? 2.1f:Index==3 ? 3.f:3.2f;
+   Enemy->FieldRecoverySeconds=Index==2 ? 1.25f:1.1f;Enemy->FieldWindupSeconds=Index==2 ? .7f:.55f;
+   Enemy->FieldPreferredRange=Index==3 ? 1100.f:Index==2 ? 250.f:750.f;Enemy->FieldHomeRadius=Index==2 ? 950.f:750.f;
+   Enemy->MoveSpeed=Index==0 ? 110.f:Index==2 ? 270.f:Index==3 ? 180.f:220.f;
+   Enemy->FieldShotSpeed=Index==1 ? 820.f:650.f;
   }
-  Enemy->Tint=Index%2==0 ? FLinearColor(.46f,.34f,.52f):FLinearColor(.35f,.51f,.51f);
+  Enemy->Tint=bFieldBulletHell ? Colors[Index%5]:Index%2==0 ? FLinearColor(.46f,.34f,.52f):FLinearColor(.35f,.51f,.51f);
   UGameplayStatics::FinishSpawningActor(Enemy,Pose);
  }
 }

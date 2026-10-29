@@ -151,6 +151,10 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWireRecovering=false;
  /** Fixed HUD radius at 1280 px reference width, independent of target bounds. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire charges|HUD",meta=(ClampMin="40",ClampMax="180")) float LockedWireGaugeRadius=100.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire charges|HUD",meta=(ClampMin="1",ClampMax="5")) int32 WireReadyPulseCount=1;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire charges|HUD",meta=(ClampMin=".25",ClampMax="1.2",Units="s")) float WireReadyPulseSeconds=.6f;
+ /** Per-slot completion times; starting stock does not produce a recharge pulse. */
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges|HUD") FVector2D WireChargeReadyAt=FVector2D(-100.,-100.);
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") int32 WireCharges=2;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") float WireRechargeProgress=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") bool bWireOnRechargeSurface=false;

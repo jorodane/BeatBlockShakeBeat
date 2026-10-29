@@ -43,6 +43,7 @@ void UBBSBTraversalComponent::BeginPlay()
  Super::BeginPlay();Character=Cast<ABBSBCharacter>(GetOwner());
  if (!Character) return;
  WireCharges=2;WireRechargeProgress=0;bWireOnRechargeSurface=bWireRechargeArmed=false;
+ WireChargeReadyAt=FVector2D(-100.,-100.);
  if(FMath::IsNearlyEqual(SkyWireElevation,45.f) || FMath::IsNearlyEqual(SkyWireElevation,25.f)) SkyWireElevation=30.f;
  Character->JumpMaxCount=1;
  BaseGravityScale=Character->GetCharacterMovement()->GravityScale;

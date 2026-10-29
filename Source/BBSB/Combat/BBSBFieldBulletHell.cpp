@@ -1,5 +1,6 @@
 #include "BBSBCombat.h"
 #include "BBSBCombatVisuals.h"
+#include "BBSBFieldAttack.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -46,29 +47,97 @@ void ABBSBInkEnemy::TickFieldBulletHell(float DT)
  if(Visible) FieldLastSeenAt=Now;
  if(bFieldAggro && (!Combat || Combat->bDead || Now-FieldLastSeenAt>FMath::Max(.1f,FieldLoseAggroSeconds)))
  {
-  bFieldAggro=false;FieldTarget.Reset();UpdateLabel();
+  bFieldAggro=false;bFieldWindingUp=false;FieldTarget.Reset();UpdateLabel();
  }
+ bFieldRecovering=bFieldAggro && Now<FieldRecoveryUntil;
  if(bFieldAggro && Target)
  {
   const FRotator Facing=(Target->GetActorLocation()-GetActorLocation()).Rotation();
   SetActorRotation(FMath::RInterpTo(GetActorRotation(),FRotator(0,Facing.Yaw,0),DT,5.f));
-  if(Visible && Now>=NextFieldVolleyAt)
+  if(Now<WeaponImpulseUntil && bFieldWindingUp) { bFieldWindingUp=false;NextFieldVolleyAt=Now+.65; }
+  if(bFieldWindingUp)
   {
-   FireFieldVolley(Target);
-   // Never replay missed volleys after a pause or editor hitch.
-   NextFieldVolleyAt=Now+FMath::Max(.25f,FieldVolleyInterval);
+   // The last 200 ms commit to a visible dodgeable position, including airborne targets.
+   if(Now<FieldReleaseAt-.2) FieldCommittedAim=Target->GetActorLocation();
+   if(Now>=FieldReleaseAt)
+   {
+    if(Visible) { FireFieldVolley(Target);FieldRecoveryUntil=Now+FMath::Max(.2f,FieldRecoverySeconds); }
+    bFieldWindingUp=false;NextFieldVolleyAt=Now+FMath::Max(.25f,FieldVolleyInterval);
+   }
+  }
+  else if(Visible && !bFieldRecovering && Now>=NextFieldVolleyAt && Now>=WeaponImpulseUntil &&
+   (FieldAttack!=EBBSBFieldAttackKind::Slam || FVector::Dist2D(GetActorLocation(),Target->GetActorLocation())<700.f))
+  {
+   if(FieldAttack==EBBSBFieldAttackKind::Fan)
+   {
+    FireFieldVolley(Target);NextFieldVolleyAt=Now+FMath::Max(.25f,FieldVolleyInterval);
+   }
+   else { bFieldWindingUp=true;FieldReleaseAt=Now+FMath::Max(.2f,FieldWindupSeconds);FieldCommittedAim=Target->GetActorLocation(); }
   }
  }
- // These test opponents defend their pocket, then walk home after a weapon impulse.
- const FVector Delta=Home-GetActorLocation();
- if(Now<WeaponImpulseUntil) ConsumeMovementInputVector();
- else if(Delta.Size2D()>24.f) AddMovementInput(Delta.GetSafeNormal2D());
- Body->SetRelativeLocation(FVector(0,0,-6.f+1.5f*FMath::Sin(Now*2.f)));
+ MoveInField(DT,bFieldAggro ? Target:nullptr);
+ const float Bob=GetVelocity().Size2D()>20.f ? 4.f*FMath::Sin(Now*10.f):1.5f*FMath::Sin(Now*2.f);
+ Body->SetRelativeLocation(FVector(0,0,-6.f+Bob));
+ const float Prepare=bFieldWindingUp ? FMath::Clamp(float((FieldReleaseAt-Now)/FMath::Max(.2f,FieldWindupSeconds)),0.f,1.f):0.f;
+ Body->SetRelativeScale3D(FieldRestScale*FVector(1.f+.12f*Prepare,1.f+.12f*Prepare,1.f-.18f*Prepare));
+}
+
+void ABBSBInkEnemy::MoveInField(float DT,APawn* Target)
+{
+ const double Now=GetWorld()->GetTimeSeconds();auto* Movement=GetCharacterMovement();
+ Movement->bOrientRotationToMovement=!Target;
+ if(Now<WeaponImpulseUntil) { ConsumeMovementInputVector();return; }
+ if(Target && (bFieldWindingUp || bFieldRecovering)) { ConsumeMovementInputVector();Movement->StopMovementImmediately();return; }
+ const FVector Position=GetActorLocation();FVector Goal=Home;
+ if(Target)
+ {
+  const float Range=FVector::Dist2D(Position,Target->GetActorLocation());
+  FVector Toward=(Target->GetActorLocation()-Position).GetSafeNormal2D();if(Toward.IsNearlyZero()) Toward=GetActorForwardVector();
+  const FVector Side=FVector::CrossProduct(FVector::UpVector,Toward)*(FieldVolleysFired%2 ? -1.f:1.f);
+  const float Radial=FMath::Clamp(Range-FieldPreferredRange,-220.f,220.f);
+  switch(FieldMotion)
+  {
+   case EBBSBFieldMotion::Guard:Goal=Home+Side*(180.f*FMath::Sin(Now*.7f));break;
+   case EBBSBFieldMotion::Strafe:Goal=Position+Side*300.f+Toward*Radial;break;
+   case EBBSBFieldMotion::Pursue:Goal=Target->GetActorLocation()-Toward*220.f;break;
+   case EBBSBFieldMotion::Skirmish:Goal=Position+Toward*(Radial*1.5f)+Side*140.f;break;
+   case EBBSBFieldMotion::Orbit:Goal=Position+Side*380.f+Toward*Radial;break;
+  }
+  Goal=Home+(Goal-Home).GetClampedToMaxSize2D(FMath::Max(100.f,FieldHomeRadius));
+ }
+ const FVector Delta=Goal-Position;
+ if(Delta.Size2D()>24.f)
+ {
+  // Stay on reachable ground; CharacterMovement still sweeps walls and other pawns.
+  FHitResult Floor;FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBFieldStep),false,this);if(Target) Query.AddIgnoredActor(Target);
+  const FVector Ahead=Position+Delta.GetSafeNormal2D()*85.f;
+  if(GetWorld()->LineTraceSingleByObjectType(Floor,Ahead+FVector(0,0,40),Ahead-FVector(0,0,190),BBSBCombatVisuals::GeometryTypes(),Query) && Floor.ImpactNormal.Z>.75f) AddMovementInput(Delta.GetSafeNormal2D());
+ }
 }
 
 void ABBSBInkEnemy::FireFieldVolley(APawn* Target)
 {
  if(!IsValid(Target) || bDefeated) return;
+ if(FieldAttack!=EBBSBFieldAttackKind::Fan)
+ {
+  const FVector Origin=GetAimPoint();const FVector Side=FVector::CrossProduct(FVector::UpVector,(FieldCommittedAim-Origin).GetSafeNormal2D());
+  auto Shape=[&](FVector Aim,float Delay)
+  {
+   FActorSpawnParameters Spawn;Spawn.Owner=this;Spawn.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+   if(auto* Shot=GetWorld()->SpawnActor<ABBSBFieldAttack>(ABBSBFieldAttack::StaticClass(),Origin,FRotator::ZeroRotator,Spawn))
+   { Shot->InitializeField(this,FieldAttack,Aim,Delay);++FieldShotsFired; }
+  };
+  if(FieldAttack==EBBSBFieldAttackKind::Artillery)
+  {
+   Shape(FieldCommittedAim,0.f);Shape(FieldCommittedAim+Side*320.f,.28f);Shape(FieldCommittedAim-Side*320.f,.56f);
+  }
+  else if(FieldAttack==EBBSBFieldAttackKind::SwordWave)
+  {
+   Shape(FieldCommittedAim-Side*100.f,0.f);Shape(FieldCommittedAim+Side*100.f,.28f);
+  }
+  else Shape(FieldCommittedAim,0.f);
+  ++FieldVolleysFired;return;
+ }
  // Every pellet gets an independent world-space launch. No target tracking remains in flight.
  const FVector Origin=GetAimPoint();
  const FVector Aim=(Target->GetActorLocation()-Origin).GetSafeNormal();

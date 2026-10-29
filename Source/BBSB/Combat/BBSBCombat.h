@@ -25,6 +25,12 @@ class AHUD;
 class UCanvas;
 struct FMinimalViewInfo;
 
+UENUM(BlueprintType)
+enum class EBBSBFieldAttackKind : uint8 { Fan, GroundSpikes, SwordWave, Slam, Artillery, Donut };
+
+UENUM(BlueprintType)
+enum class EBBSBFieldMotion : uint8 { Guard, Strafe, Pursue, Skirmish, Orbit };
+
 USTRUCT(BlueprintType)
 struct FBBSBDamagePopup
 {
@@ -121,7 +127,8 @@ public:
  UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ReleaseTargetLock();
  UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool HasTargetLock() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool IsLockedTargetInAttackRange() const;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="0",ClampMax="150",Units="cm")) float TargetLockCameraHeight=20.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="0",ClampMax="150",Units="cm")) float TargetLockCameraHeight=90.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="0",ClampMax="30",Units="deg")) float TargetLockLookDownDegrees=12.f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Target lock") float TargetLockCameraLift=0.f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Target lock") TObjectPtr<ABBSBInkEnemy> FieldLockedTarget;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="100",Units="cm")) float TargetLockRange=2000.f;
@@ -272,6 +279,16 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="100",ClampMax="2000",Units="cm/s")) float FieldShotSpeed=650.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin=".25",Units="s")) float FieldVolleyInterval=1.05f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="3",ClampMax="32")) int32 FieldBulletsPerVolley=9;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern") EBBSBFieldAttackKind FieldAttack=EBBSBFieldAttackKind::Fan;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern") EBBSBFieldMotion FieldMotion=EBBSBFieldMotion::Guard;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin=".2",Units="s")) float FieldWindupSeconds=.55f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin=".2",Units="s")) float FieldRecoverySeconds=1.1f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin="100",Units="cm")) float FieldHomeRadius=750.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin="100",Units="cm")) float FieldPreferredRange=750.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") bool bFieldWindingUp=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") bool bFieldRecovering=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") FVector FieldCommittedAim=FVector::ZeroVector;
+ UFUNCTION(CallInEditor,BlueprintCallable,Category="BBSB|Field pattern") void RebuildFieldAppearance();
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") bool bFieldAggro=false;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldVolleysFired=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldShotsFired=0;
@@ -287,6 +304,10 @@ public:
 private:
  TWeakObjectPtr<APawn> FieldTarget;
  double NextFieldVolleyAt=0,FieldLastSeenAt=-100;
+ double FieldReleaseAt=-100,FieldRecoveryUntil=-100;
+ FVector FieldRestScale=FVector(.75f,.65f,1.25f);
+ UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> FieldOrnaments;
+ void MoveInField(float DT,APawn* Target);
  void TickFieldBulletHell(float DT);
  void FireFieldVolley(APawn* Target);
  float DamageTrailStartHealth=0.f;

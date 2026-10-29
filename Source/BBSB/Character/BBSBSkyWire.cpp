@@ -44,8 +44,28 @@ bool UBBSBTraversalComponent::TrySkyWire()
  Horizontal=Horizontal.GetSafeNormal2D();
  if(Horizontal.IsNearlyZero()) return false;
  const float Elevation=FMath::DegreesToRadians(FMath::Clamp(SkyWireElevation,20.f,75.f));
- const FVector Direction=Horizontal*FMath::Cos(Elevation)+FVector::UpVector*FMath::Sin(Elevation);
  const FVector Start=Character->GetActorLocation();const float Distance=FMath::Clamp(SkyWireDistance,200.f,1000.f);
+ if(const auto* Combat=Character->Combat.Get();Combat && Combat->HasTargetLock())
+ {
+  FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);
+  const FVector ViewForward=FRotator(0,View.Yaw,0).Vector();
+  const FVector ViewRight=FVector::CrossProduct(FVector::UpVector,ViewForward);
+  const float Side=FVector::DotProduct(Horizontal,ViewRight),Forward=FVector::DotProduct(Horizontal,ViewForward);
+  const FVector ToTarget=(Combat->FieldLockedTarget->GetActorLocation()-Start).GetSafeNormal2D();
+  const float Range=FVector::Dist2D(Start,Combat->FieldLockedTarget->GetActorLocation());
+  if(FMath::Abs(Side)>.75f && FMath::Abs(Forward)<.25f && Range>50.f)
+  {
+   // Aim along a chord rather than the tangent. Keep the straight pull, elevation and recovery unchanged.
+   // Include the existing 52 cm stand-off and recovery carry so the whole action stays near its starting range.
+   const float RecoveryCarry=FMath::Min(WireAirExitSpeed,WireSpeed)*FMath::Max(.35f,WireRecoverySeconds)*(1.f+FMath::Clamp(WireMomentumRetention,0.f,1.f))*.5f;
+   const float Travel=(FMath::Max(0.f,Distance-52.f)+RecoveryCarry)*FMath::Cos(Elevation);
+   // At very close range a full-length chord cannot fit. Retain a clear lateral component instead of aiming through the enemy.
+   const float Inward=FMath::Clamp(Travel/(2.f*Range),0.f,.85f);
+   const FVector TargetRight=FVector::CrossProduct(FVector::UpVector,ToTarget);
+   Horizontal=ToTarget*Inward+TargetRight*(FMath::Sign(Side)*FMath::Sqrt(1.f-Inward*Inward));
+  }
+ }
+ const FVector Direction=Horizontal*FMath::Cos(Elevation)+FVector::UpVector*FMath::Sin(Elevation);
  FVector Anchor=Start+Direction*Distance;
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BunniarSkyWirePath),false,Character);Q.AddIgnoredActor(Buddy);
  for(TActorIterator<ABBSBInkEnemy> It(GetWorld());It;++It) Q.AddIgnoredActor(*It);
