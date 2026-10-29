@@ -8,7 +8,7 @@
 
 ABBSBDuelPracticeArea::ABBSBDuelPracticeArea()
 {
- EnemyCount=5;EncounterID=1000;EnemyHealth=90.f;
+ EnemyCount=5;EncounterID=1000;EnemyHealth=300.f;bFieldBulletHell=true;
  DuelPositions={FVector(-2800,-1500,0),FVector(0,-1500,0),FVector(2800,-1500,0),FVector(-1400,1800,0),FVector(1800,1800,0)};
  GroundMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/CombatField/MI_FieldGround.MI_FieldGround")));
  PadMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/CombatField/MI_DuelPad.MI_DuelPad")));
@@ -51,6 +51,7 @@ void ABBSBDuelPracticeArea::RebuildField()
  Mesh(TEXT("Cube"),FVector(0,0,1),FVector(X-500,360,2),PathMaterial);
  for(const FVector& Point:DuelPositions) Mesh(TEXT("Cube"),FVector(Point.X,Point.Y*.5f,1.2f),FVector(280,FMath::Abs(Point.Y),2),PathMaterial);
  const TCHAR* Names[]={TEXT("QUILL / UP > RIGHT > LEFT"),TEXT("RIBBON / LEFT > HOLD UP > RIGHT"),TEXT("WAVER / RIGHT > DOWN > UP"),TEXT("SKIPPER / LEFT > RIGHT > DOWN"),TEXT("SPLASH / TWO GROUND MARKS")};
+ const TCHAR* BulletNames[]={TEXT("QUILL / AIMED FAN"),TEXT("RIBBON / QUICK BURSTS"),TEXT("WAVER / SWEEPING FAN"),TEXT("SKIPPER / STAGGERED FAN"),TEXT("SPLASH / RING + AIMED SHOTS")};
  for(int32 Index=0;Index<DuelPositions.Num();++Index)
  {
   const FVector P=DuelPositions[Index];
@@ -62,11 +63,11 @@ void ABBSBDuelPracticeArea::RebuildField()
   }
   // A placement guide is visible in the editor and cannot become another game enemy.
   auto* Preview=Mesh(TEXT("Sphere"),P+FVector(0,0,72),FVector(75,65,125),AccentMaterial,false);Preview->SetHiddenInGame(true);
-  Label(P+FVector(-750,-850,90),FString::Printf(TEXT("%d  %s"),Index+1,Names[FMath::Min(Index,4)]),20.f);
+  Label(P+FVector(-750,-850,90),FString::Printf(TEXT("%d  %s"),Index+1,(bFieldBulletHell ? BulletNames:Names)[FMath::Min(Index,4)]),20.f);
  }
  for(float WallX:{-1400.f,1400.f}) Mesh(TEXT("Cube"),FVector(WallX,-1500,120),FVector(120,1150,240),BoundaryMaterial);
  for(float WallX:{-2900.f,2900.f}) Mesh(TEXT("Cube"),FVector(WallX,350,120),FVector(1500,120,240),BoundaryMaterial);
- Label(FVector(-4000,-1500,240),TEXT("RHYTHM DUELS\nRead the phrase / defend / counter\nOne opponent per pocket"),32.f);
+ Label(FVector(-4000,-1500,240),bFieldBulletHell ? TEXT("BULLET FIELD\nApproach or hit / move and dodge\nFree camera / no combat stance"):TEXT("RHYTHM DUELS\nRead the phrase / defend / counter\nOne opponent per pocket"),32.f);
 }
 void ABBSBDuelPracticeArea::SpawnPracticeEnemies()
 {
@@ -86,6 +87,14 @@ void ABBSBDuelPracticeArea::SpawnPracticeEnemies()
   if(!Enemy) continue;
   Enemy->PracticeArea=this;Enemy->EncounterID=EncounterID+Index;Enemy->EnemyName=Names[Index%5];Enemy->MaximumHealth=EnemyHealth;
   Enemy->MainPattern=Patterns[Index%5];Enemy->AttackDirections=Directions[Index%5];
+  Enemy->bFieldBulletHell=bFieldBulletHell;
+  if(bFieldBulletHell)
+  {
+   Enemy->ShotDamage=6.f;
+   Enemy->FieldBulletsPerVolley=Index==1 ? 7:Index==4 ? 18:9;
+   Enemy->FieldVolleyInterval=Index==1 ? .75f:Index==4 ? 1.5f:1.05f;
+   Enemy->FieldShotSpeed=Index==4 ? 540.f:650.f;
+  }
   Enemy->Tint=Index%2==0 ? FLinearColor(.46f,.34f,.52f):FLinearColor(.35f,.51f,.51f);
   UGameplayStatics::FinishSpawningActor(Enemy,Pose);
  }

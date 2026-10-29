@@ -136,12 +136,21 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Air attack",meta=(ClampMin="0",ClampMax="60",Units="cm")) float AirWeaponLift=18.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Air attack",meta=(ClampMin="0.05",ClampMax="0.4",Units="s")) float AirWeaponLiftSeconds=.16f;
  UFUNCTION(BlueprintCallable,Category="BBSB|Wire") bool TryWireRecall(ABBSBBunniarCompanion* Buddy);
+ UFUNCTION(BlueprintPure,Category="BBSB|Wire") bool CanWireRecall(ABBSBBunniarCompanion* Buddy) const;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Wire") bool TrySkyWire();
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sky wire",meta=(ClampMin="200",ClampMax="1000",Units="cm")) float SkyWireDistance=700.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sky wire",meta=(ClampMin="20",ClampMax="75",Units="deg")) float SkyWireElevation=30.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Sky wire") bool bSkyWire=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire preview") bool bWirePreviewVisible=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire preview") FVector WirePreviewAnchor=FVector::ZeroVector;
  UFUNCTION(BlueprintCallable,Category="BBSB|Wire") void CancelWireRecall();
  UFUNCTION(BlueprintPure,Category="BBSB|Wire") bool IsWireTraversalActive() const { return bWirePulling || bWireArrival || bWireRecovering; }
  void UpdateWirePresentation();
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWirePulling=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWireArrival=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Wire") bool bWireRecovering=false;
+ /** Fixed HUD radius at 1280 px reference width, independent of target bounds. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire charges|HUD",meta=(ClampMin="40",ClampMax="180")) float LockedWireGaugeRadius=100.f;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") int32 WireCharges=2;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") float WireRechargeProgress=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire charges") bool bWireOnRechargeSurface=false;
@@ -296,6 +305,8 @@ private:
  uint64 ClimbCameraFrame=MAX_uint64;
  bool bClimbQueued=false;
  void TickWireMovement(float DeltaTime);
+ bool BeginWirePull(ABBSBBunniarCompanion* Buddy,bool Sky);
+ void EnsureWireSegments();
  void TickWireRecharge(float DeltaTime);
  void FinishWireRecovery();
  double WireRecoveryStartedAt=0;

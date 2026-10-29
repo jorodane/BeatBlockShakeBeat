@@ -80,6 +80,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact") TObjectPtr<UNiagaraSystem> AttackImpactBurst;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact") TObjectPtr<UNiagaraSystem> AttackImpactRing;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact",meta=(ClampMin="0",ClampMax="3")) float AttackImpactScale=1.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Attack impact",meta=(ClampMin="1",ClampMax="3")) float EnemyImpactScaleMultiplier=1.75f;
  /** Sword throws return after the embedded hold; flight endpoints stay frozen. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",ClampMax="1")) float SwordReturnStart=.77f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword throw",meta=(ClampMin="0",Units="cm")) float SwordEmbedDepth=3.f;

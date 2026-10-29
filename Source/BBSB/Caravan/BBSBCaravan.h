@@ -108,6 +108,7 @@ public:
  void ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& View);
  // Release only camera ownership; surface and wire attachment remain intact.
  void ReleaseSurfaceView();
+ bool BeginWireAirAnchor(const FVector& Point);
  bool HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool bInitialPress);
  void HandleSurfaceDrag(FVector2D Delta);
 private:

@@ -109,6 +109,13 @@ bool UBBSBFieldActionComponent::IsWeaponReturning() const
  return (bHasFollowThrough[0] && Now<FollowThroughUntil[0]) || (bHasFollowThrough[1] && Now<FollowThroughUntil[1]);
 }
 
+int32 UBBSBFieldActionComponent::GetReparatonForm() const
+{
+ // Read the hand-held form actually visible when the hit arrives, before interruption.
+ if(FieldEquipment || !FormUpper || !FormUpper->IsVisible()) return 0;
+ return OtherFormLower && OtherFormLower->IsVisible() ? 2:1;
+}
+
 void UBBSBFieldActionComponent::ResetPrototypeState()
 {
  ReleaseSpearEmbed();
@@ -197,7 +204,7 @@ FVector UBBSBFieldActionComponent::FindPrototypeCursorPoint(AActor** TargetActor
  if (!IsValid(PC) || !PC->IsLocalController() || !GetWorld()) return ForwardAim;
  FVector Eye,Direction; FRotator View; PC->GetPlayerViewPoint(Eye,View); Direction=View.Vector();
  if (PC->bShowMouseCursor) PC->DeprojectMousePositionToWorld(Eye,Direction);
- FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBManualWeaponAim),false,Character); Q.AddIgnoredActor(FloatingWeapon); Q.AddIgnoredActor(OtherFloatingWeapon);
+ FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBManualWeaponAim),false,Character); Q.AddIgnoredActor(FloatingWeapon); Q.AddIgnoredActor(OtherFloatingWeapon);IgnoreInkProjectiles(Q);
  FHitResult Hit; FVector Target=Eye+Direction*WeaponReach; AActor* Candidate=nullptr;
  if (GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Direction*2500,ECC_Visibility,Q)) { Target=Hit.ImpactPoint; Candidate=Hit.GetActor(); }
  const FVector Shoulder=Character->GetActorLocation()+FVector(0,0,30);
@@ -659,8 +666,10 @@ void UBBSBFieldActionComponent::PresentPrototypeWeapon()
  const bool Defending=Defense && Defense->IsDefenseMotionActive();
  const bool AuthoredSplit=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->bSplitReparaton && (ActiveWeaponAnimationSet->bKeepFormEquipped || IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil)
   : Dual || (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && (IsGestureCaptured() || WeaponChargeSeconds>0 || Now<FormUntil));
- const bool Split=!Defending && AuthoredSplit;
- ConductorFull->SetVisibility(!Split); FormUpper->SetVisibility(Split); FormLower->SetVisibility(Split && !Dual); OtherFormLower->SetVisibility(Dual && !Defending);
+ const bool ReceivingHit=Defense && Defense->bDefenseHitReaction && Defense->DefenseAnimation;
+ const int32 Form=ReceivingHit ? Defense->HitReparatonForm:Defending ? 0:AuthoredSplit ? (Dual ? 2:1):0;
+ const bool Split=Form!=0,PairedHands=Form==2;
+ ConductorFull->SetVisibility(!Split);FormUpper->SetVisibility(Split);FormLower->SetVisibility(Split && !PairedHands);OtherFormLower->SetVisibility(PairedHands);
  Blade->SetVisibility(PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger || Now>=DaggerAwayUntil[0]);
  OtherBlade->SetVisibility(PrototypeWeapon==EBBSBPrototypeWeapon::Crescent);
  FTransform Top(FRotator::ZeroRotator,FVector(0,0,-6)), Bottom(FRotator::ZeroRotator,FVector(0,0,-90));
@@ -798,7 +807,7 @@ void ABBSBPlayerWeaponProjectile::Tick(float DT)
  if (GetWorld()->SweepSingleByChannel(Hit,From,To,GetActorQuat(),ECC_Visibility,FCollisionShape::MakeCapsule(16,54),Q))
  {
   if(auto* Field=SourceCharacter->FindComponentByClass<UBBSBFieldActionComponent>())
-  { UBBSBFieldActionComponent::FWeaponAction Cue;Cue.TargetHighlight=TargetHighlight;Field->EmitAttackImpact(Cue,Hit.ImpactPoint,Hit.ImpactNormal); }
+  { UBBSBFieldActionComponent::FWeaponAction Cue;Cue.TargetHighlight=TargetHighlight;Field->EmitAttackImpact(Cue,Hit.ImpactPoint,Hit.ImpactNormal,Cast<ABBSBInkEnemy>(Hit.GetActor())!=nullptr); }
   ABBSBBreakableProp* Prop=Cast<ABBSBBreakableProp>(Hit.GetActor());
   if (Cast<ABBSBInkEnemy>(Hit.GetActor()) || Prop)
   {

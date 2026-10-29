@@ -10,6 +10,21 @@ using namespace BBSBCombatVisuals;
 
 namespace
 {
+ void PlayerHurtShape(const ABBSBInkProjectile* Shot,const APawn* Pawn,FVector& Center,float& Radius,float& HalfHeight)
+ {
+  Center=Pawn ? Pawn->GetActorLocation():FVector::ZeroVector;
+  if(Shot->bFieldProjectile && Pawn)
+  {
+   if(const auto* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>())
+   {
+    Center=Pawn->GetActorTransform().TransformPosition(Combat->FieldProjectileHurtOffset);
+    Radius=FMath::Clamp(Combat->FieldProjectileHurtRadius,1.f,80.f);HalfHeight=Radius;return;
+   }
+  }
+  const auto* Character=Cast<ACharacter>(Pawn);const auto* Capsule=Character ? Character->GetCapsuleComponent():nullptr;
+  Radius=Capsule ? Capsule->GetScaledCapsuleRadius():35.f;HalfHeight=Capsule ? Capsule->GetScaledCapsuleHalfHeight():92.f;
+ }
+
  FCollisionQueryParams InkFlightQuery(const ABBSBInkProjectile* Shot,const APawn* Pawn)
  {
   FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBInkFlight),false,Shot);
@@ -26,14 +41,17 @@ ABBSBInkProjectile::ABBSBInkProjectile()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sphere(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	Body->SetStaticMesh(Sphere.Object); Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Body->SetRelativeScale3D(FVector(0.22f)); Body->SetCastShadow(false);
+ Body->SetCollisionResponseToAllChannels(ECR_Ignore);Body->SetGenerateOverlapEvents(false);Body->SetCanEverAffectNavigation(false);
+ Tags.Add(TEXT("BBSBIgnoreAim"));
 }
 void ABBSBInkProjectile::Initialize(ABBSBCombatStage* InStage,ABBSBInkEnemy* InSource,FVector Target,EBBSBInkPattern InPattern,float FlightSeconds,int32 InHoldGroup)
 {
-	OwningStage=InStage; Source=InSource; Pattern=InPattern; FrozenTarget=Target; HoldGroup=InHoldGroup;
+	OwningStage=InStage; Source=InSource; bFieldProjectile=InSource && InSource->bFieldBulletHell; Pattern=InPattern; FrozenTarget=Target; HoldGroup=InHoldGroup;
 	LaunchOrigin=GetActorLocation(); PreviousPosition=LaunchOrigin; TravelSeconds=FMath::Max(FlightSeconds,0.2f);
 	Damage=InSource ? InSource->ShotDamage : 8.f; FlightVelocity=(Target-LaunchOrigin)/TravelSeconds;
 	Side=FVector::CrossProduct(FVector::UpVector,FlightVelocity).GetSafeNormal();
 	Tint(Body,Pattern==EBBSBInkPattern::Hold ? FLinearColor(0.08f,0.045f,0.1f) : FLinearColor(0.025f,0.018f,0.035f));
+ if(bFieldProjectile) Tint(Body,FLinearColor(.9f,.31f,.51f));
 	if (Pattern==EBBSBInkPattern::Bounce)
 	{
 		FVector Floor;
@@ -74,9 +92,9 @@ FVector ABBSBInkProjectile::FlightPosition(float AtAge) const
 bool ABBSBInkProjectile::PredictBodyContact(ACharacter* Target,float MaxSeconds,FVector& Contact,float& Seconds) const
 {
  Contact=FVector::ZeroVector;Seconds=-1.f;
+ if(EvadedContactPawn.Get()==Target) return false;
  if(bResolved || Pattern==EBBSBInkPattern::Area || !IsValid(Target) || !GetWorld() || !FMath::IsFinite(MaxSeconds) || MaxSeconds<=0) return false;
- const auto* Capsule=Target->GetCapsuleComponent();
- const float Radius=Capsule ? Capsule->GetScaledCapsuleRadius():35.f,Half=Capsule ? Capsule->GetScaledCapsuleHalfHeight():92.f;
+ FVector HurtCenter;float Radius,Half;PlayerHurtShape(this,Target,HurtCenter,Radius,Half);
  const float Horizon=GetLifeSpan()>0 ? FMath::Min(MaxSeconds,GetLifeSpan()):MaxSeconds;
  const float Reach=FlightVelocity.Size()*Horizon+2.f*ApproachOffset.Size()+280.f+Half+Radius;
  if(FVector::DistSquared(GetActorLocation(),Target->GetActorLocation())>FMath::Square(Reach)) return false;
@@ -91,7 +109,7 @@ bool ABBSBInkProjectile::PredictBodyContact(ACharacter* Target,float MaxSeconds,
   FHitResult WorldHit;
   const bool WorldBlocked=GetWorld()->SweepSingleByChannel(WorldHit,Previous,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(10.f),Query);
   FVector BodyContact;float Fraction=1.f;
-  if(BBSBCombatRules::SweptCapsuleContact(Previous,Next,Target->GetActorLocation(),Radius,Half,10.f,BodyContact,Fraction)
+  if(BBSBCombatRules::SweptCapsuleContact(Previous,Next,HurtCenter,Radius,Half,10.f,BodyContact,Fraction)
    && (!WorldBlocked || FVector::Dist(Previous,BodyContact)<=WorldHit.Distance))
   {
    Contact=BodyContact;Seconds=Index*Step+Fraction*Step;return true;
@@ -144,15 +162,20 @@ void ABBSBInkProjectile::Tick(float DT)
   FVector Contact;float BodyFraction=1.f;bool bBodyHit=false;
   if(Combat && !Combat->bDead)
   {
-   const auto* Character=Cast<ACharacter>(Pawn);const auto* Capsule=Character ? Character->GetCapsuleComponent():nullptr;
-   bBodyHit=BBSBCombatRules::SweptCapsuleContact(PreviousPosition,Next,Pawn->GetActorLocation(),Capsule ? Capsule->GetScaledCapsuleRadius():35.f,
-    Capsule ? Capsule->GetScaledCapsuleHalfHeight():92.f,10.f,Contact,BodyFraction);
+   FVector HurtCenter;float HurtRadius,HurtHalf;PlayerHurtShape(this,Pawn,HurtCenter,HurtRadius,HurtHalf);
+   bBodyHit=BBSBCombatRules::SweptCapsuleContact(PreviousPosition,Next,HurtCenter,HurtRadius,HurtHalf,10.f,Contact,BodyFraction);
   }
+  if(!bBodyHit) EvadedContactPawn.Reset();
   // A real body contact is the only parry/hit event. A nearer wall still intercepts first.
   if(bBodyHit && (!bWorldHit || FVector::Dist(PreviousPosition,Contact)<=WorldHit.Distance))
   {
    SetActorLocation(Contact);
-   if(Combat->ResolveContact(Contact,HoldGroup,Damage,this)!=EBBSBParryResult::Evade) { ResolveAndFade();return; }
+   if(EvadedContactPawn.Get()!=Pawn)
+   {
+    if(Combat->ResolveContact(Contact,HoldGroup,Damage,this)!=EBBSBParryResult::Evade) { ResolveAndFade();return; }
+    // Keep flying unchanged; ending a dash cannot hit again inside this same overlap.
+    EvadedContactPawn=Pawn;
+   }
   }
 		if (bWorldHit)
 		{

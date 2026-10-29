@@ -43,6 +43,7 @@ void UBBSBTraversalComponent::BeginPlay()
  Super::BeginPlay();Character=Cast<ABBSBCharacter>(GetOwner());
  if (!Character) return;
  WireCharges=2;WireRechargeProgress=0;bWireOnRechargeSurface=bWireRechargeArmed=false;
+ if(FMath::IsNearlyEqual(SkyWireElevation,45.f) || FMath::IsNearlyEqual(SkyWireElevation,25.f)) SkyWireElevation=30.f;
  Character->JumpMaxCount=1;
  BaseGravityScale=Character->GetCharacterMovement()->GravityScale;
  if (Character->FieldActions) AddTickPrerequisiteComponent(Character->FieldActions);
@@ -250,7 +251,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
  Super::TickComponent(DT,Type,Function);
  if (!IsValid(Character)) return;
  RestoreParkourRunExit();TickWallJumpMovement();auto* Move=Character->GetCharacterMovement();
- TickWireMovement(DT);TickWireRecharge(DT);
+ TickWireMovement(DT);TickWireRecharge(DT);UpdateWirePresentation();
  TickParkour(DT);
  TickMovementEffects(DT);
  ParkourPoseAlpha=FMath::FInterpConstantTo(ParkourPoseAlpha,IsParkourActive() ? 1.f:0.f,DT,IsParkourActive() ? 16.f:10.f);

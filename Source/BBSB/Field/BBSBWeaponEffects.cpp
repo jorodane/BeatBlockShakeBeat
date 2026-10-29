@@ -73,13 +73,13 @@ void UBBSBFieldActionComponent::UpdateAttackHighlight(FWeaponAction& A,float T)
  { MID->SetVectorParameterValue(TEXT("Tint"),Set->AttackHighlightColor);MID->SetScalarParameterValue(TEXT("Density"),Pulse); }
 }
 
-void UBBSBFieldActionComponent::EmitAttackImpact(FWeaponAction& A,const FVector& Point,const FVector& Normal)
+void UBBSBFieldActionComponent::EmitAttackImpact(FWeaponAction& A,const FVector& Point,const FVector& Normal,bool bEnemyHit)
 {
  A.bImpactCuePlayed=true;
  if(auto* Marker=A.TargetHighlight.Get()) Marker->DestroyComponent();A.TargetHighlight.Reset();
  const auto* Set=ActiveWeaponAnimationSet.Get();
  if(Set && Set->AttackImpactScale>0) for(auto* System:{Set->AttackImpactBurst.Get(),Set->AttackImpactRing.Get()}) if(System)
-  UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(),System,Point+Normal*2.f,FRotationMatrix::MakeFromZ(Normal.IsNearlyZero() ? FVector::UpVector:Normal).Rotator(),FVector(Set->AttackImpactScale),true,true,ENCPoolMethod::AutoRelease,true);
+  UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(),System,Point+Normal*2.f,FRotationMatrix::MakeFromZ(Normal.IsNearlyZero() ? FVector::UpVector:Normal).Rotator(),FVector(Set->AttackImpactScale*(bEnemyHit ? FMath::Clamp(Set->EnemyImpactScaleMultiplier,1.f,3.f):1.f)),true,true,ENCPoolMethod::AutoRelease,true);
 }
 
 void UBBSBFieldActionComponent::EmitSurfaceImpact(FWeaponAction& A)

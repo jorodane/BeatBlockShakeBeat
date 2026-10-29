@@ -42,7 +42,7 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
   if(!BuddyOutlineMID) if(auto* Material=BuddyOutlineMaterial.LoadSynchronous()) BuddyOutlineMID=UMaterialInstanceDynamic::Create(Material,this);
   if(BuddyOutlineMID) Camera->AddOrUpdateBlendable(BuddyOutlineMID,BuddyFocus ? 1.f:0.f);
  }
- if(!PC || !PC->IsLocalController() || bEquipmentWheelOpen || IsSurfaceAimLocked() || (Interaction && Interaction->bDialogueActive) || (Combat && Combat->bDead)) return;
+ if(!PC || !PC->IsLocalController() || (Combat && Combat->HasTargetLock()) || bEquipmentWheelOpen || IsSurfaceAimLocked() || (Interaction && Interaction->bDialogueActive) || (Combat && Combat->bDead)) return;
  AimPresentation=EBBSBAimPresentation::Air;AimPresentationColor=AirAimColor;
  FHitResult Hit;
  if(!TraceEquipmentAim(Hit)) { FVector Point;ResolveEquipmentAim(Point,Hit);AimPresentationPoint=Point;return; }
@@ -75,16 +75,17 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
 void UBBSBFieldActionComponent::DrawContextAim(AHUD* HUD,UCanvas* Canvas) const
 {
  if(!HUD || !Canvas || AimPresentation==EBBSBAimPresentation::Hidden || IsSurfaceAimLocked()) return;
+ if(const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;Combat && Combat->HasTargetLock()) return;
  const auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
  if(!PC) return;
  float X=Canvas->SizeX*.5f,Y=Canvas->SizeY*.5f;
  if(PC->bShowMouseCursor) PC->GetMousePosition(X,Y);
  const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.4f);
- const FLinearColor Shade(.10f,.08f,.12f,.55f);
+ const FLinearColor Shade(.055f,.04f,.075f,.98f);
  auto Line=[&](FVector2D A,FVector2D B)
  {
-  HUD->DrawLine(A.X,A.Y,B.X,B.Y,Shade,3.f*S);
-  HUD->DrawLine(A.X,A.Y,B.X,B.Y,AimPresentationColor,1.5f*S);
+  HUD->DrawLine(A.X,A.Y,B.X,B.Y,Shade,3.8f*S);
+  HUD->DrawLine(A.X,A.Y,B.X,B.Y,AimPresentationColor,2.f*S);
  };
  const FVector2D Center(X,Y);
  if(AimPresentation==EBBSBAimPresentation::Interactive)

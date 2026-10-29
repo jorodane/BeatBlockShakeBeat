@@ -31,6 +31,7 @@ class ABBSBCharacter : public ACharacter
 	/** Camera boom positioning the camera behind the character */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	USpringArmComponent* CameraBoom;
+ double LastDashPressAt=-100;
 
 	/** Follow camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
@@ -119,6 +120,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpEnd();
  UFUNCTION(BlueprintCallable,Category="Input") void DoDash();
+ /** A second dash press can request a wire even after the first dash has ended. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Input|Wire",meta=(ClampMin="0.2",ClampMax="0.8",Units="s")) float SkyWireDoubleTapSeconds=.45f;
  virtual void Landed(const FHitResult& Hit) override;
 
 public:

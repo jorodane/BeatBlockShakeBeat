@@ -65,7 +65,15 @@ void UBBSBCombatComponent::StartDefenseMotion(uint8 Mask,bool bHit)
  if(!GetWorld() || !DefensePresentation) return;
  const double Now=GetWorld()->GetTimeSeconds();
  if(!bHit && bDefenseHitReaction && Now-DefenseStartedAt<.18) return;
- UAnimSequence* Clip=bHit ? DefensePresentation->HitReaction.Get():DefensePresentation->FindParry(Mask);
+ UAnimSequence* Clip=nullptr;
+ if(bHit)
+ {
+  const auto* Actions=Character ? Character->FindComponentByClass<UBBSBFieldActionComponent>():nullptr;
+  HitReparatonForm=Actions ? Actions->GetReparatonForm():0;
+  Clip=HitReparatonForm==2 ? DefensePresentation->DualHitReaction.Get():HitReparatonForm==1 ? DefensePresentation->SplitHitReaction.Get():DefensePresentation->HitReaction.Get();
+  if(!Clip) Clip=DefensePresentation->HitReaction.Get();
+ }
+ else Clip=DefensePresentation->FindParry(Mask);
  if(!Clip) return;
  const bool SameChord=!bHit && !bDefenseHitReaction && Now-DefenseStartedAt<=.045;
  if(!SameChord) { DefenseStartedAt=Now;++DefenseMotionSerial; }

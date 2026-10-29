@@ -8,6 +8,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 
 bool UBBSBFieldActionComponent::EquipFieldEquipment(AActor* Equipment,FName Name)
 {
@@ -188,9 +189,15 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
  return true;
 }
 
+void UBBSBFieldActionComponent::IgnoreInkProjectiles(FCollisionQueryParams& Query) const
+{
+ if(!GetWorld()) return;
+ for(TActorIterator<ABBSBInkProjectile> It(GetWorld());It;++It) Query.AddIgnoredActor(*It);
+}
+
 bool UBBSBFieldActionComponent::IsEquipmentTarget(AActor* Actor) const
 {
- if(!IsValid(Actor)) return false;
+ if(!IsValid(Actor) || Actor->IsA<ABBSBInkProjectile>() || Actor->ActorHasTag(TEXT("BBSBIgnoreAim"))) return false;
  if(const auto* Object=Cast<ABBSBCarryObject>(Actor);Object && Object->bBroken) return false;
  if(FieldEquipment) return FieldEquipment==BunniarEquipment && Actor->Implements<UBBSBBunniarSurface>();
  if(const auto* Enemy=Cast<ABBSBInkEnemy>(Actor)) return !Enemy->bDefeated;
@@ -220,6 +227,7 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
  if(bEquipmentWheelOpen) return false;
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBEquipmentAim),true,Character);
  for(AActor* Ignored:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get(),BunniarEquipment.Get()}) Q.AddIgnoredActor(Ignored);
+ IgnoreInkProjectiles(Q);
  FHitResult CameraHit;
  if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent()) return false;
  if(FVector::DistSquared(Character->GetActorLocation(),CameraHit.ImpactPoint)<=FMath::Square(Reach))
@@ -238,6 +246,7 @@ bool UBBSBFieldActionComponent::TraceEquipmentAim(FHitResult& Hit) const
  if(IsValid(FieldEquipment) && FieldEquipment==BunniarEquipment) return true;
  // Keep the existing character cover check for combat weapons.
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBWeaponCover),true,Character);Q.AddIgnoredActor(FloatingWeapon);Q.AddIgnoredActor(OtherFloatingWeapon);Q.AddIgnoredActor(BunniarEquipment);
+ IgnoreInkProjectiles(Q);
  FHitResult Cover;
  return !GetWorld()->LineTraceSingleByChannel(Cover,Character->GetActorLocation()+FVector(0,0,25),Hit.ImpactPoint,ECC_Visibility,Q) || Cover.GetActor()==Hit.GetActor();
 }

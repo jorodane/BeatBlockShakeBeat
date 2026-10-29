@@ -24,6 +24,8 @@ class BBSB_API UBBSBDefensePresentation : public UDataAsset
 public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TArray<FBBSBDefenseClip> Parries;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> HitReaction;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> SplitHitReaction;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> DualHitReaction;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Authoring") TArray<TObjectPtr<ULevelSequence>> EditableSources;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Feedback") FLinearColor BlockColor=FLinearColor(.98f,.79f,.9f);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Feedback") FLinearColor HitColor=FLinearColor(.56f,.24f,.36f);

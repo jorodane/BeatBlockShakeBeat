@@ -10,6 +10,7 @@
 #include "BBSBFieldActions.generated.h"
 
 class ACharacter;
+struct FCollisionQueryParams;
 class UCameraComponent;
 class UStaticMeshComponent;
 class UStaticMesh;
@@ -47,12 +48,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Dodge", meta=(ClampMin="0.1")) float DodgeCooldown = 1.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Dodge", meta=(ClampMin="0.1")) float DodgeDuration = 0.3f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Dodge", meta=(ClampMin="0")) float DodgeDistance = 330.f;
+ /** Protect the whole accepted dash. Disable to author a shorter Start/End window. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Dodge") bool bFullDashInvulnerability=true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Dodge") float InvulnerableStart = 0.03f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Dodge") float InvulnerableEnd = 0.24f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Gestures", meta=(ClampMin="0.1")) float HoldThreshold = 0.35f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Gestures", meta=(ClampMin="100")) float FlickSpeed = 900.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Gestures", meta=(ClampMin="5")) float ShakeStrokePixels = 16.f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon", meta=(ClampMin="100")) float WeaponReach = 650.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon", meta=(ClampMin="100")) float WeaponReach = 1000.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") float WeaponHitRadius = 36.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") float BaseDamage = 18.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon") FName WeaponName = "Floating baton";
@@ -136,6 +139,7 @@ public:
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponRecoveryRemaining() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") float GetWeaponActionProgress() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool IsWeaponReturning() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Reparaton") int32 GetReparatonForm() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool CanContinueSwordCombo() const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") EBBSBActionState ActiveState = EBBSBActionState::Idle;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 RejectedActions = 0;
@@ -174,6 +178,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="BBSB|Practice") bool SetWeaponExperiment(EBBSBWeaponCommitment Preset);
 	UFUNCTION(BlueprintPure, Category="BBSB|Weapon") FBBSBWeaponActionRule GetWeaponRule(EBBSBFieldGesture Gesture, int32 Channel=0) const;
 	UFUNCTION(BlueprintCallable, Category="BBSB|Movement") bool TryDodge();
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") FVector ActiveDashDirection() const { return DodgeDirection; }
+ UFUNCTION(BlueprintPure,Category="BBSB|Movement") bool IsPrecisionWalking() const;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Precision walk") TObjectPtr<UStaticMeshComponent> HurtSphereGuide;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Precision walk") TSoftObjectPtr<UMaterialInterface> HurtSphereGuideMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/CombatField/MI_PlayerHurtSphere.MI_PlayerHurtSphere")));
 	UFUNCTION(BlueprintCallable, Category="BBSB|Practice") void ResetPracticeProps();
 	/** Debug hooks share the actual input pipeline, so automated checks exercise gameplay. */
 	UFUNCTION(Exec) void FieldGesturePress(int32 Channel = 0);
@@ -338,6 +346,7 @@ private:
 	bool bSavedRootMotionMode = false;
 
 	void BindControls();
+ void UpdateHurtSphereGuide();
 	void PrimaryDown(); void PrimaryUp(); void SecondaryDown(); void SecondaryUp();
 	void RotateHeldObject(float Steps);
 	void RotateHeldObjectUp(); void RotateHeldObjectDown();
@@ -360,7 +369,7 @@ private:
  void UpdateTravelTrail(FWeaponAction& Action,float PreviousTime,float CurrentTime);
  void FinishTravelTrail(FWeaponAction& Action);
  void UpdateAttackHighlight(FWeaponAction& Action,float Time);
- void EmitAttackImpact(FWeaponAction& Action,const FVector& Point,const FVector& Normal);
+ void EmitAttackImpact(FWeaponAction& Action,const FVector& Point,const FVector& Normal,bool bEnemyHit=false);
  void EmitSurfaceImpact(FWeaponAction& Action);
 	void TickPrototypeState();
 	void PresentPrototypeWeapon();
@@ -378,6 +387,8 @@ private:
  void TraceSwordBlade(const FTransform& From,const FTransform& To,FWeaponAction& Action);
 	void FinishDodge(bool bContinueMovement=false);
 	FVector FindAimPoint() const;
+ /** Applied to aim, hover, weapon sweeps and cover checks even if a projectile's profile changes. */
+ void IgnoreInkProjectiles(FCollisionQueryParams& Query) const;
 	void PlayGestureAnimation(EBBSBFieldGesture Gesture);
 	void CancelCurrentAction(bool bCancelGesture,bool bCountCancel=true);
 	void UpdateHover();

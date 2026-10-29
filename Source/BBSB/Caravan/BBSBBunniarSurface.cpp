@@ -130,7 +130,7 @@ bool ABBSBBunniarCompanion::CanMaintainSurfaceAttachment() const
   FVector::DistSquared(Player->GetActorLocation(),(SurfaceLocalFrame*SurfaceComponent->GetComponentTransform()).GetLocation())>FMath::Square(Player->FieldActions->WeaponReach)) return false;
  return bSurfaceAttached && IsValid(SurfaceComponent) && Player && Player->FieldActions->FieldEquipment==this &&
   (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) && !Player->Combat->bDead &&
-  (!bSurfaceViewLocked || !Player->Combat->IsStageLocked()) && !Player->FieldActions->IsDodging() &&
+  (!bSurfaceViewLocked || !Player->Combat->IsStageLocked()) &&
   (!FSlateApplication::IsInitialized() || FSlateApplication::Get().IsActive());
 }
 bool ABBSBBunniarCompanion::ApplySurfaceRetreat(float DeltaTime,float Required,FMinimalViewInfo& View)
@@ -329,14 +329,28 @@ bool ABBSBBunniarCompanion::BeginAirHoverFromCursor(APlayerController* Controlle
  Player->FieldActions->SetEquipmentPointerCapture(false);
  return true;
 }
+bool ABBSBBunniarCompanion::BeginWireAirAnchor(const FVector& Point)
+{
+ auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
+ if(!Player || !Player->FieldActions || bGliding || bSurfaceAttached || bAirHovering || AttachedDevice || Point.ContainsNaN()) return false;
+ SetOwner(Player);ReleaseSurfaceView();
+ const FVector Ray=(Point-GetActorLocation()).GetSafeNormal();
+ const FVector Face=AnimationSet ? AnimationSet->FaceDirection.GetSafeNormal():FVector::RightVector;
+ const FQuat ModelFrame=FRotationMatrix::MakeFromXZ(Visual->GetRelativeTransform().TransformVectorNoScale(Face),Visual->GetRelativeTransform().TransformVectorNoScale(FVector::UpVector)).ToQuat();
+ AirHoverPoint=Point;AirHoverRotation=FRotationMatrix::MakeFromXZ(-Ray,FVector::UpVector).ToQuat()*ModelFrame.Inverse();
+ SurfaceComponent=nullptr;SurfacePoint=Point;SurfaceNormal=-Ray;DragPixels=FVector2D::ZeroVector;
+ SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=GetWorld()->GetTimeSeconds();SurfaceArrivalAlpha=0;
+ bAirHovering=bWireAnchored=true;bSurfaceReturning=bSurfaceArrived=false;return true;
+}
+
 bool ABBSBBunniarCompanion::CanMaintainAirHover() const
 {
  const auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  const auto* Controller=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
  return bAirHovering && Player && Controller && Controller->IsLocalController() && Player->FieldActions &&
-  Player->FieldActions->FieldEquipment==this && (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) &&
+  (Player->FieldActions->FieldEquipment==this || bWireAnchored) && (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) &&
   !(Player->Combat && (Player->Combat->bDead || Player->Combat->IsStageLocked())) &&
-  !Player->FieldActions->IsDodging() && (!FSlateApplication::IsInitialized() || FSlateApplication::Get().IsActive());
+  (!FSlateApplication::IsInitialized() || FSlateApplication::Get().IsActive());
 }
 void ABBSBBunniarCompanion::HandleSurfaceDrag(FVector2D Delta)
 {

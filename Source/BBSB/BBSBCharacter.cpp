@@ -124,7 +124,8 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 		// find out which way is forward
 		const FRotator Rotation = GetController()->GetControlRotation();
 		FRotator MoveView=Rotation;
-		if(const auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->FieldEquipment):nullptr;Buddy && Buddy->bSurfaceViewLocked)
+		const auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->FieldEquipment):nullptr;
+		if((Combat && Combat->HasTargetLock()) || (Buddy && Buddy->bSurfaceViewLocked))
 			if(const auto* PC=Cast<APlayerController>(GetController())) { FVector Eye;PC->GetPlayerViewPoint(Eye,MoveView); }
 		const FRotator YawRotation(0, MoveView.Yaw, 0);
 
@@ -164,8 +165,16 @@ void ABBSBCharacter::DoJumpEnd()
 
 void ABBSBCharacter::DoDash()
 {
- if(Traversal && Traversal->IsParkourActive()) { Traversal->DropParkour();return; }
- if(Traversal && Traversal->IsWireTraversalActive()) return;
+ if(Traversal && Traversal->IsParkourActive()) { LastDashPressAt=-100;Traversal->DropParkour();return; }
+ if(Traversal && Traversal->IsWireTraversalActive()) { LastDashPressAt=-100;return; }
+ if(!GetWorld()) return;
+ const double Now=GetWorld()->GetRealTimeSeconds();
+ const bool DoublePress=Now>=LastDashPressAt && Now-LastDashPressAt<=FMath::Clamp(SkyWireDoubleTapSeconds,.2f,.8f);
+ // Consume the pair even if stock/path/action restrictions reject it. It must
+ // never become a buffered wire after a recovery, cooldown, or blocked path.
+ LastDashPressAt=DoublePress ? -100:Now;
+ if(DoublePress && Traversal && Traversal->TrySkyWire()) return;
+ if(FieldActions && FieldActions->IsDodging()) return;
  // Shift always uses the same directional dash, including when leaving glide.
  if (FieldActions && FieldActions->TryDodge())
   if(Traversal && Traversal->IsBunniarTraversalActive()) Traversal->EndGlide();
@@ -189,6 +198,7 @@ void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
  if(Traversal) Traversal->ApplyClimbCamera(DeltaTime,OutResult);
 	// A release blend also finishes when Tab switches away from Bunniar.
 	if(auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->BunniarEquipment):nullptr) Buddy->ApplySurfaceFocus(DeltaTime,OutResult);
+ if(Combat) { Combat->ApplyTargetLockCamera(OutResult);Combat->ApplyDamageCameraFeedback(OutResult); }
 }
 
 void ABBSBCharacter::FieldPress(int32 Channel) { if (FieldActions) FieldActions->FieldGesturePress(Channel); }
@@ -215,7 +225,7 @@ void ABBSBCharacter::CombatLabKey(FString KeyName,bool bPressed)
 {
 #if !UE_BUILD_SHIPPING
 	const FKey Key{FName(*KeyName)};
-	const TArray<FKey> Allowed={EKeys::LeftMouseButton,EKeys::RightMouseButton,EKeys::SpaceBar,EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
+	const TArray<FKey> Allowed={EKeys::LeftMouseButton,EKeys::RightMouseButton,EKeys::MiddleMouseButton,EKeys::LeftControl,EKeys::RightControl,EKeys::SpaceBar,EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
 	if (Allowed.Contains(Key))
 		if (APlayerController* PC=Cast<APlayerController>(GetController())) PC->InputKey(FInputKeyEventArgs::CreateSimulated(Key,bPressed ? IE_Pressed : IE_Released,bPressed ? 1.f : 0.f));
 #endif

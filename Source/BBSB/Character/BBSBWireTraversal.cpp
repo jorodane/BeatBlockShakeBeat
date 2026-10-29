@@ -18,16 +18,15 @@
 
 bool UBBSBTraversalComponent::TryWireRecall(ABBSBBunniarCompanion* Buddy)
 {
- if(!Character || WireCharges<=0 || !IsValid(Buddy) || IsWireTraversalActive() || IsBunniarTraversalActive() || IsParkourActive() || !Character->FieldActions || Character->FieldActions->FieldEquipment!=Buddy) return false;
- const auto* PC=Cast<APlayerController>(Character->GetController());
- if(!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || Character->FieldActions->PendingEquipmentId!=INDEX_NONE || (Character->Combat && (!Character->Combat->CanAttack() || Character->Combat->bDead))) return false;
+ if(!CanWireRecall(Buddy)) return false;
+ return BeginWirePull(Buddy,false);
+}
+
+bool UBBSBTraversalComponent::BeginWirePull(ABBSBBunniarCompanion* Buddy,bool Sky)
+{
  auto* Surface=Buddy->SurfaceComponent.Get();
- if(!Buddy->bAirHovering && (!Buddy->bSurfaceAttached || !IsValid(Surface) || Surface->GetOwner()->Implements<UBBSBBunniarSurface>())) return false;
  const FVector Anchor=Buddy->bAirHovering ? Buddy->AirHoverPoint:Buddy->SurfacePoint;
- if(FVector::DistSquared(Character->GetActorLocation(),Anchor)>FMath::Square(Character->FieldActions->WeaponReach+100.f)) return false;
- // Reject a blocked line rather than allowing the pull to tunnel through another wall.
- FCollisionQueryParams Query(SCENE_QUERY_STAT(BunniarWireStart),false,Character);Query.AddIgnoredActor(Buddy);FHitResult Hit;
- if(GetWorld()->LineTraceSingleByChannel(Hit,Character->GetActorLocation(),Anchor,ECC_Visibility,Query) && Hit.GetComponent()!=Surface) return false;
+ bSkyWire=Sky;
  auto* Move=Character->GetCharacterMovement();
  WireArrival=Buddy->bAirHovering ? EBBSBWireArrival::Air:Buddy->SurfaceNormal.Z>=Move->GetWalkableFloorZ() ? EBBSBWireArrival::Floor:EBBSBWireArrival::Wall;
  WireAnchor=Anchor;WireNormal=Buddy->SurfaceNormal.GetSafeNormal();WireBuddy=Buddy;WireSurface=Surface;
@@ -51,20 +50,6 @@ bool UBBSBTraversalComponent::TryWireRecall(ABBSBBunniarCompanion* Buddy)
  WireStartedAt=GetWorld()->GetTimeSeconds();WireMotionAge=0;WirePreviousStep=0;WirePreviousPosition=Character->GetActorLocation();
  bWirePulling=true;bWireArrival=bWireRecovering=false;WireRecoveryAge=-1;WireRecoveryYaw=WireCatchAlpha=0;Buddy->bWireAnchored=true;
  Character->FieldActions->SetEquipmentPointerCapture(false);
- if(WireSegments.IsEmpty())
- {
-  UStaticMesh* Cylinder=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-  for(int32 I=0;I<4;++I)
-  {
-   auto* Part=NewObject<USplineMeshComponent>(Character,MakeUniqueObjectName(Character,USplineMeshComponent::StaticClass(),TEXT("BunniarWire")));
-   Part->SetupAttachment(Character->GetRootComponent());Part->SetAbsolute(true,true,true);
-   Part->SetMobility(EComponentMobility::Movable);Part->SetStaticMesh(Cylinder);Part->SetForwardAxis(ESplineMeshAxis::Z,false);
-   Part->SetStartScale(FVector2D(.009f));Part->SetEndScale(FVector2D(.009f));Part->SetSplineUpDir(FVector::ForwardVector,false);
-   Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);Part->SetCastShadow(false);Part->bReceivesDecals=false;
-   if(Presentation && Presentation->WireMaterial) Part->SetMaterial(0,Presentation->WireMaterial);
-   Character->AddInstanceComponent(Part);Part->RegisterComponent();WireSegments.Add(Part);
-  }
- }
  UpdateWirePresentation();return true;
 }
 
@@ -80,7 +65,7 @@ void UBBSBTraversalComponent::CancelWireRecall()
 {
  if(!IsWireTraversalActive()) return;
  const bool WasPulling=bWirePulling,WasRecovering=bWireRecovering;
- bWirePulling=bWireArrival=bWireRecovering=false;WireRecoveryAge=-1;WireRecoveryYaw=WireCatchAlpha=0;
+ bWirePulling=bWireArrival=bWireRecovering=false;bSkyWire=false;WireRecoveryAge=-1;WireRecoveryYaw=WireCatchAlpha=0;
  if(WasRecovering) EndGlide();
  // Fade the flight pose on an aborted pull; contact poses belong to real arrivals.
  if(WasPulling) WireArrival=EBBSBWireArrival::Air;
@@ -165,7 +150,7 @@ void UBBSBTraversalComponent::TickWireMovement(float DT)
   }
   return;
  }
- if(!IsValid(WireBuddy) || !WireBuddy->bWireAnchored || Character->FieldActions->FieldEquipment!=WireBuddy ||
+ if(!IsValid(WireBuddy) || !WireBuddy->bWireAnchored || (!bSkyWire && Character->FieldActions->FieldEquipment!=WireBuddy) ||
   (WireArrival!=EBBSBWireArrival::Air && !WireSurface.IsValid())) { CancelWireRecall();return; }
  WireMotionAge=GetWorld()->GetTimeSeconds()-WireStartedAt;
  if(WireMotionAge>4.f) { CancelWireRecall();return; }
@@ -190,19 +175,42 @@ void UBBSBTraversalComponent::TickWireMovement(float DT)
  UpdateWirePresentation();
 }
 
+void UBBSBTraversalComponent::EnsureWireSegments()
+{
+ if(WireSegments.IsEmpty())
+ {
+  UStaticMesh* Cylinder=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+  for(int32 I=0;I<4;++I)
+  {
+   auto* Part=NewObject<USplineMeshComponent>(Character,MakeUniqueObjectName(Character,USplineMeshComponent::StaticClass(),TEXT("BunniarWire")));
+   Part->SetupAttachment(Character->GetRootComponent());Part->SetAbsolute(true,true,true);
+   Part->SetMobility(EComponentMobility::Movable);Part->SetStaticMesh(Cylinder);Part->SetForwardAxis(ESplineMeshAxis::Z,false);
+   Part->SetStartScale(FVector2D(.009f));Part->SetEndScale(FVector2D(.009f));Part->SetSplineUpDir(FVector::ForwardVector,false);
+   Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);Part->SetCastShadow(false);Part->bReceivesDecals=false;
+   if(Presentation && Presentation->WireMaterial) Part->SetMaterial(0,Presentation->WireMaterial);
+   Character->AddInstanceComponent(Part);Part->RegisterComponent();WireSegments.Add(Part);
+  }
+ }
+}
+
 void UBBSBTraversalComponent::UpdateWirePresentation()
 {
  if(!Character) return;
- const bool Visible=bWirePulling && IsValid(WireBuddy);
+ auto* Buddy=Cast<ABBSBBunniarCompanion>(Character->FieldActions ? Character->FieldActions->BunniarEquipment.Get():nullptr);
+ bWirePreviewVisible=!IsWireTraversalActive() && CanWireRecall(Buddy);
+ const bool Pull=bWirePulling && IsValid(WireBuddy),Visible=Pull || bWirePreviewVisible;
  const FVector Start=Character->GetMesh()->GetSocketLocation(TEXT("hand_l"));
- const FVector End=Visible ? WireBuddy->GetActorLocation()+FVector(0,0,10):Start;
+ const FVector End=Pull ? WireBuddy->GetActorLocation()+FVector(0,0,10):bWirePreviewVisible ? Buddy->GetActorLocation()+FVector(0,0,10):Start;
+ WirePreviewAnchor=bWirePreviewVisible ? (Buddy->bAirHovering ? Buddy->AirHoverPoint:Buddy->SurfacePoint):FVector::ZeroVector;
+ if(Visible) EnsureWireSegments();
  const FVector Line=End-Start;
- const float Sag=FMath::Min(18.f,Line.Size()*.035f)*(1.f-FMath::Clamp(WireCurrentSpeed/FMath::Max(1.f,WireSpeed),0.f,.9f));
+ const float Sag=Pull ? FMath::Min(18.f,Line.Size()*.035f)*(1.f-FMath::Clamp(WireCurrentSpeed/FMath::Max(1.f,WireSpeed),0.f,.9f)):FMath::Min(32.f,Line.Size()*.055f);
  auto Point=[&](float T){ return Start+Line*T-FVector::UpVector*(FMath::Sin(PI*T)*Sag); };
  auto Tangent=[&](float T){ return (Line-FVector::UpVector*(PI*FMath::Cos(PI*T)*Sag))/4.f; };
  for(int32 I=0;I<WireSegments.Num();++I) if(auto* Part=WireSegments[I].Get())
  {
   Part->SetVisibility(Visible);if(!Visible) continue;
+  Part->SetStartScale(FVector2D(Pull ? .009f:.0075f));Part->SetEndScale(FVector2D(Pull ? .009f:.0075f));
   Part->SetWorldTransform(FTransform::Identity);
   const float A=float(I)/4.f,B=float(I+1)/4.f;Part->SetStartAndEnd(Point(A),Tangent(A),Point(B),Tangent(B),true);
  }
@@ -211,7 +219,7 @@ void UBBSBTraversalComponent::UpdateWirePresentation()
 void UBBSBTraversalComponent::FinishWireRecovery()
 {
  const FVector Velocity=Character->GetCharacterMovement()->Velocity;
- bWireRecovering=false;WireRecoveryAge=-1;WireRecoveryYaw=0;WireCatchAlpha=1;WirePoseAlpha=0;WireSurface.Reset();
+ bWireRecovering=false;bSkyWire=false;WireRecoveryAge=-1;WireRecoveryYaw=0;WireCatchAlpha=1;WirePoseAlpha=0;WireSurface.Reset();
  RestoreWireMovement(false);auto* Move=Character->GetCharacterMovement();Move->Velocity=Velocity;
  if(bGliding) { GlidePoseAlpha=1;Move->AirControl=GlideAirControl;Move->GravityScale=Velocity.Z<=-GlideFallSpeed ? 0.f:GlideGravityScale; }
  if(JumpVortexComponent) JumpVortexComponent->Deactivate();

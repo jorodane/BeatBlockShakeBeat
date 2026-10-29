@@ -23,6 +23,20 @@ class UAnimSequence;
 class UBBSBDefensePresentation;
 class AHUD;
 class UCanvas;
+struct FMinimalViewInfo;
+
+USTRUCT(BlueprintType)
+struct FBBSBDamagePopup
+{
+ GENERATED_BODY()
+ UPROPERTY(BlueprintReadOnly) float Amount=0.f;
+ UPROPERTY(BlueprintReadOnly) FVector WorldPoint=FVector::ZeroVector;
+ UPROPERTY(BlueprintReadOnly) double StartedAt=0;
+ UPROPERTY(BlueprintReadOnly) float Drift=0.f;
+ UPROPERTY(BlueprintReadOnly) FVector2D ScreenOffset=FVector2D::ZeroVector;
+ UPROPERTY(BlueprintReadOnly) float Opacity=1.f;
+ UPROPERTY(BlueprintReadOnly) float SizeScale=1.f;
+};
 
 UCLASS(ClassGroup=(BBSB), meta=(BlueprintSpawnableComponent))
 class BBSB_API UBBSBCombatComponent : public UActorComponent
@@ -37,6 +51,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Vitals") float MaximumHealth=100.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Vitals") float Health=100.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ecstatic") float Ecstatic=0.f;
+ /** World-space sphere used only by free-field bullets; movement collision stays unchanged. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="1",ClampMax="80",Units="cm")) float FieldProjectileHurtRadius=18.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(Units="cm")) FVector FieldProjectileHurtOffset=FVector::ZeroVector;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Ecstatic") float MaximumEcstatic=500.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Ecstatic") float EntryBonus=75.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Ecstatic") float BlockGain=24.f;
@@ -79,6 +96,7 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") float DefensePoseTime=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") float DefensePoseWeight=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") bool bDefenseHitReaction=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 HitReparatonForm=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 DefenseMotionSerial=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 DefenseCombo=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") int32 BestDefenseCombo=0;
@@ -99,6 +117,35 @@ public:
  void GetDefensePose(UAnimSequence*& Clip,float& Time,float& Weight) const;
  void DrawDefenseFeedback(AHUD* HUD,UCanvas* Canvas) const;
  void DrawDefenseDirectionCues(AHUD* HUD,UCanvas* Canvas) const;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ToggleTargetLock();
+ UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ReleaseTargetLock();
+ UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool HasTargetLock() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool IsLockedTargetInAttackRange() const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="0",ClampMax="150",Units="cm")) float TargetLockCameraHeight=20.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Target lock") float TargetLockCameraLift=0.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Target lock") TObjectPtr<ABBSBInkEnemy> FieldLockedTarget;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="100",Units="cm")) float TargetLockRange=2000.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="100",Units="cm")) float TargetLockBreakRange=2600.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin=".1",Units="s")) float TargetLockOcclusionSeconds=.75f;
+ void ApplyTargetLockCamera(FMinimalViewInfo& View);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin=".2",ClampMax="2",Units="s")) float DamageNumberLifetime=.9f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0")) float DamageNumberRiseSpeed=145.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0")) float DamageNumberGravity=420.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin=".5",ClampMax="3")) float DamageNumberScale=1.6f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback") FLinearColor DamageNumberColor=FLinearColor(1.f,.91f,.72f,1.f);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2",Units="s")) float DamageShakeDuration=.24f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2",Units="deg")) float DamageShakeStrength=.18f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2",Units="s")) float DamageVignetteDuration=.5f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax=".6")) float DamageVignetteOpacity=.32f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") TArray<FBBSBDamagePopup> DamagePopups;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") float DamageVignetteAlpha=0.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") float DamageShakeAlpha=0.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") double LastPlayerDamageAt=-100;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") int32 PlayerDamageFeedbackSerial=0;
+ void ShowEnemyDamage(float Damage,const FVector& Point);
+ void ApplyDamageCameraFeedback(FMinimalViewInfo& View) const;
+ void DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const;
+ void DrawEnemyHealthBars(AHUD* HUD,UCanvas* Canvas) const;
 	bool BlocksMovement() const;
 	bool IsStageLocked() const;
 	bool CanAttack() const;
@@ -130,11 +177,26 @@ private:
 	TWeakObjectPtr<UPlayerInput> DebugInput;
 	TArray<TPair<int32,FKeyBind>> SavedViewBindings;
 	void RestoreViewBindings();
+ void TickTargetLock();
+ void TickDamageFeedback();
+ void StartPlayerDamageFeedback(float Damage);
+ void ResetDamageFeedback();
+ float PlayerDamageFeedbackScale=1.f;
+ int32 DamagePopupSerial=0;
+ double TargetOccludedAt=-1;
+ bool bTargetBoomSaved=false,bTargetOriginalLag=false,bTargetOriginalRotationLag=false;
+ FRotator TargetOrbitRotation=FRotator::ZeroRotator,TargetOrbitOffset=FRotator::ZeroRotator;
+ bool bTargetOrbitHasBearing=false,bTargetReleaseBlending=false;
+ FVector TargetReleaseLocalEye=FVector::ZeroVector;
+ float TargetReleaseElapsed=0.f;
 	FBBSBParryInput Inputs[4];
 	FBBSBParryTimingHistory TimingHistory;
 	void SyncTimingCoach();
 	bool bDownS=false, bDownX=false;
 	TSet<int32> RewardedEncounters;
+ /** Only field-bullet contacts share a short damage grace; fired shots keep moving through it. */
+ UPROPERTY(EditAnywhere,Category="BBSB|Field bullets",meta=(ClampMin="0",ClampMax="2",Units="s")) float FieldHitGraceSeconds=.45f;
+ double FieldDamageGraceUntil=-100;
 	float OriginalArmLength=250.f;
 	float OriginalCombatDistance=640.f;
 	FVector OriginalSocketOffset=FVector::ZeroVector;
@@ -192,6 +254,28 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") TObjectPtr<ABBSBCombatStage> Stage;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") FVector FormationTarget=FVector::ZeroVector;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") float LastDamageTaken=0;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Enemy|Health bar") bool bShowHealthBar=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Enemy|Health bar",meta=(ClampMin="0",Units="s")) float HealthTrailHoldSeconds=.75f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Enemy|Health bar",meta=(ClampMin=".05",Units="s")) float HealthTrailFadeSeconds=.35f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Enemy|Health bar") float DamageTrailHealth=0.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Enemy|Health bar") float RecentDamageTotal=0.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Enemy|Health bar") double LastHealthDamageAt=-100;
+ float GetDamageTrailHealth() const;
+ void RecordHealthDamage(float Before);
+ void ResetHealthFeedback();
+ void TickHealthFeedback();
+ /** Reversible free-field experiment. No formation, camera lock, or player relocation. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets") bool bFieldBulletHell=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="100",Units="cm")) float FieldAggroRadius=1350.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="100",Units="cm")) float FieldLoseAggroRadius=2300.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin=".1",Units="s")) float FieldLoseAggroSeconds=4.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="100",ClampMax="2000",Units="cm/s")) float FieldShotSpeed=650.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin=".25",Units="s")) float FieldVolleyInterval=1.05f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="3",ClampMax="32")) int32 FieldBulletsPerVolley=9;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") bool bFieldAggro=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldVolleysFired=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldShotsFired=0;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Field bullets") void AlertFieldPlayer(APawn* Target);
 	void JoinStage(ABBSBCombatStage* NewStage, bool bIsFront);
 	void ApplyWeaponImpulse(FVector Impulse);
 	void ResetEnemy();
@@ -201,6 +285,11 @@ public:
 	FVector Home=FVector::ZeroVector;
 	EBBSBInkPattern AuthoredPattern=EBBSBInkPattern::Tap;
 private:
+ TWeakObjectPtr<APawn> FieldTarget;
+ double NextFieldVolleyAt=0,FieldLastSeenAt=-100;
+ void TickFieldBulletHell(float DT);
+ void FireFieldVolley(APawn* Target);
+ float DamageTrailStartHealth=0.f;
 	double HitFlashUntil=-100;
 	double WeaponImpulseUntil=-100;
 };
@@ -312,6 +401,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") float Age=0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") int32 HoldGroup=INDEX_NONE;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") float Damage=8;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") bool bFieldProjectile=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") bool bResolved=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") TWeakObjectPtr<ABBSBCombatStage> OwningStage;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") TWeakObjectPtr<ABBSBInkEnemy> Source;
@@ -320,6 +410,8 @@ public:
  /** Read-only forecast using the same trajectory, body sweep and world obstruction rules as flight. */
  UFUNCTION(BlueprintPure,Category="BBSB|Ink") bool PredictBodyContact(ACharacter* Target,float MaxSeconds,FVector& Contact,float& Seconds) const;
 private:
+ // An invulnerable transit lasts until this pellet has fully left the same body.
+ TWeakObjectPtr<APawn> EvadedContactPawn;
 	float TravelSeconds=1.f;
 	int32 Bounces=0;
 	FVector Side=FVector::RightVector;
@@ -339,6 +431,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Practice") int32 EncounterID=1;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Practice") int32 EnemyCount=3;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Practice") bool bSpawnEnemies=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Practice") bool bFieldBulletHell=false;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Practice") float EnemyHealth=110.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Practice") int32 ExperimentPreset=0;
 	void CycleExperiment();
