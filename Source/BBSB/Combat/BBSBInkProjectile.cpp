@@ -1,4 +1,5 @@
 #include "BBSBCombat.h"
+#include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCombatVisuals.h"
 #include "Field/BBSBFieldActions.h"
 #include "Components/CapsuleComponent.h"
@@ -46,6 +47,7 @@ ABBSBInkProjectile::ABBSBInkProjectile()
 }
 void ABBSBInkProjectile::Initialize(ABBSBCombatStage* InStage,ABBSBInkEnemy* InSource,FVector Target,EBBSBInkPattern InPattern,float FlightSeconds,int32 InHoldGroup)
 {
+	Body->SetCustomDepthStencilValue(BBSBVisibilityStencil::Projectile);Body->SetRenderCustomDepth(BBSBVisibilityStencil::Enabled(GetWorld()));
 	OwningStage=InStage; Source=InSource; bFieldProjectile=InSource && InSource->bFieldBulletHell; Pattern=InPattern; FrozenTarget=Target; HoldGroup=InHoldGroup;
 	LaunchOrigin=GetActorLocation(); PreviousPosition=LaunchOrigin; TravelSeconds=FMath::Max(FlightSeconds,0.2f);
 	Damage=InSource ? InSource->ShotDamage : 8.f; FlightVelocity=(Target-LaunchOrigin)/TravelSeconds;
@@ -73,10 +75,11 @@ void ABBSBInkProjectile::Initialize(ABBSBCombatStage* InStage,ABBSBInkEnemy* InS
 void ABBSBInkProjectile::ResolveAndFade()
 {
 	if (bResolved) return; bResolved=true;
-	Body->SetVisibility(false); SetLifeSpan(0.06f);
+	SetActorHiddenInGame(true); SetLifeSpan(0.06f);
 }
 FVector ABBSBInkProjectile::FlightPosition(float AtAge) const
 {
+ if(bBeatProjectile) return BeatFlightPosition(AtAge);
  FVector Position=LaunchOrigin+FlightVelocity*AtAge;
  const float Progress=FMath::Clamp(AtAge/TravelSeconds,0.f,1.f);
  // Settle before body contact: decorative motion must not change the authored defense direction.
@@ -96,7 +99,7 @@ bool ABBSBInkProjectile::PredictBodyContact(ACharacter* Target,float MaxSeconds,
  if(bResolved || Pattern==EBBSBInkPattern::Area || !IsValid(Target) || !GetWorld() || !FMath::IsFinite(MaxSeconds) || MaxSeconds<=0) return false;
  FVector HurtCenter;float Radius,Half;PlayerHurtShape(this,Target,HurtCenter,Radius,Half);
  const float Horizon=GetLifeSpan()>0 ? FMath::Min(MaxSeconds,GetLifeSpan()):MaxSeconds;
- const float Reach=FlightVelocity.Size()*Horizon+2.f*ApproachOffset.Size()+280.f+Half+Radius;
+ const float Reach=FlightVelocity.Size()*Horizon+2.f*ApproachOffset.Size()+280.f+Half+Radius+BeatFlightReach(Horizon);
  if(FVector::DistSquared(GetActorLocation(),Target->GetActorLocation())>FMath::Square(Reach)) return false;
  const auto Query=InkFlightQuery(this,Target);
  const int32 Steps=FMath::Clamp(FMath::CeilToInt(Horizon/.0125f),1,128);
@@ -107,9 +110,9 @@ bool ABBSBInkProjectile::PredictBodyContact(ACharacter* Target,float MaxSeconds,
   const float Elapsed=(Index+1)*Step;
   FVector Next=Pattern==EBBSBInkPattern::Bounce ? Previous+Velocity*Step:FlightPosition(Age+Elapsed);
   FHitResult WorldHit;
-  const bool WorldBlocked=GetWorld()->SweepSingleByChannel(WorldHit,Previous,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(10.f),Query);
+  const bool WorldBlocked=GetWorld()->SweepSingleByChannel(WorldHit,Previous,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(CollisionRadius),Query);
   FVector BodyContact;float Fraction=1.f;
-  if(BBSBCombatRules::SweptCapsuleContact(Previous,Next,HurtCenter,Radius,Half,10.f,BodyContact,Fraction)
+  if(BBSBCombatRules::SweptCapsuleContact(Previous,Next,HurtCenter,Radius,Half,CollisionRadius,BodyContact,Fraction)
    && (!WorldBlocked || FVector::Dist(Previous,BodyContact)<=WorldHit.Distance))
   {
    Contact=BodyContact;Seconds=Index*Step+Fraction*Step;return true;
@@ -158,12 +161,12 @@ void ABBSBInkProjectile::Tick(float DT)
 		Age+=Step;
 		FVector Next=Pattern==EBBSBInkPattern::Bounce ? PreviousPosition+FlightVelocity*Step:FlightPosition(Age);
 		FHitResult WorldHit;
-		const bool bWorldHit=GetWorld()->SweepSingleByChannel(WorldHit,PreviousPosition,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(10.f),Query);
+		const bool bWorldHit=GetWorld()->SweepSingleByChannel(WorldHit,PreviousPosition,Next,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(CollisionRadius),Query);
   FVector Contact;float BodyFraction=1.f;bool bBodyHit=false;
   if(Combat && !Combat->bDead)
   {
    FVector HurtCenter;float HurtRadius,HurtHalf;PlayerHurtShape(this,Pawn,HurtCenter,HurtRadius,HurtHalf);
-   bBodyHit=BBSBCombatRules::SweptCapsuleContact(PreviousPosition,Next,HurtCenter,HurtRadius,HurtHalf,10.f,Contact,BodyFraction);
+   bBodyHit=BBSBCombatRules::SweptCapsuleContact(PreviousPosition,Next,HurtCenter,HurtRadius,HurtHalf,CollisionRadius,Contact,BodyFraction);
   }
   if(!bBodyHit) EvadedContactPawn.Reset();
   // A real body contact is the only parry/hit event. A nearer wall still intercepts first.
@@ -188,4 +191,5 @@ void ABBSBInkProjectile::Tick(float DT)
 		}
 		SetActorLocation(Next); PreviousPosition=Next;
 	}
+ if(bBeatProjectile && !bResolved) UpdateBeatVisual();
 }

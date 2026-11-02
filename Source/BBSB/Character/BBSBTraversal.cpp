@@ -165,6 +165,7 @@ void UBBSBTraversalComponent::EndGlide()
  }
  if (IsValid(Glider)) Glider->EndGlidePresentation();
  Glider=nullptr;bGliding=false;bGlideDashing=false;bAirLiftPending=false;bDashPhysicsSaved=false;PreviousDashStep=0;
+ GlideMomentumSpeed=0;
  DoubleJumpAge=-1;DoubleJumpYaw=0;GlideHandAlpha=1;AirDashPoseAlpha=0;
  if(JumpVortexComponent) JumpVortexComponent->DeactivateImmediate();
  if(DashDrillComponent) DashDrillComponent->DeactivateImmediate();
@@ -282,6 +283,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
    BunniarScale=Glider->AnimationSet ? Glider->AnimationSet->EquippedScale:.175f;
    if (bGliding)
    {
+    GlideMomentumSpeed=FMath::FInterpConstantTo(GlideMomentumSpeed,GlideSpeed,DT,FMath::Max(100.f,EnemyVaultCoastDeceleration));
     Move->AirControl=GlideAirControl;
     if(bAirLiftPending)
     {

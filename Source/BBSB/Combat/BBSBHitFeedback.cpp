@@ -1,4 +1,7 @@
 #include "Combat/BBSBCombat.h"
+#include "Combat/BBSBDamageCameraShake.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraModifier_CameraShake.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Field/BBSBFieldActions.h"
 #include "Camera/CameraTypes.h"
@@ -37,10 +40,23 @@ void UBBSBCombatComponent::StartPlayerDamageFeedback(float Damage)
  LastPlayerDamageAt=GetWorld()->GetTimeSeconds();
  PlayerDamageFeedbackScale=FMath::Clamp(Damage/12.f,.65f,1.f);
  ++PlayerDamageFeedbackSerial;
+ auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
+ if(!PC || !PC->IsLocalController() || !PC->PlayerCameraManager) return;
+ if(DamageShakeDuration<=0.f || DamageShakeStrength<=0.f || PC->GetViewTarget()!=Character)
+ {
+  if(DamageCameraShake) PC->PlayerCameraManager->StopCameraShake(DamageCameraShake,true);
+  DamageCameraShake=nullptr;return;
+ }
+ FAddCameraShakeParams Params(FMath::Clamp(DamageShakeStrength,0.f,2.f)*PlayerDamageFeedbackScale);
+ Params.DurationOverride=FMath::Clamp(DamageShakeDuration,.01f,2.f);
+ DamageCameraShake=PC->PlayerCameraManager->StartCameraShake(UBBSBDamageCameraShake::StaticClass(),Params);
 }
 
 void UBBSBCombatComponent::ResetDamageFeedback()
 {
+ if(auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr)
+  if(PC->PlayerCameraManager && DamageCameraShake) PC->PlayerCameraManager->StopCameraShake(DamageCameraShake,true);
+ DamageCameraShake=nullptr;
  DamagePopups.Reset();LastPlayerDamageAt=-100;DamageVignetteAlpha=DamageShakeAlpha=0.f;
 }
 
@@ -61,24 +77,6 @@ void UBBSBCombatComponent::TickDamageFeedback()
   Popup.SizeScale=T<PopSeconds ? FMath::InterpEaseOut(1.f,1.6f,T/PopSeconds,3.f)
    : FMath::Lerp(1.6f,.55f,FMath::SmoothStep(PopSeconds,Lifetime,T));
  }
-}
-
-void UBBSBCombatComponent::ApplyDamageCameraFeedback(FMinimalViewInfo& View) const
-{
- if(DamageShakeAlpha<=0.f || DamageShakeStrength<=0.f || !Character) return;
- const auto* PC=Cast<APlayerController>(Character->GetController());if(!PC || !PC->IsLocalController()) return;
- const float Age=GetWorld()->GetTimeSeconds()-LastPlayerDamageAt;
- const float A=DamageShakeAlpha*FMath::Clamp(DamageShakeStrength,0.f,2.f);
- // Apply only to this rendered view: never accumulate into control rotation or movement.
- View.Location+=View.Rotation.RotateVector(FVector(0,FMath::Sin(Age*83.f)*2.5f,FMath::Sin(Age*61.f)*1.7f)*A);
- bool Focus=false;FVector Point;
- if(HasTargetLock()) { Focus=true;Point=FieldLockedTarget->GetAimPoint(); }
- else if(const auto* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>())
-  if(const auto* Buddy=Cast<ABBSBBunniarCompanion>(Actions->BunniarEquipment);Buddy && Buddy->bSurfaceViewLocked)
-  { Focus=true;Point=Buddy->SurfacePoint; }
- if(Focus) View.Rotation=(Point-View.Location).Rotation();
- else View.Rotation+=FRotator(FMath::Sin(Age*71.f)*A,FMath::Sin(Age*57.f)*A*.6f,0);
- View.Rotation.Roll+=FMath::Sin(Age*67.f)*A*.55f;
 }
 
 void UBBSBCombatComponent::DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const

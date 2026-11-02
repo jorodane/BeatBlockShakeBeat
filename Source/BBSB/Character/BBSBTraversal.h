@@ -6,6 +6,7 @@
 
 class ABBSBCharacter;
 class ABBSBBunniarCompanion;
+class ABBSBInkEnemy;
 class UAnimSequence;
 class UBlendSpace;
 class UPoseSearchDatabase;
@@ -19,7 +20,7 @@ class UPrimitiveComponent;
 struct FMinimalViewInfo;
 
 UENUM(BlueprintType)
-enum class EBBSBWireArrival : uint8 { Air, Floor, Wall };
+enum class EBBSBWireArrival : uint8 { Air, Floor, Wall, Enemy };
 
 UENUM(BlueprintType)
 enum class EBBSBParkourMode : uint8 { None, LedgeHang, Mantle, Vault, WallSlide };
@@ -41,6 +42,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> WirePull;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> WireLanding;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> WireWallLatch;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Motion") TObjectPtr<UAnimSequence> EnemyVault;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour motion") TObjectPtr<UAnimSequence> LedgeHang;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour motion") TObjectPtr<UAnimSequence> LedgeClimb;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour motion") TObjectPtr<UAnimSequence> LowVault;
@@ -182,6 +184,16 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0",ClampMax="1",Units="s")) float WireWallSlideStartsAt=.3f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0",ClampMax="200",Units="cm/s")) float WireWallSlideSpeed=70.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Wire",meta=(ClampMin="0",Units="cm/s")) float DispatchLiftSpeed=220.f;
+ /** Enemy contact spends the same wire stock and never counts as ground recharge. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin=".03",ClampMax=".2",Units="s")) float EnemyVaultContactSeconds=.08f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin=".15",ClampMax=".6",Units="s")) float EnemyVaultRecoverySeconds=.30f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin="0",ClampMax="300",Units="cm/s")) float EnemyVaultRiseSpeed=140.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin=".1",ClampMax="1")) float EnemyVaultForwardSpeedScale=.5f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin="0",ClampMax="30",Units="deg")) float EnemyVaultPitchOffsetDegrees=10.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin="0")) float EnemyVaultDamage=16.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Enemy vault",meta=(ClampMin="100",Units="cm/s^2")) float EnemyVaultCoastDeceleration=800.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Enemy vault") FVector EnemyVaultExitVelocity=FVector::ZeroVector;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Enemy vault") float GlideMomentumSpeed=0.f;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Transient,Category="Wire") TArray<TObjectPtr<USplineMeshComponent>> WireSegments;
  UFUNCTION(BlueprintPure,Category="BBSB|Traversal") bool IsBunniarTraversalActive() const { return bGliding || bGlideDashing; }
  UFUNCTION(BlueprintCallable,Category="BBSB|Traversal") void EndGlide();
@@ -255,6 +267,9 @@ private:
  bool bWasFalling=false;
  float LastFallSpeed=0;
  UPROPERTY(Transient) TObjectPtr<ABBSBBunniarCompanion> WireBuddy;
+ TWeakObjectPtr<ABBSBInkEnemy> WireVaultEnemy;
+ FVector EnemyVaultForward=FVector::ForwardVector;
+ bool bEnemyVaultApproach=false;
  TWeakObjectPtr<UPrimitiveComponent> WireSurface;
  FVector WireLocalAnchor=FVector::ZeroVector,WireLocalNormal=FVector::UpVector,WireNormal=FVector::UpVector;
  FVector WireDestination=FVector::ZeroVector,WirePreviousPosition=FVector::ZeroVector;
@@ -310,6 +325,10 @@ private:
  bool bClimbQueued=false;
  void TickWireMovement(float DeltaTime);
  bool BeginWirePull(ABBSBBunniarCompanion* Buddy,bool Sky);
+ FVector EnemyVaultHead(const ABBSBInkEnemy* Enemy) const;
+ FVector EnemyVaultApproach(const ABBSBInkEnemy* Enemy,const FVector& Forward) const;
+ bool CanEnemyVaultPath(const ABBSBInkEnemy* Enemy) const;
+ void LaunchEnemyVault();
  void EnsureWireSegments();
  void TickWireRecharge(float DeltaTime);
  void FinishWireRecovery();

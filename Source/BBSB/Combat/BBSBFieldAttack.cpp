@@ -1,4 +1,5 @@
 #include "Combat/BBSBFieldAttack.h"
+#include "Character/BBSBVisibilityStencil.h"
 #include "Combat/BBSBCombatVisuals.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SceneComponent.h"
@@ -40,8 +41,11 @@ bool ABBSBFieldAttack::FloorAt(const FVector& Point,FVector& Floor) const
  Floor=Hit.ImpactPoint;return true;
 }
 
-void ABBSBFieldAttack::InitializeField(ABBSBInkEnemy* Enemy,EBBSBFieldAttackKind Kind,FVector Target,float Delay)
+void ABBSBFieldAttack::InitializeField(ABBSBInkEnemy* Enemy,EBBSBFieldAttackKind Kind,FVector Target,float Delay,float RadiusScale)
 {
+ const bool Silhouette=BBSBVisibilityStencil::Enabled(GetWorld());
+ for(auto* Part:{static_cast<UStaticMeshComponent*>(Body.Get()),static_cast<UStaticMeshComponent*>(Energy.Get()),static_cast<UStaticMeshComponent*>(Stones.Get())})
+ { Part->SetCustomDepthStencilValue(BBSBVisibilityStencil::Projectile);Part->SetRenderCustomDepth(Silhouette); }
  Source=Enemy;Attack=Kind;bFieldProjectile=true;Pattern=EBBSBInkPattern::Area;Damage=Enemy ? Enemy->ShotDamage:6.f;
  LaunchOrigin=GetActorLocation();FrozenTarget=Target;Age=0;LaunchDelay=FMath::Max(0.f,Delay);ContactedShapes.Reset();
  AttackSpeed=Enemy ? FMath::Max(100.f,Enemy->FieldShotSpeed):720.f;
@@ -75,7 +79,7 @@ void ABBSBFieldAttack::InitializeField(ABBSBInkEnemy* Enemy,EBBSBFieldAttackKind
   WarningSeconds=LaunchDelay+FlightSeconds;AttackRadius=185.f;AttackHeight=230.f;ArcHeight=FMath::Max(420.f,float(FVector::Dist2D(LaunchOrigin,Target))*.45f);
   TotalSeconds=WarningSeconds+ActiveSeconds+.2f;Damage*=1.2f;
  }
- else if(Kind==EBBSBFieldAttackKind::Donut)
+ else if(Kind==EBBSBFieldAttackKind::Donut || Kind==EBBSBFieldAttackKind::InwardRing)
  {
   if(!FloorAt(LaunchOrigin,ImpactPoint)) { Destroy();return; }
   AttackRadius=1150.f;AttackThickness=70.f;AttackHeight=115.f;WarningSeconds=.85f+LaunchDelay;ActiveSeconds=1.65f;
@@ -87,6 +91,7 @@ void ABBSBFieldAttack::InitializeField(ABBSBInkEnemy* Enemy,EBBSBFieldAttackKind
   Body->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube")));
   TotalSeconds=WarningSeconds+ActiveSeconds+.25f;Damage*=1.5f;
  }
+ AttackRadius*=FMath::Clamp(RadiusScale,.25f,2.f);
  auto Style=[&](UStaticMeshComponent* Part,FLinearColor Color,float Opacity)
  {
   if(auto* Base=LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/BBSB/VFX/Enemies/M_FieldAttack.M_FieldAttack")))
@@ -142,9 +147,9 @@ bool ABBSBFieldAttack::ContactAt(float Before,float Now,const FVector& Hurt,floa
   }
   return false;
  }
- if(Attack==EBBSBFieldAttackKind::Donut)
+ if(Attack==EBBSBFieldAttackKind::Donut || Attack==EBBSBFieldAttackKind::InwardRing)
  {
-  const float R=FMath::Lerp(180.f,AttackRadius,FMath::Clamp((Now-WarningSeconds)/ActiveSeconds,0.f,1.f));
+  const float R=RingRadiusAt(Now);
   return Hurt.Z+HurtRadius>=ImpactPoint.Z+25.f && Hurt.Z-HurtRadius<=ImpactPoint.Z+AttackHeight && FMath::Abs(float(FVector::Dist2D(Hurt,ImpactPoint))-R)<=AttackThickness*.5f+HurtRadius;
  }
  Contact=ImpactPoint+FVector(0,0,65);return Column(ImpactPoint,AttackRadius);
@@ -212,6 +217,12 @@ void ABBSBFieldAttack::Trim(UInstancedStaticMeshComponent* Mesh,int32 Count)
  Mesh->MarkRenderStateDirty();
 }
 
+float ABBSBFieldAttack::RingRadiusAt(float Time) const
+{
+ const float T=FMath::Clamp((Time-WarningSeconds)/FMath::Max(.05f,ActiveSeconds),0.f,1.f);
+ return Attack==EBBSBFieldAttackKind::InwardRing ? FMath::Lerp(AttackRadius,180.f,T):FMath::Lerp(180.f,AttackRadius,T);
+}
+
 void ABBSBFieldAttack::RenderShape()
 {
  MarkerCount=EnergyCount=StoneCount=0;Body->SetVisibility(false);
@@ -249,12 +260,23 @@ void ABBSBFieldAttack::RenderShape()
    }
   }
  }
- else if(Attack==EBBSBFieldAttackKind::Donut)
+ else if(Attack==EBBSBFieldAttackKind::Donut || Attack==EBBSBFieldAttackKind::InwardRing)
  {
-  const float Progress=FMath::Clamp((Age-WarningSeconds)/ActiveSeconds,0.f,1.f);const float Radius=FMath::Lerp(180.f,AttackRadius,Progress);
+  const float Radius=RingRadiusAt(Age);
   if(Age<WarningSeconds)
   {
-   Ring(Telegraph,MarkerCount,ImpactPoint+FVector(0,0,4),180.f,12,4);
+   const bool Inward=Attack==EBBSBFieldAttackKind::InwardRing;
+   Ring(Telegraph,MarkerCount,ImpactPoint+FVector(0,0,4),Inward ? AttackRadius:180.f,12,4);
+   if(Inward) for(int32 Arrow=0;Arrow<8;++Arrow)
+   {
+    const FVector Outward=FRotator(0,Arrow*45.f,0).Vector(),ArrowSide=FVector::CrossProduct(FVector::UpVector,Outward);
+    const FVector Tip=ImpactPoint+Outward*(AttackRadius-100.f)+FVector(0,0,4);
+    for(float Wing:{-35.f,35.f})
+    {
+     const FVector Tail=Tip+Outward*55.f+ArrowSide*Wing,Delta=Tail-Tip;
+     Instance(Telegraph,MarkerCount,(Tip+Tail)*.5f,FVector(Delta.Size(),7,4),Delta.Rotation());
+    }
+   }
    for(int32 Index=0;Index<48;Index+=2)
    {
     const float Angle=Index*360.f/48.f;Instance(Telegraph,MarkerCount,ImpactPoint+FRotator(0,Angle,0).Vector()*AttackRadius+FVector(0,0,3),FVector(8,60,3),FRotator(0,Angle,0));

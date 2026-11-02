@@ -13,7 +13,7 @@ class BBSB_API ABBSBFieldAttack : public ABBSBInkProjectile
 public:
  ABBSBFieldAttack();
  virtual void Tick(float DT) override;
- UFUNCTION(BlueprintCallable,Category="Field attack") void InitializeField(ABBSBInkEnemy* Enemy,EBBSBFieldAttackKind Kind,FVector Target,float Delay=0.f);
+ UFUNCTION(BlueprintCallable,Category="Field attack") void InitializeField(ABBSBInkEnemy* Enemy,EBBSBFieldAttackKind Kind,FVector Target,float Delay=0.f,float RadiusScale=1.f);
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Field attack") EBBSBFieldAttackKind Attack=EBBSBFieldAttackKind::GroundSpikes;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Field attack",meta=(ClampMin=".1",Units="s")) float WarningSeconds=.7f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Field attack",meta=(ClampMin=".05",Units="s")) float ActiveSeconds=.4f;
@@ -42,6 +42,7 @@ private:
  FVector ShellAt(float Time) const;
  FVector WavePoint(float Time,int32 Segment) const;
  bool ContactAt(float Before,float Now,const FVector& Hurt,float HurtRadius,int32& Shape,FVector& Contact) const;
+ float RingRadiusAt(float Time) const;
  void RenderShape();
  void Instance(UInstancedStaticMeshComponent* Mesh,int32& Count,const FVector& Point,const FVector& Size,FRotator Rotation=FRotator::ZeroRotator);
  void Ring(UInstancedStaticMeshComponent* Mesh,int32& Count,const FVector& Point,float Radius,float Width,float Height,int32 Segments=48);

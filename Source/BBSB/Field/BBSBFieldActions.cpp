@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Character/BBSBTraversal.h"
@@ -224,9 +225,14 @@ void UBBSBFieldActionComponent::RotateHeldObjectUp() { RotateHeldObject(1); }
 void UBBSBFieldActionComponent::RotateHeldObjectDown() { RotateHeldObject(-1); }
 void UBBSBFieldActionComponent::RotateHeldObject(float Steps)
 {
-	if(bEquipmentWheelOpen || bEquipmentInputBlocked || !IsGestureChannelHeld(0)) return;
-	if(auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
-		if(auto* Object=Cast<ABBSBCarryObject>(Buddy->SurfaceComponent->GetOwner())) Object->RotateFromWheel(Steps);
+	if(bEquipmentWheelOpen || bEquipmentInputBlocked) return;
+	if(IsGestureChannelHeld(0))
+	 if(auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
+		if(auto* Object=Cast<ABBSBCarryObject>(Buddy->SurfaceComponent->GetOwner())) { Object->RotateFromWheel(Steps);return; }
+ // Wheel up/down selects the previous/next on-screen target. Carry rotation
+ // keeps priority when the same wheel is manipulating a held Bunniar object.
+ if(auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;Combat && Combat->HasTargetLock())
+  Combat->CycleTargetLock(Steps>0 ? -1:Steps<0 ? 1:0);
 }
 void UBBSBFieldActionComponent::ToggleHelp() { bHelpVisible = !bHelpVisible; }
 
@@ -370,7 +376,7 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	else
 	{
 		const auto* Player=Cast<ABBSBCharacter>(Character);
-		Move->MaxWalkSpeed=Player && Player->Traversal && Player->Traversal->bGliding ? Player->Traversal->GlideSpeed:(IsPrecisionWalking() ? WalkSpeed:RunSpeed);
+		Move->MaxWalkSpeed=Player && Player->Traversal && Player->Traversal->bGliding ? FMath::Max(Player->Traversal->GlideSpeed,Player->Traversal->GlideMomentumSpeed):(IsPrecisionWalking() ? WalkSpeed:RunSpeed);
 		if (!CanMove()) { Character->ConsumeMovementInputVector(); Move->Velocity.X=Move->Velocity.Y=0; }
 	}
 	if (Camera)
@@ -685,7 +691,8 @@ bool UBBSBFieldActionComponent::EmitGesture(EBBSBFieldGesture Gesture, int32 Cha
 		const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
 		const bool Continuation=bGestureChain && Arbiter.State==EBBSBActionState::Attack;
   const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);
-  const bool WireRequest=!bGestureChain && Gesture==EBBSBFieldGesture::Beat && Channel==1 && Buddy && (Buddy->bAirHovering || Buddy->bSurfaceViewLocked);
+  const bool EnemyAnchor=Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent) && Cast<ABBSBInkEnemy>(Buddy->SurfaceComponent->GetOwner());
+  const bool WireRequest=!bGestureChain && Gesture==EBBSBFieldGesture::Beat && Channel==1 && Buddy && (Buddy->bAirHovering || Buddy->bSurfaceViewLocked || EnemyAnchor);
   const bool ExistingPlacement=bDodging && bGestureChain && Buddy && (Buddy->bSurfaceAttached || Buddy->bAirHovering);
   if ((bDodging && !ExistingPlacement) || (Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) && !Continuation && !WireRequest && !ExistingPlacement) || (Combat && !Combat->CanAttack())) return false;
 		if (EquipmentGesture.IsBound() && !EquipmentGesture.Execute(Gesture,Channel,Charge,!bGestureChain)) return false;
@@ -807,27 +814,54 @@ void UBBSBFieldActionComponent::TickWeapon(float DT)
 	if (T >= 1.f) { CurrentAction.Reset(); Arbiter.Clear(); ActiveState=EBBSBActionState::Idle; }
 }
 
-void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius)
+void UBBSBFieldActionComponent::TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius,bool bEnemyVolume)
 {
 	FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBFieldWeapon),false,Character);
 	Query.AddIgnoredActor(FloatingWeapon);
  IgnoreInkProjectiles(Query);
 	TArray<FHitResult> Hits;
-	GetWorld()->SweepMultiByChannel(Hits,From,To,FQuat::Identity,ECC_Visibility,FCollisionShape::MakeSphere(Radius>=0 ? Radius:WeaponHitRadius),Query);
+ const auto Shape=FCollisionShape::MakeSphere(Radius>=0 ? Radius:WeaponHitRadius);
+ if(bEnemyVolume)
+ {
+  // Pawn object queries collect every enemy in the cut, rather than stopping
+  // at the first visibility blocker. Ground does not swallow a generous sweep.
+  FCollisionObjectQueryParams Enemies;Enemies.AddObjectTypesToQuery(ECC_Pawn);
+  GetWorld()->SweepMultiByObjectType(Hits,From,To,FQuat::Identity,Enemies,Shape,Query);
+ }
+ else GetWorld()->SweepMultiByChannel(Hits,From,To,FQuat::Identity,ECC_Visibility,Shape,Query);
+ FCollisionQueryParams CoverQuery=Query;
+ if(bEnemyVolume && !Hits.IsEmpty())
+  for(TActorIterator<ABBSBInkEnemy> It(GetWorld());It;++It) CoverQuery.AddIgnoredActor(*It);
 	if (!Hits.IsEmpty()) LastTraceSummary=FString::Printf(TEXT("%d hits: %s point=%s"),Hits.Num(),*GetNameSafe(Hits[0].GetActor()),*Hits[0].ImpactPoint.ToCompactString());
-	for (const FHitResult& Hit : Hits)
+	for (FHitResult Hit : Hits)
 	{
 		AActor* Actor = Hit.GetActor();
 		if (!Actor || Action.HitActors.Contains(Actor)) continue;
 		if (Action.bRestrictToAimActor && Actor!=Action.AimActor.Get()) continue;
 		ABBSBBreakableProp* Prop = Cast<ABBSBBreakableProp>(Actor);
 		ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(Actor);
+  if(bEnemyVolume && !Enemy) continue;
 		ABBSBCarryObject* Object=Cast<ABBSBCarryObject>(Actor);
   if ((!Prop || Prop->bBroken) && (!Enemy || Enemy->bDefeated) && (!Object || Object->bBroken)) continue;
-		// Check each target from the player as well; sweeping around a corner cannot bypass a wall.
-		FHitResult Obstruction;
+  FHitResult Obstruction;
+  if(bEnemyVolume)
+  {
+   // Use the enemy's current collision surface, including initial overlaps.
+   // Test from the blade as well as the launch point: padding cannot reach
+   // across a thin wall even when the player can see around its other side.
+   auto* Component=Hit.GetComponent();if(!Component) continue;
+   const FVector BladePoint=FMath::ClosestPointOnSegment(Enemy->GetActorLocation(),From,To);
+   FVector Contact=Hit.ImpactPoint;
+   if(Component->GetClosestPointOnCollision(BladePoint,Contact)<0.f) continue;
+   if(GetWorld()->LineTraceSingleByChannel(Obstruction,BladePoint,Contact,ECC_Visibility,CoverQuery)) continue;
+   Hit.Location=BladePoint;Hit.ImpactPoint=Contact;
+   Hit.ImpactNormal=(BladePoint-Contact).GetSafeNormal();
+   if(Hit.ImpactNormal.IsNearlyZero()) Hit.ImpactNormal=-Action.Direction;
+  }
+		// Also reject targets hidden from the original attack origin.
+
 		const FVector Origin = Action.bSwordThrow ? Action.StartPose.GetLocation():Character->GetActorLocation()+FVector(0,0,30);
-		if (GetWorld()->LineTraceSingleByChannel(Obstruction,Origin,Hit.ImpactPoint,ECC_Visibility,Query) && Obstruction.GetActor()!=Actor) continue;
+		if (GetWorld()->LineTraceSingleByChannel(Obstruction,Origin,Hit.ImpactPoint,ECC_Visibility,CoverQuery) && Obstruction.GetActor()!=Actor) continue;
 		Action.HitActors.Add(Actor);
 		const float Damage = Action.bPrototype ? Action.ExactDamage : BaseDamage*Action.DamageScale*(1.f+Action.Charge);
 		const FVector Impulse=Action.Impulse;
@@ -964,7 +998,11 @@ void UBBSBFieldActionComponent::ResetActionState()
 void UBBSBFieldActionComponent::ClearHover()
 {
 	for (const FHoverState& State:HoverStates)
-		if (UPrimitiveComponent* Primitive=State.Primitive.Get()) { Primitive->SetRenderCustomDepth(State.bDepth); Primitive->SetCustomDepthStencilValue(State.Stencil); }
+		if (UPrimitiveComponent* Primitive=State.Primitive.Get())
+		{
+		 const bool StaleBuddy=Primitive->GetOwner()==BunniarEquipment && State.Stencil==137 && !BBSBVisibilityStencil::Enabled(GetWorld());
+		 Primitive->SetRenderCustomDepth(StaleBuddy ? false:State.bDepth);Primitive->SetCustomDepthStencilValue(StaleBuddy ? 0:State.Stencil);
+		}
 	if (ABBSBInkEnemy* Enemy=Cast<ABBSBInkEnemy>(HoveredActor))
 	{
 		const UBBSBCombatComponent* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
@@ -991,14 +1029,18 @@ void UBBSBFieldActionComponent::UpdateHover()
  {
   FHitResult Hit;if(TraceEquipmentAim(Hit) && IsEquipmentTarget(Hit.GetActor())) Target=Hit.GetActor();
  }
- if(!FieldEquipment && bWeaponAimLocked && IsEquipmentTarget(LockedAimActor)) Target=LockedAimActor;
- if(const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock()) Target=Combat->FieldLockedTarget;
+ if(!FieldEquipment && bWeaponAimLocked) Target=IsEquipmentTarget(LockedAimActor) ? LockedAimActor.Get():nullptr;
+ if(const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock())
+ { Target=Combat->FieldLockedTarget;LockedSurface=nullptr;HighlightBuddy=nullptr; }
 	const auto* TargetCombat=Character->FindComponentByClass<UBBSBCombatComponent>();
 	const bool LockedTarget=TargetCombat && TargetCombat->HasTargetLock() && TargetCombat->FieldLockedTarget==Target;
-	const int32 HighlightStencil=LockedTarget && !TargetCombat->IsLockedTargetInAttackRange() ? 5:bWeaponAimLocked || LockedSurface || LockedTarget ? 3:2;
+ const bool EquipmentFocus=!LockedTarget && (bWeaponAimLocked || LockedSurface);
+	const int32 BaseHighlightStencil=LockedTarget ? (TargetCombat->IsLockedTargetInAttackRange() ? 3:5):EquipmentFocus ? 4:2;
+	const int32 HighlightStencil=BBSBVisibilityStencil::Focus(BaseHighlightStencil,LockedTarget || EquipmentFocus,GetWorld());
+	const int32 BuddyStencil=BBSBVisibilityStencil::Focus(4,true,GetWorld());
 	if (Target==HoveredActor && LockedSurface==HoverLockedSurface.Get() && HighlightBuddy==HoverBuddy.Get())
 	{
-		for (const FHoverState& State:HoverStates) if (UPrimitiveComponent* Mesh=State.Primitive.Get()) { Mesh->SetRenderCustomDepth(true); Mesh->SetCustomDepthStencilValue(Mesh->GetOwner()==HighlightBuddy ? 4:HighlightStencil); }
+		for (const FHoverState& State:HoverStates) if (UPrimitiveComponent* Mesh=State.Primitive.Get()) { Mesh->SetRenderCustomDepth(true); Mesh->SetCustomDepthStencilValue(Mesh->GetOwner()==HighlightBuddy ? BuddyStencil:HighlightStencil); }
 		return;
 	}
 	ClearHover(); HoveredActor=Target;HoverLockedSurface=LockedSurface;HoverBuddy=HighlightBuddy;
@@ -1010,7 +1052,7 @@ void UBBSBFieldActionComponent::UpdateHover()
 	for (UPrimitiveComponent* Mesh:Meshes)
 	{
 		FHoverState State; State.Primitive=Mesh; State.bDepth=Mesh->bRenderCustomDepth; State.Stencil=Mesh->CustomDepthStencilValue; HoverStates.Add(State);
-		Mesh->SetRenderCustomDepth(true); Mesh->SetCustomDepthStencilValue(Mesh->GetOwner()==HighlightBuddy ? 4:HighlightStencil);
+		Mesh->SetRenderCustomDepth(true); Mesh->SetCustomDepthStencilValue(Mesh->GetOwner()==HighlightBuddy ? BuddyStencil:HighlightStencil);
 	}
 }
 

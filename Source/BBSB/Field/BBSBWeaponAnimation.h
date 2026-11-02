@@ -89,6 +89,9 @@ public:
  /** Center travel of the actual diagonal cut; the blade adds its own physical reach. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Sword cut",meta=(ClampMin="20",Units="cm")) float SwordSwingSpan=140.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade hit",meta=(ClampMin="1",ClampMax="20",Units="cm")) float BladeHitRadius=5.f;
+ /** Enemy-only thickness around the swept sword edge. Zero restores precise blade contact.
+  * Applied only during the authored cut, never during flight, embedded hold or recall. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Blade hit",meta=(ClampMin="0",ClampMax="100",Units="cm")) float SwordEnemyHitPadding=45.f;
  /** Independent weapon curves and upper-body animation while supported by Bunniar. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Glide attacks",meta=(TitleProperty="Sequence")) TArray<FBBSBWeaponAnimationClip> GlideClips;
  const FBBSBWeaponAnimationClip* FindClip(EBBSBFieldGesture Gesture,int32 Channel,int32 Combo,bool bGliding=false) const;

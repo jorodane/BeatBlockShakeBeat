@@ -13,6 +13,9 @@ class ABBSBCombatStage;
 class ABBSBInkProjectile;
 class ABBSBCombatPracticeArea;
 class UStaticMeshComponent;
+class UInstancedStaticMeshComponent;
+class USplineMeshComponent;
+class UCameraShakeBase;
 class UTextRenderComponent;
 class USpringArmComponent;
 class UAudioComponent;
@@ -26,7 +29,7 @@ class UCanvas;
 struct FMinimalViewInfo;
 
 UENUM(BlueprintType)
-enum class EBBSBFieldAttackKind : uint8 { Fan, GroundSpikes, SwordWave, Slam, Artillery, Donut };
+enum class EBBSBFieldAttackKind : uint8 { Fan, GroundSpikes, SwordWave, Slam, Artillery, Donut, InwardRing };
 
 UENUM(BlueprintType)
 enum class EBBSBFieldMotion : uint8 { Guard, Strafe, Pursue, Skirmish, Orbit };
@@ -57,6 +60,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Vitals") float MaximumHealth=100.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Vitals") float Health=100.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ecstatic") float Ecstatic=0.f;
+ /** Shared clock for the field metronome, weapon rhythm and small enemy shots. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field rhythm",meta=(ClampMin="40",ClampMax="240")) float FieldBPM=110.f;
  /** World-space sphere used only by free-field bullets; movement collision stays unchanged. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="1",ClampMax="80",Units="cm")) float FieldProjectileHurtRadius=18.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(Units="cm")) FVector FieldProjectileHurtOffset=FVector::ZeroVector;
@@ -124,6 +129,8 @@ public:
  void DrawDefenseFeedback(AHUD* HUD,UCanvas* Canvas) const;
  void DrawDefenseDirectionCues(AHUD* HUD,UCanvas* Canvas) const;
  UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ToggleTargetLock();
+ UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") bool CycleTargetLock(int32 Step);
+ void NotifyLockedTargetDefeated(ABBSBInkEnemy* Defeated);
  UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ReleaseTargetLock();
  UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool HasTargetLock() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool IsLockedTargetInAttackRange() const;
@@ -134,6 +141,8 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="100",Units="cm")) float TargetLockRange=2000.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="100",Units="cm")) float TargetLockBreakRange=2600.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin=".1",Units="s")) float TargetLockOcclusionSeconds=.75f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock") bool bAutoRetargetOnDefeat=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="0",ClampMax=".5",Units="s")) float TargetLockSwitchBlendSeconds=.16f;
  void ApplyTargetLockCamera(FMinimalViewInfo& View);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin=".2",ClampMax="2",Units="s")) float DamageNumberLifetime=.9f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0")) float DamageNumberRiseSpeed=145.f;
@@ -141,7 +150,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin=".5",ClampMax="3")) float DamageNumberScale=1.6f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback") FLinearColor DamageNumberColor=FLinearColor(1.f,.91f,.72f,1.f);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2",Units="s")) float DamageShakeDuration=.24f;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2",Units="deg")) float DamageShakeStrength=.18f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2")) float DamageShakeStrength=.18f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax="2",Units="s")) float DamageVignetteDuration=.5f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback",meta=(ClampMin="0",ClampMax=".6")) float DamageVignetteOpacity=.32f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") TArray<FBBSBDamagePopup> DamagePopups;
@@ -150,7 +159,7 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") double LastPlayerDamageAt=-100;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") int32 PlayerDamageFeedbackSerial=0;
  void ShowEnemyDamage(float Damage,const FVector& Point);
- void ApplyDamageCameraFeedback(FMinimalViewInfo& View) const;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") TObjectPtr<UCameraShakeBase> DamageCameraShake;
  void DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const;
  void DrawEnemyHealthBars(AHUD* HUD,UCanvas* Canvas) const;
 	bool BlocksMovement() const;
@@ -185,12 +194,18 @@ private:
 	TArray<TPair<int32,FKeyBind>> SavedViewBindings;
 	void RestoreViewBindings();
  void TickTargetLock();
+ bool CanSelectTargetLock() const;
+ bool IsTargetInAttackRange(const ABBSBInkEnemy* Target) const;
+ ABBSBInkEnemy* NearestTargetToCursor(const ABBSBInkEnemy* Exclude=nullptr) const;
+ void ActivateTargetLock(ABBSBInkEnemy* Target);
  void TickDamageFeedback();
  void StartPlayerDamageFeedback(float Damage);
  void ResetDamageFeedback();
  float PlayerDamageFeedbackScale=1.f;
  int32 DamagePopupSerial=0;
  double TargetOccludedAt=-1;
+ double TargetSwitchStartedAt=-100;
+ FRotator TargetSwitchFromRotation=FRotator::ZeroRotator;
  bool bTargetBoomSaved=false,bTargetOriginalLag=false,bTargetOriginalRotationLag=false;
  FRotator TargetOrbitRotation=FRotator::ZeroRotator,TargetOrbitOffset=FRotator::ZeroRotator;
  bool bTargetOrbitHasBearing=false,bTargetReleaseBlending=false;
@@ -285,6 +300,27 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin=".2",Units="s")) float FieldRecoverySeconds=1.1f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin="100",Units="cm")) float FieldHomeRadius=750.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern",meta=(ClampMin="100",Units="cm")) float FieldPreferredRange=750.f;
+ /** Opt-in roaming keeps authored combat arenas stationary. Distances are measured from the placed home. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field roaming") bool bFieldIdleWander=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field roaming",meta=(ClampMin="100",Units="cm")) float FieldWanderRadius=450.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field roaming",meta=(ClampMin="20",Units="cm/s")) float FieldWanderSpeed=90.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field roaming",meta=(ClampMin=".2",Units="s")) float FieldWanderPauseMin=1.3f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field roaming",meta=(ClampMin=".2",Units="s")) float FieldWanderPauseMax=3.7f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field roaming") bool bFieldWanderMoving=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field roaming") FVector FieldWanderGoal=FVector::ZeroVector;
+ /** Alternates the existing major attack with its species-specific second pattern. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field pattern") bool bEnableFieldSecondaryPattern=true;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") bool bFieldSecondaryWindingUp=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") int32 FieldSecondaryVolleysFired=0;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field beat fire") bool bEnableFieldBeatFire=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field beat fire",meta=(ClampMin="100",ClampMax="1000",Units="cm/s")) float FieldBeatShotSpeed=430.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field beat fire",meta=(ClampMin="0")) float FieldBeatShotDamage=3.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field beat fire",meta=(ClampMin="2",ClampMax="12",Units="cm")) float FieldBeatShotRadius=9.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field beat fire",meta=(ClampMin="1",ClampMax="6",Units="s")) float FieldBeatShotLifetime=4.25f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field beat fire") int32 FieldBeatBurstsFired=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field beat fire") int32 FieldBeatShotsFired=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field beat fire") int64 FieldLastFiredBeat=-1;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field beat fire") double FieldLastBeatShotAt=-100;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") bool bFieldWindingUp=false;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") bool bFieldRecovering=false;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") FVector FieldCommittedAim=FVector::ZeroVector;
@@ -308,8 +344,19 @@ private:
  FVector FieldRestScale=FVector(.75f,.65f,1.25f);
  UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> FieldOrnaments;
  void MoveInField(float DT,APawn* Target);
+ void ResetFieldWander();
+ FVector IdleFieldGoal();
+ bool ChooseFieldWanderGoal();
+ FRandomStream FieldWanderRandom;
+ bool bFieldWanderReady=false;
+ double NextFieldWanderAt=0,FieldWanderProgressAt=0,FieldWanderStartedAt=0;
+ FVector FieldWanderProgress=FVector::ZeroVector;
  void TickFieldBulletHell(float DT);
  void FireFieldVolley(APawn* Target);
+ void TickFieldBeatFire(APawn* Target,bool bVisible);
+ bool FireFieldSecondaryPattern(const FVector& Origin,const FVector& Aim);
+ int64 LastFieldBeatTick=-1;
+ double BeatFireArmedAt=-100,LastFieldMajorAt=-100;
  float DamageTrailStartHealth=0.f;
 	double HitFlashUntil=-100;
 	double WeaponImpulseUntil=-100;
@@ -423,10 +470,19 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") int32 HoldGroup=INDEX_NONE;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") float Damage=8;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") bool bFieldProjectile=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") bool bBeatProjectile=false;
+ /** Captured at launch; changing or defeating the emitter cannot alter a flying bullet. */
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") EBBSBFieldAttackKind BeatStyle=EBBSBFieldAttackKind::Fan;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") float BeatFlightSeconds=1.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") float BeatArcHeight=0.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") TObjectPtr<UInstancedStaticMeshComponent> BeatVisual;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") TArray<TObjectPtr<USplineMeshComponent>> BeatTrails;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Ink") float CollisionRadius=10.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") bool bResolved=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") TWeakObjectPtr<ABBSBCombatStage> OwningStage;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Ink") TWeakObjectPtr<ABBSBInkEnemy> Source;
 	void Initialize(ABBSBCombatStage* InStage, ABBSBInkEnemy* InSource, FVector Target, EBBSBInkPattern InPattern, float FlightSeconds, int32 InHoldGroup);
+ void InitializeBeat(ABBSBInkEnemy* Enemy,FVector Direction,float TargetDistance);
 	float TimeToTarget() const { return FMath::Max(0.f,TravelSeconds-Age); }
  /** Read-only forecast using the same trajectory, body sweep and world obstruction rules as flight. */
  UFUNCTION(BlueprintPure,Category="BBSB|Ink") bool PredictBodyContact(ACharacter* Target,float MaxSeconds,FVector& Contact,float& Seconds) const;
@@ -438,6 +494,11 @@ private:
 	FVector Side=FVector::RightVector;
 	FVector PreviousPosition=FVector::ZeroVector;
  FVector FlightPosition(float AtAge) const;
+ FVector BeatFlightPosition(float AtAge) const;
+ float BeatFlightReach(float Horizon) const;
+ void InitializeBeatVisual();
+ void UpdateBeatVisual();
+ float BeatCurveSign=1.f;
 	void ResolveAndFade();
 };
 

@@ -14,6 +14,7 @@
 #include "Field/BBSBFieldActions.h"
 #include "Character/BBSBAimGaze.h"
 #include "Character/BBSBTraversal.h"
+#include "Character/BBSBViewOcclusion.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
@@ -31,6 +32,7 @@ ABBSBCharacter::ABBSBCharacter()
 	AimGaze = CreateDefaultSubobject<UBBSBAimGazeComponent>(TEXT("AimGaze"));
  Traversal=CreateDefaultSubobject<UBBSBTraversalComponent>(TEXT("Traversal"));
  Interaction=CreateDefaultSubobject<UBBSBInteractionComponent>(TEXT("Interaction"));
+ ViewOcclusion=CreateDefaultSubobject<UBBSBViewOcclusionComponent>(TEXT("ViewOcclusion"));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 		
@@ -198,7 +200,7 @@ void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
  if(Traversal) Traversal->ApplyClimbCamera(DeltaTime,OutResult);
 	// A release blend also finishes when Tab switches away from Bunniar.
 	if(auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->BunniarEquipment):nullptr) Buddy->ApplySurfaceFocus(DeltaTime,OutResult);
- if(Combat) { Combat->ApplyTargetLockCamera(OutResult);Combat->ApplyDamageCameraFeedback(OutResult); }
+ if(Combat) Combat->ApplyTargetLockCamera(OutResult);
 }
 
 void ABBSBCharacter::FieldPress(int32 Channel) { if (FieldActions) FieldActions->FieldGesturePress(Channel); }

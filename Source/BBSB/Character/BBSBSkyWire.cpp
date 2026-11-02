@@ -18,6 +18,7 @@ bool UBBSBTraversalComponent::CanWireRecall(ABBSBBunniarCompanion* Buddy) const
  const auto* PC=Cast<APlayerController>(Character->GetController());
  if(!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || Character->FieldActions->PendingEquipmentId!=INDEX_NONE || (Character->Combat && (!Character->Combat->CanAttack() || Character->Combat->bDead)) || (Character->Interaction && Character->Interaction->bDialogueActive)) return false;
  auto* Surface=Buddy->SurfaceComponent.Get();
+ if(const auto* Enemy=Surface ? Cast<ABBSBInkEnemy>(Surface->GetOwner()):nullptr;Enemy && (Enemy->bDefeated || !CanEnemyVaultPath(Enemy))) return false;
  if(!Buddy->bAirHovering && (!Buddy->bSurfaceAttached || !IsValid(Surface) || Surface->GetOwner()->Implements<UBBSBBunniarSurface>())) return false;
  const FVector Anchor=Buddy->bAirHovering ? Buddy->AirHoverPoint:Buddy->SurfacePoint;
  if(FVector::DistSquared(Character->GetActorLocation(),Anchor)>FMath::Square(Character->FieldActions->WeaponReach+100.f)) return false;

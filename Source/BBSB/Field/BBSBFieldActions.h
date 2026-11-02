@@ -383,7 +383,7 @@ private:
  void UpdateSwordTarget(FWeaponAction& Action);
 	void WeaponOne(); void WeaponTwo(); void WeaponThree(); void WeaponFour(); void WeaponFive(); void WeaponSix();
 	void TickWeapon(float DeltaTime);
-	void TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius=-1.f);
+	void TraceWeapon(const FVector& From, const FVector& To, FWeaponAction& Action,float Radius=-1.f,bool bEnemyVolume=false);
  void TraceSwordBlade(const FTransform& From,const FTransform& To,FWeaponAction& Action);
 	void FinishDodge(bool bContinueMovement=false);
 	FVector FindAimPoint() const;

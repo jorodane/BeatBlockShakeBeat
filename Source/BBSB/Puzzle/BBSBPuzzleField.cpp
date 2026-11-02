@@ -4,6 +4,7 @@
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombatVisuals.h"
 #include "Components/InputComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/AudioComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -324,7 +325,7 @@ void ABBSBPuzzleStation::Tick(float DT)
  if (auto* Cam=UGameplayStatics::GetPlayerCameraManager(this,0)) Sign->SetWorldRotation((Cam->GetCameraLocation()-Sign->GetComponentLocation()).Rotation());
 }
 
-ABBSBPuzzleField::ABBSBPuzzleField() { PrimaryActorTick.bCanEverTick=true;SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("FieldOrigin"))); }
+ABBSBPuzzleField::ABBSBPuzzleField() { PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.TickGroup=TG_PostPhysics;SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("FieldOrigin"))); }
 void ABBSBPuzzleField::BeginPlay()
 {
  Super::BeginPlay();
@@ -340,6 +341,7 @@ void ABBSBPuzzleField::BindPlayer()
  {
   auto* PC=Cast<APlayerController>(Player->GetController());if(!PC || !Player->InputComponent) return;
   SafeStart=Player->GetActorLocation();Player->FieldActions->bShowPracticeHUD=false;
+  AddTickPrerequisiteComponent(Player->GetCharacterMovement());
   Controls=NewObject<UInputComponent>(this,TEXT("FieldPuzzleKeys"));Controls->RegisterComponent();Controls->Priority=5;
   Controls->BindKey(EKeys::R,IE_Pressed,this,&ABBSBPuzzleField::ResetNearest);Controls->BindKey(EKeys::BackSpace,IE_Pressed,this,&ABBSBPuzzleField::ResetAll);
   if(PC) { PC->PushInputComponent(Controls);PC->ClientSetHUD(ABBSBPuzzleFieldHUD::StaticClass()); }
@@ -347,8 +349,7 @@ void ABBSBPuzzleField::BindPlayer()
 }
 void ABBSBPuzzleField::ReleaseBoundary()
 {
- if (bOwnsMoveIgnore && Player) if (auto* PC=Cast<APlayerController>(Player->GetController())) PC->SetIgnoreMoveInput(false);
- bOwnsMoveIgnore=bReturning=false;
+ bReturning=false;
 }
 void ABBSBPuzzleField::EndPlay(const EEndPlayReason::Type Reason)
 {
@@ -387,23 +388,22 @@ void ABBSBPuzzleField::Tick(float DT)
   }
  }
  else { RhythmFocus.Reset();if(RhythmAudio) RhythmAudio->Stop();if(RhythmClick) RhythmClick->ResetAudio(); }
+ // Constrain only the outward displacement and horizontal velocity. The boundary
+ // never owns input, cancels equipment, releases Bunniar, or schedules a return walk.
  FVector Position=Player->GetActorLocation()-GetActorLocation();
- const double Radius=FMath::Sqrt(FMath::Square(Position.X/FMath::Max(100.,BoundaryRadii.X))+FMath::Square(Position.Y/FMath::Max(100.,BoundaryRadii.Y)));
- if (Radius>1 && !bReturning)
+ auto* Movement=Player->GetCharacterMovement();
+ const float Padding=Player->GetCapsuleComponent()->GetScaledCapsuleRadius()+8.f;
+ const double RX=FMath::Max(100.,BoundaryRadii.X-Padding),RY=FMath::Max(100.,BoundaryRadii.Y-Padding);
+ const double Radius=FMath::Sqrt(FMath::Square(Position.X/RX)+FMath::Square(Position.Y/RY));
+ const bool WasContact=bReturning;bReturning=Radius>=1. || (WasContact && Radius>.985);
+ if(bReturning && !WasContact) ++ReturnCount;
+ if(Radius>1.)
  {
-  bReturning=true;++ReturnCount;
-  if (auto* Buddy=Cast<ABBSBBunniarCompanion>(Player->FieldActions->FieldEquipment)) Buddy->ReleaseSurface();
-  Player->FieldActions->CancelEquipmentSelection();
-  if(auto* PC=Cast<APlayerController>(Player->GetController())) { PC->SetIgnoreMoveInput(true);bOwnsMoveIgnore=true; }
- }
- if (bReturning)
- {
-  if(Radius<ReturnHysteresis || Player->Combat->bDead) ReleaseBoundary();
-  else
-  {
-   FVector Direction(-Position.X/FMath::Square(BoundaryRadii.X),-Position.Y/FMath::Square(BoundaryRadii.Y),0);Direction.Normalize();
-   Player->ConsumeMovementInputVector();Player->AddMovementInput(Direction,1.f,true);
-  }
+  const FVector Inside(Position.X/Radius,Position.Y/Radius,Position.Z);
+  FHitResult Hit;Movement->SafeMoveUpdatedComponent(Inside-Position,Player->GetActorQuat(),true,Hit,ETeleportType::TeleportPhysics);
+  const FVector Normal=FVector(Position.X/(RX*RX),Position.Y/(RY*RY),0).GetSafeNormal();
+  const float Outward=FVector::DotProduct(Movement->Velocity,Normal);
+  if(Outward>0.f) Movement->Velocity-=Normal*Outward;
  }
  if (Position.Z<-1400)
  {
@@ -414,16 +414,14 @@ void ABBSBPuzzleField::Tick(float DT)
 void ABBSBPuzzleFieldHUD::DrawHUD()
 {
  Super::DrawHUD();auto* Player=Cast<ABBSBCharacter>(GetOwningPawn());auto* Field=Meadow::Field(GetWorld());
- if(Player && Player->Interaction && Player->Interaction->bDialogueActive) { Player->Interaction->DrawDialogue(this,Canvas);return; }
+ if(Player && Player->Interaction && Player->Interaction->bDialogueActive) return;
  if(!Canvas || !Player || !Field) return;auto* Actions=Player->FieldActions.Get();
- if(Actions->bEquipmentWheelOpen) { Actions->DrawEquipmentWheel(this,Canvas);return; }
+ if(Actions->bEquipmentWheelOpen) return;
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.3f),W=Canvas->ClipX,H=Canvas->ClipY,CX=W*.5f,CY=H*.5f;
  const FLinearColor Ink(.94f,.90f,.78f),Green(.57f,.85f,.66f),Rose(.95f,.58f,.65f),Paper(.13f,.17f,.16f,.85f);
- Actions->DrawContextAim(this,Canvas);
- DrawText(FString::Printf(TEXT("BUNNIAR MEADOW   %d / 20"),Field->SolvedCount),Ink,26*S,22*S,GEngine->GetMediumFont(),S);
- DrawText(Actions->FieldEquipment ? TEXT("Bunniar  |  Tab: sword"):TEXT("Sword  |  Tab: Bunniar"),Ink,W-270*S,22*S,GEngine->GetSmallFont(),S);
+ DrawText(FString::Printf(TEXT("BUNNIAR MEADOW   %d / 20"),Field->SolvedCount),Ink,26*S,102*S,GEngine->GetSmallFont(),S);
  DrawText(TEXT("WASD Run   Shift Dash   Space Jump / Glide toggle   Tab Switch / Hold for wheel"),Ink,26*S,H-34*S,GEngine->GetSmallFont(),S);
- if(Field->bReturning) { DrawRect(Paper,CX-230*S,105*S,460*S,42*S);DrawText(TEXT("The trail ends here. Returning to the meadow..."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
+ if(Field->bReturning) { DrawRect(Paper,CX-230*S,105*S,460*S,42*S);DrawText(TEXT("The meadow ends here. Move along the edge or turn back."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
  if(auto* Station=Field->Focus.Get())
  {
   const float X=CX-360*S,Y=58*S;
@@ -445,5 +443,5 @@ void ABBSBPuzzleFieldHUD::DrawHUD()
    for(int I=0;I<3;++I) { const FVector2D Point=Station->PointerOrigin+Meadow::WirePoints[I];DrawLine(Previous.X,Previous.Y,Point.X,Point.Y,I<Station->Step ? Green:Ink,3*S);DrawRect(I<Station->Step ? Green:Rose,Point.X-5*S,Point.Y-5*S,10*S,10*S);Previous=Point; }
   }
  }
- else DrawText(TEXT("Follow the numbered boards. Hold Bunniar against a surface; release to detach."),Ink,CX-310*S,62*S,GEngine->GetSmallFont(),S);
+
 }

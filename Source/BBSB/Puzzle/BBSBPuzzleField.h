@@ -1,7 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "GameFramework/HUD.h"
+#include "Field/BBSBFieldActions.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Caravan/BBSBBunniarSurface.h"
 #include "Field/BBSBFieldGesture.h"
@@ -112,13 +112,13 @@ private:
  TWeakObjectPtr<ABBSBPuzzleStation> RhythmFocus;
  int32 LastRhythmBeat=MIN_int32;
  FVector SafeStart;
- bool bOwnsMoveIgnore=false;
+
  void ReleaseBoundary();
  void BindPlayer();
 };
 
 UCLASS()
-class BBSB_API ABBSBPuzzleFieldHUD : public AHUD
+class BBSB_API ABBSBPuzzleFieldHUD : public ABBSBFieldPracticeHUD
 {
  GENERATED_BODY()
 public:

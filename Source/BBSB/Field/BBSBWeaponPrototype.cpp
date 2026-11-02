@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "Character/BBSBVisibilityStencil.h"
 #include "BBSB.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
@@ -156,12 +157,13 @@ void UBBSBFieldActionComponent::CreatePrototypeWeapon()
  FormProgress=0;
  FloatingWeapon->SetActorTransform(GetWeaponRestTransform()); OtherFloatingWeapon->SetActorTransform(GetWeaponRestTransform());
  PresentPrototypeWeapon(); LastWeaponPosition=FloatingWeapon->GetActorLocation();
+ BBSBVisibilityStencil::UpdateHandOccluders(Character,BBSBVisibilityStencil::Enabled(GetWorld()));
 }
 
 double UBBSBFieldActionComponent::WeaponBeatPosition() const
 {
  const UBBSBCombatComponent* C=Character ? Character->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
- return C && C->IsStageLocked() ? C->Stage->CurrentBeat : BBSBCombatRules::BeatAt(GetWorld()->GetTimeSeconds(),0,110);
+ return C && C->IsStageLocked() ? C->Stage->CurrentBeat : BBSBCombatRules::BeatAt(GetWorld()->GetTimeSeconds(),0,C ? C->FieldBPM:110.f);
 }
 
 void UBBSBFieldActionComponent::TickPrototypeState()
@@ -232,7 +234,7 @@ bool UBBSBFieldActionComponent::PrototypeGesture(EBBSBFieldGesture G,int32 Chann
   if (Release)
   {
    const float Seconds=WeaponChargeSeconds;
-   const double Beat=WeaponBeatPosition(); const float BPM=C && C->IsStageLocked() ? C->Stage->BPM : 110.f;
+   const double Beat=WeaponBeatPosition(); const float BPM=C && C->IsStageLocked() ? C->Stage->BPM : C ? C->FieldBPM:110.f;
    const bool OnBeat=FMath::Abs(Beat-FMath::RoundToDouble(Beat))*60.0/BPM<=RhythmWindowSeconds;
    if (!StartPrototypeAttack(G,Channel,BaseDamage*(1.f+Seconds)*(OnBeat ? 1.5f : 1.f),1.2f)) return false;
    bLastWeaponOnBeat=OnBeat; WeaponChargeSeconds=0; ChargingChannel=-1; return true;
@@ -581,7 +583,13 @@ void UBBSBFieldActionComponent::TraceSwordBlade(const FTransform& From,const FTr
  const uint32 Revision=Arbiter.Revision;
  for(int32 I=0;I<=Slices;++I)
  {
-  const float U=float(I)/Slices;TraceWeapon(FMath::Lerp(R0,T0,U),FMath::Lerp(R1,T1,U),A,Radius);
+  const float U=float(I)/Slices;
+  const FVector Start=FMath::Lerp(R0,T0,U),End=FMath::Lerp(R1,T1,U);
+  TraceWeapon(Start,End,A,Radius);
+  if(Arbiter.Revision!=Revision) return;
+  // Keep the authored world-space slash, with a readable enemy hit volume
+  // around the edge. All slices and both passes share one per-action hit set.
+  TraceWeapon(Start,End,A,Radius+FMath::Clamp(Settings->SwordEnemyHitPadding,0.f,100.f),true);
   if(Arbiter.Revision!=Revision) return;
  }
 }

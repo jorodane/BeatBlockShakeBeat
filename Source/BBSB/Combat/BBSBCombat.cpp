@@ -1,4 +1,5 @@
 #include "BBSBCombat.h"
+#include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCombatVisuals.h"
 #include "Combat/BBSBDefensePresentation.h"
 #include "BBSB.h"
@@ -475,7 +476,7 @@ ABBSBInkEnemy::ABBSBInkEnemy()
 void ABBSBInkEnemy::OnConstruction(const FTransform& Transform) { Super::OnConstruction(Transform); RebuildFieldAppearance();BBSBCombatVisuals::Tint(Body,Tint); UpdateLabel(); }
 void ABBSBInkEnemy::BeginPlay()
 {
- Super::BeginPlay(); Home=GetActorLocation(); FormationTarget=Home; Health=MaximumHealth; ResetHealthFeedback();Label->SetHiddenInGame(true); AuthoredPattern=MainPattern; RebuildFieldAppearance();BBSBCombatVisuals::Tint(Body,this->Tint); UpdateLabel();
+ Super::BeginPlay(); Home=GetActorLocation(); ResetFieldWander(); FormationTarget=Home; Health=MaximumHealth; ResetHealthFeedback();Label->SetHiddenInGame(true); AuthoredPattern=MainPattern; RebuildFieldAppearance();BBSBCombatVisuals::Tint(Body,this->Tint); UpdateLabel();
 	TArray<UStaticMeshComponent*> Parts; GetComponents(Parts);
 	for (UStaticMeshComponent* Part:Parts) if (Part->ComponentHasTag(TEXT("InkEye"))) BBSBCombatVisuals::Tint(Part,FLinearColor(0.02f,0.015f,0.035f));
 }
@@ -500,7 +501,7 @@ void ABBSBInkEnemy::Tick(float DT)
 	}
  }
  const bool Counter=Stage && Stage->IsCounterWindow();
- BBSBCombatVisuals::Tint(Body,GetWorld()->GetTimeSeconds()<HitFlashUntil ? FLinearColor(0.9f,0.65f,0.7f) : Counter || bFieldRecovering ? FLinearColor(.94f,.73f,.34f):bFieldWindingUp ? FLinearColor(1.f,.48f,.12f):this->Tint);
+ BBSBCombatVisuals::Tint(Body,GetWorld()->GetTimeSeconds()<HitFlashUntil ? FLinearColor(0.9f,0.65f,0.7f) : Counter || bFieldRecovering ? FLinearColor(.94f,.73f,.34f):bFieldWindingUp ? (bFieldSecondaryWindingUp ? FLinearColor(.7f,.35f,1.f):FLinearColor(1.f,.48f,.12f)):this->Tint);
 	if (APlayerCameraManager* Camera=UGameplayStatics::GetPlayerCameraManager(this,0)) Label->SetWorldRotation((Camera->GetCameraLocation()-Label->GetComponentLocation()).Rotation());
 }
 float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AController* InstigatorController,AActor* Causer)
@@ -518,6 +519,8 @@ float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AControll
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Body->SetRelativeScale3D(FVector(0.85f,0.8f,0.08f)); Body->SetRelativeLocation(FVector(0,0,-65));
 		if (IsValid(Stage)) Stage->EnemyDefeated(this);
+  if(auto* Player=UGameplayStatics::GetPlayerPawn(this,0))
+   if(auto* LocalCombat=Player->FindComponentByClass<UBBSBCombatComponent>()) LocalCombat->NotifyLockedTargetDefeated(this);
 	}
 	// Deal damage first. Entering a stage and granting Ecstatic happens strictly afterwards.
 	AActor* Attacker=InstigatorController ? InstigatorController->GetPawn() : Causer;
@@ -538,8 +541,10 @@ void ABBSBInkEnemy::ApplyWeaponImpulse(FVector Impulse)
 void ABBSBInkEnemy::JoinStage(ABBSBCombatStage* NewStage,bool bIsFront) { Stage=NewStage; bFront=bIsFront; UpdateLabel(); }
 void ABBSBInkEnemy::ResetEnemy()
 {
-	WeaponImpulseUntil=-100;FieldTarget.Reset();bFieldAggro=false;FieldVolleysFired=FieldShotsFired=0;NextFieldVolleyAt=0;FieldLastSeenAt=-100;
- bFieldWindingUp=bFieldRecovering=false;FieldReleaseAt=FieldRecoveryUntil=-100;
+	ResetFieldWander();WeaponImpulseUntil=-100;FieldTarget.Reset();bFieldAggro=false;FieldVolleysFired=FieldShotsFired=0;NextFieldVolleyAt=0;FieldLastSeenAt=-100;
+ bFieldWindingUp=bFieldRecovering=bFieldSecondaryWindingUp=false;FieldReleaseAt=FieldRecoveryUntil=-100;
+ FieldSecondaryVolleysFired=FieldBeatBurstsFired=FieldBeatShotsFired=0;LastFieldBeatTick=FieldLastFiredBeat=-1;
+ BeatFireArmedAt=LastFieldMajorAt=FieldLastBeatShotAt=-100;
 	Stage=nullptr; bDefeated=bFront=false; Health=MaximumHealth; ResetHealthFeedback();SetSelected(false);
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking); GetCharacterMovement()->SetAvoidanceEnabled(true);
@@ -553,6 +558,9 @@ void ABBSBInkEnemy::SetSelected(bool bSelected)
  if(bSelected)
   if(const auto* Pawn=UGameplayStatics::GetPlayerPawn(this,0))
    if(const auto* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock() && Combat->FieldLockedTarget==this && !Combat->IsLockedTargetInAttackRange()) Stencil=5;
+ if(bSelected)
+  if(const auto* Pawn=UGameplayStatics::GetPlayerPawn(this,0))
+   if(const auto* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>())Stencil=BBSBVisibilityStencil::Focus(Stencil,Combat->HasTargetLock() && Combat->FieldLockedTarget==this,GetWorld());
  Body->SetRenderCustomDepth(bSelected);Body->SetCustomDepthStencilValue(Stencil);
  for(UStaticMeshComponent* Part:FieldOrnaments) if(Part) { Part->SetRenderCustomDepth(bSelected);Part->SetCustomDepthStencilValue(Stencil); }
 }

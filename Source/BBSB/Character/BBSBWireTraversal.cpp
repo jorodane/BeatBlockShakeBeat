@@ -29,6 +29,14 @@ bool UBBSBTraversalComponent::BeginWirePull(ABBSBBunniarCompanion* Buddy,bool Sk
  bSkyWire=Sky;
  auto* Move=Character->GetCharacterMovement();
  WireArrival=Buddy->bAirHovering ? EBBSBWireArrival::Air:Buddy->SurfaceNormal.Z>=Move->GetWalkableFloorZ() ? EBBSBWireArrival::Floor:EBBSBWireArrival::Wall;
+ WireVaultEnemy=Surface ? Cast<ABBSBInkEnemy>(Surface->GetOwner()):nullptr;bEnemyVaultApproach=false;
+ if(auto* Enemy=WireVaultEnemy.Get())
+ {
+  WireArrival=EBBSBWireArrival::Enemy;
+  EnemyVaultForward=(Enemy->GetActorLocation()-Character->GetActorLocation()).GetSafeNormal2D();
+  if(EnemyVaultForward.IsNearlyZero()) EnemyVaultForward=Character->GetActorForwardVector().GetSafeNormal2D();
+  bEnemyVaultApproach=Character->GetActorLocation().Z-Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()<EnemyVaultHead(Enemy).Z+20.f;
+ }
  WireAnchor=Anchor;WireNormal=Buddy->SurfaceNormal.GetSafeNormal();WireBuddy=Buddy;WireSurface=Surface;
  if(Surface)
  {
@@ -66,6 +74,7 @@ void UBBSBTraversalComponent::CancelWireRecall()
  if(!IsWireTraversalActive()) return;
  const bool WasPulling=bWirePulling,WasRecovering=bWireRecovering;
  bWirePulling=bWireArrival=bWireRecovering=false;bSkyWire=false;WireRecoveryAge=-1;WireRecoveryYaw=WireCatchAlpha=0;
+ WireVaultEnemy.Reset();bEnemyVaultApproach=false;
  if(WasRecovering) EndGlide();
  // Fade the flight pose on an aborted pull; contact poses belong to real arrivals.
  if(WasPulling) WireArrival=EBBSBWireArrival::Air;
@@ -120,6 +129,15 @@ void UBBSBTraversalComponent::TickWireMovement(float DT)
  if(bWireRecovering)
  {
   WireRecoveryAge=WireMotionAge=GetWorld()->GetTimeSeconds()-WireRecoveryStartedAt;
+  if(WireArrival==EBBSBWireArrival::Enemy)
+  {
+   const float Duration=FMath::Max(.15f,EnemyVaultRecoverySeconds);
+   WireRecoveryYaw=0;WireCatchAlpha=FMath::SmoothStep(0.f,Duration-.02f,WireRecoveryAge);
+   Move->Velocity=WireRecoveryVelocity;
+   Move->Velocity.Z=FMath::Lerp(float(WireRecoveryVelocity.Z),-GlideFallSpeed,FMath::SmoothStep(0.f,Duration,WireRecoveryAge));
+   if(WireRecoveryAge>=Duration) FinishWireRecovery();
+   return;
+  }
   const float Duration=FMath::Max(.35f,WireRecoverySeconds),Spin=FMath::Min(WireSpinSeconds,Duration-.1f);
   const float Phase=FMath::SmoothStep(0.f,Duration,WireRecoveryAge);
   WireRecoveryYaw=-360.f*FMath::SmoothStep(0.f,Spin,WireRecoveryAge);
@@ -134,6 +152,16 @@ void UBBSBTraversalComponent::TickWireMovement(float DT)
  {
   if(!WireSurface.IsValid()) { CancelWireRecall();return; }
   WireMotionAge=GetWorld()->GetTimeSeconds()-WireArrivalAt;
+  if(WireArrival==EBBSBWireArrival::Enemy)
+  {
+   auto* Enemy=WireVaultEnemy.Get();
+   if(!IsValid(Enemy) || Enemy->bDefeated) { CancelWireRecall();return; }
+   WireAnchor=EnemyVaultHead(Enemy);
+   const FVector Contact=WireAnchor+FVector::UpVector*(Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+2.f);
+   Move->Velocity=((Contact-Character->GetActorLocation())/FMath::Max(DT,.0001f)).GetClampedToMaxSize(WireSpeed);
+   if(WireMotionAge>=FMath::Max(.03f,EnemyVaultContactSeconds)) LaunchEnemyVault();
+   return;
+  }
   const bool Wall=WireArrival==EBBSBWireArrival::Wall;
   Move->Velocity=Wall && WireMotionAge>=WireWallSlideStartsAt ? -FVector::UpVector*WireWallSlideSpeed:FVector::ZeroVector;
   if(WireMotionAge>=(Wall ? WireWallContactSeconds:WireArrivalSeconds))
@@ -154,21 +182,33 @@ void UBBSBTraversalComponent::TickWireMovement(float DT)
   (WireArrival!=EBBSBWireArrival::Air && !WireSurface.IsValid())) { CancelWireRecall();return; }
  WireMotionAge=GetWorld()->GetTimeSeconds()-WireStartedAt;
  if(WireMotionAge>4.f) { CancelWireRecall();return; }
- if(WireSurface.IsValid())
+ if(WireArrival==EBBSBWireArrival::Enemy)
+ {
+  const auto* Enemy=WireVaultEnemy.Get();
+  if(!IsValid(Enemy) || Enemy->bDefeated) { CancelWireRecall();return; }
+  WireAnchor=EnemyVaultHead(Enemy);WireNormal=FVector::UpVector;
+ }
+ else if(WireSurface.IsValid())
  {
   const FTransform Frame=WireSurface->GetComponentTransform();WireAnchor=Frame.TransformPosition(WireLocalAnchor);WireNormal=Frame.TransformVectorNoScale(WireLocalNormal).GetSafeNormal();
  }
  const FVector Position=Character->GetActorLocation();
  const float Radius=Character->GetCapsuleComponent()->GetScaledCapsuleRadius(),HalfHeight=Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
- WireDestination=WireArrival==EBBSBWireArrival::Floor ? WireAnchor+FVector(0,0,HalfHeight+2.f):
+ WireDestination=WireArrival==EBBSBWireArrival::Enemy ? (bEnemyVaultApproach ? EnemyVaultApproach(WireVaultEnemy.Get(),EnemyVaultForward):WireAnchor+FVector::UpVector*(HalfHeight+2.f)):
+  WireArrival==EBBSBWireArrival::Floor ? WireAnchor+FVector(0,0,HalfHeight+2.f):
   WireArrival==EBBSBWireArrival::Wall ? WireAnchor+WireNormal*(Radius+6.f):WireAnchor-(WireAnchor-Position).GetSafeNormal()*52.f;
- const FVector Delta=WireDestination-Position;const float Remaining=Delta.Size();
+ FVector Delta=WireDestination-Position;float Remaining=Delta.Size();
+ if(Remaining<=8.f && WireArrival==EBBSBWireArrival::Enemy && bEnemyVaultApproach)
+ {
+  bEnemyVaultApproach=false;WirePreviousStep=0;
+  WireDestination=WireAnchor+FVector::UpVector*(HalfHeight+2.f);Delta=WireDestination-Position;Remaining=Delta.Size();
+ }
  if(Remaining<=8.f) { ArriveFromWire();return; }
  // CharacterMovement performs swept capsule movement. A blocked pull always aborts safely.
  if(WirePreviousStep>3.f && FVector::Distance(Position,WirePreviousPosition)<WirePreviousStep*.15f) { CancelWireRecall();return; }
  WireDirection=Delta/Remaining;WirePreviousPosition=Position;
  const float Exit=WireArrival==EBBSBWireArrival::Air ? WireAirExitSpeed:80.f;
- const float Desired=FMath::Min(WireSpeed,FMath::Sqrt(Exit*Exit+2.f*WireAcceleration*Remaining));
+ const float Desired=WireArrival==EBBSBWireArrival::Enemy ? WireSpeed:FMath::Min(WireSpeed,FMath::Sqrt(Exit*Exit+2.f*WireAcceleration*Remaining));
  WireCurrentSpeed=FMath::FInterpConstantTo(WireCurrentSpeed,Desired,DT,WireAcceleration);
  WirePreviousStep=FMath::Min(Remaining,WireCurrentSpeed*FMath::Max(DT,.0001f));Move->Velocity=WireDirection*(WirePreviousStep/FMath::Max(DT,.0001f));
  if(!WireDirection.GetSafeNormal2D().IsNearlyZero()) Character->SetActorRotation(FMath::RInterpTo(Character->GetActorRotation(),WireDirection.GetSafeNormal2D().Rotation(),DT,14.f));
@@ -219,7 +259,7 @@ void UBBSBTraversalComponent::UpdateWirePresentation()
 void UBBSBTraversalComponent::FinishWireRecovery()
 {
  const FVector Velocity=Character->GetCharacterMovement()->Velocity;
- bWireRecovering=false;bSkyWire=false;WireRecoveryAge=-1;WireRecoveryYaw=0;WireCatchAlpha=1;WirePoseAlpha=0;WireSurface.Reset();
+ bWireRecovering=false;bSkyWire=false;WireRecoveryAge=-1;WireRecoveryYaw=0;WireCatchAlpha=1;WirePoseAlpha=0;WireSurface.Reset();WireVaultEnemy.Reset();bEnemyVaultApproach=false;
  RestoreWireMovement(false);auto* Move=Character->GetCharacterMovement();Move->Velocity=Velocity;
  if(bGliding) { GlidePoseAlpha=1;Move->AirControl=GlideAirControl;Move->GravityScale=Velocity.Z<=-GlideFallSpeed ? 0.f:GlideGravityScale; }
  if(JumpVortexComponent) JumpVortexComponent->Deactivate();
@@ -230,14 +270,15 @@ void UBBSBTraversalComponent::TickWireRecharge(float DT)
  const bool WasOnRechargeSurface=bWireOnRechargeSurface;
  bWireOnRechargeSurface=false;if(!Character || (Character->Combat && Character->Combat->bDead)) return;
  const auto* Move=Character->GetCharacterMovement();
- bWireOnRechargeSurface=Move->IsMovingOnGround() || ParkourMode==EBBSBParkourMode::LedgeHang || ParkourMode==EBBSBParkourMode::WallSlide || bWireArrival;
- if(!bWireOnRechargeSurface && (Move->IsFalling() || bWireRecovering))
+ const bool EnemyVaulting=WireArrival==EBBSBWireArrival::Enemy && IsWireTraversalActive();
+ bWireOnRechargeSurface=!EnemyVaulting && ((Move->IsMovingOnGround() && !Cast<APawn>(Move->CurrentFloor.HitResult.GetActor())) || ParkourMode==EBBSBParkourMode::LedgeHang || ParkourMode==EBBSBParkourMode::WallSlide || bWireArrival);
+ if(!EnemyVaulting && !bWireOnRechargeSurface && (Move->IsFalling() || bWireRecovering))
  {
   auto* Capsule=Character->GetCapsuleComponent();const FVector Position=Character->GetActorLocation();TArray<FHitResult> Hits;
   FCollisionQueryParams Q(SCENE_QUERY_STAT(BunniarWireRechargeContact),false,Character);Q.AddIgnoredActor(Character->FieldActions ? Character->FieldActions->BunniarEquipment.Get():nullptr);Q.bFindInitialOverlaps=true;
   const auto Shape=FCollisionShape::MakeCapsule(Capsule->GetScaledCapsuleRadius()+2.f,Capsule->GetScaledCapsuleHalfHeight()+2.f);
   GetWorld()->SweepMultiByChannel(Hits,Position,Position+FVector(0,0,-.1f),FQuat::Identity,ECC_Visibility,Shape,Q);
-  for(const auto& Hit:Hits) if(Hit.bBlockingHit && Hit.GetComponent()) { bWireOnRechargeSurface=true;break; }
+  for(const auto& Hit:Hits) if(Hit.bBlockingHit && Hit.GetComponent() && !Cast<APawn>(Hit.GetActor())) { bWireOnRechargeSurface=true;break; }
  }
  // Contact is a trigger, not a condition that must remain true throughout charging.
  // Using a wire while still supported must not re-arm recharge on the next frame.

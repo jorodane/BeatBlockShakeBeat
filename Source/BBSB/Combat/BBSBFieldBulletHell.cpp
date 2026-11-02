@@ -26,7 +26,7 @@ void ABBSBInkEnemy::AlertFieldPlayer(APawn* Target)
  if(!Combat || Combat->bDead) return;
  if(!bFieldAggro)
  {
-  bFieldAggro=true;NextFieldVolleyAt=GetWorld()->GetTimeSeconds()+.65;UpdateLabel();
+  bFieldAggro=true;NextFieldVolleyAt=GetWorld()->GetTimeSeconds()+.65;BeatFireArmedAt=GetWorld()->GetTimeSeconds()+.35;UpdateLabel();
  }
  FieldTarget=Target;FieldLastSeenAt=GetWorld()->GetTimeSeconds();
 }
@@ -72,9 +72,14 @@ void ABBSBInkEnemy::TickFieldBulletHell(float DT)
    {
     FireFieldVolley(Target);NextFieldVolleyAt=Now+FMath::Max(.25f,FieldVolleyInterval);
    }
-   else { bFieldWindingUp=true;FieldReleaseAt=Now+FMath::Max(.2f,FieldWindupSeconds);FieldCommittedAim=Target->GetActorLocation(); }
+   else
+   {
+    bFieldSecondaryWindingUp=bEnableFieldSecondaryPattern && FieldVolleysFired%2==1;
+    bFieldWindingUp=true;FieldReleaseAt=Now+FMath::Max(.2f,FieldWindupSeconds);FieldCommittedAim=Target->GetActorLocation();
+   }
   }
  }
+ TickFieldBeatFire(Target,Visible);
  MoveInField(DT,bFieldAggro ? Target:nullptr);
  const float Bob=GetVelocity().Size2D()>20.f ? 4.f*FMath::Sin(Now*10.f):1.5f*FMath::Sin(Now*2.f);
  Body->SetRelativeLocation(FVector(0,0,-6.f+Bob));
@@ -88,9 +93,10 @@ void ABBSBInkEnemy::MoveInField(float DT,APawn* Target)
  Movement->bOrientRotationToMovement=!Target;
  if(Now<WeaponImpulseUntil) { ConsumeMovementInputVector();return; }
  if(Target && (bFieldWindingUp || bFieldRecovering)) { ConsumeMovementInputVector();Movement->StopMovementImmediately();return; }
- const FVector Position=GetActorLocation();FVector Goal=Home;
+ const FVector Position=GetActorLocation();FVector Goal=bFieldIdleWander && !Target ? IdleFieldGoal():Home;
  if(Target)
  {
+  bFieldWanderMoving=false;NextFieldWanderAt=Now+1.f;
   const float Range=FVector::Dist2D(Position,Target->GetActorLocation());
   FVector Toward=(Target->GetActorLocation()-Position).GetSafeNormal2D();if(Toward.IsNearlyZero()) Toward=GetActorForwardVector();
   const FVector Side=FVector::CrossProduct(FVector::UpVector,Toward)*(FieldVolleysFired%2 ? -1.f:1.f);
@@ -106,6 +112,8 @@ void ABBSBInkEnemy::MoveInField(float DT,APawn* Target)
   Goal=Home+(Goal-Home).GetClampedToMaxSize2D(FMath::Max(100.f,FieldHomeRadius));
  }
  const FVector Delta=Goal-Position;
+ if(!Target && bFieldIdleWander) Movement->MaxWalkSpeed=FMath::Max(20.f,FieldWanderSpeed);
+ if(Delta.Size2D()<=24.f && !Target) { ConsumeMovementInputVector();Movement->StopMovementImmediately(); }
  if(Delta.Size2D()>24.f)
  {
   // Stay on reachable ground; CharacterMovement still sweeps walls and other pawns.
@@ -121,6 +129,9 @@ void ABBSBInkEnemy::FireFieldVolley(APawn* Target)
  if(FieldAttack!=EBBSBFieldAttackKind::Fan)
  {
   const FVector Origin=GetAimPoint();const FVector Side=FVector::CrossProduct(FVector::UpVector,(FieldCommittedAim-Origin).GetSafeNormal2D());
+  LastFieldMajorAt=GetWorld()->GetTimeSeconds();
+  if(bFieldSecondaryWindingUp && FireFieldSecondaryPattern(Origin,FieldCommittedAim))
+  { ++FieldSecondaryVolleysFired;++FieldVolleysFired;return; }
   auto Shape=[&](FVector Aim,float Delay)
   {
    FActorSpawnParameters Spawn;Spawn.Owner=this;Spawn.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;

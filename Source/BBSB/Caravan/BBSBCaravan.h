@@ -106,6 +106,8 @@ public:
  UFUNCTION(BlueprintCallable, Category="Bunniar|Surface") bool AttachFromCursor();
  UFUNCTION(BlueprintCallable, Category="Bunniar|Surface") void ReleaseSurface();
  void ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& View);
+ /** An attached-point focus waits behind an explicit enemy target lock. */
+ UFUNCTION(BlueprintPure,Category="Bunniar|Surface") bool IsSurfaceFocusActive() const;
  // Release only camera ownership; surface and wire attachment remain intact.
  void ReleaseSurfaceView();
  bool BeginWireAirAnchor(const FVector& Point);
@@ -132,6 +134,9 @@ private:
  FVector SurfaceBlendLocalEye=FVector::ZeroVector;
  float SurfaceBlendElapsed=0,SurfaceBlendRetreat=0;
  bool bSurfaceCameraBlending=false;
+ bool bSurfaceFocusSuppressed=false;
+ FQuat SurfaceResumeRotation=FQuat::Identity;
+ double SurfaceResumeStartedAt=-100;
  void BeginSurfaceCameraBlend(APlayerController* Controller);
  void ApplySurfaceCameraBlend(float DeltaTime,FMinimalViewInfo& View);
  bool ApplySurfaceRetreat(float DeltaTime,float Required,FMinimalViewInfo& View);

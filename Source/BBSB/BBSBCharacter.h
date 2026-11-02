@@ -15,6 +15,7 @@ class UBBSBCombatComponent;
 class UBBSBAimGazeComponent;
 class UBBSBTraversalComponent;
 class UBBSBInteractionComponent;
+class UBBSBViewOcclusionComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -66,6 +67,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB") TObjectPtr<UBBSBAimGazeComponent> AimGaze;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBTraversalComponent> Traversal;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBInteractionComponent> Interaction;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBViewOcclusionComponent> ViewOcclusion;
 
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;

@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
 #include "BBSB.h"
@@ -30,6 +31,7 @@ void UBBSBFieldActionComponent::EnsureBunniarEquipment()
  if (Buddy)
  {
   Buddy->SetOwner(Character); Buddy->bFollowing=true; BunniarEquipment=Buddy;
+  BBSBVisibilityStencil::UpdateHandOccluders(Character,BBSBVisibilityStencil::Enabled(GetWorld()));
   EquipmentGesture.BindUObject(Buddy,&ABBSBBunniarCompanion::HandleEquipmentGesture);
  }
 }

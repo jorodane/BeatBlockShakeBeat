@@ -67,7 +67,7 @@ void UBBSBFieldActionComponent::UpdateWeaponAim()
  if ((AimLockChannel<0 || !Channels[AimLockChannel].bHeld) && !CurrentAction.IsSet() && !OtherWeaponAction.IsSet())
  { ClearWeaponAim(); return; }
  const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
- if (Combat && Combat->IsStageLocked()) return; // The combat frame always has camera priority.
+ if (Combat && (Combat->IsStageLocked() || Combat->HasTargetLock())) return; // Keep the capture; the enemy owns the displayed camera.
  APlayerController* PC=Cast<APlayerController>(Character->GetController());
  if (!PC) return;
  FVector Eye; FRotator View; PC->GetPlayerViewPoint(Eye,View);
@@ -96,9 +96,11 @@ void UBBSBFieldActionComponent::UpdateWeaponAim()
 void UBBSBFieldActionComponent::DrawAimFeedback(AHUD* HUD) const
 {
  if (!HUD || !Character) return;
+ const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
+ if(Combat && Combat->HasTargetLock()) return;
  APlayerController* PC=Cast<APlayerController>(Character->GetController());
  if (!PC) return;
- const FLinearColor Color(0.62f,0.42f,0.54f,0.95f);
+ const FLinearColor Color(.96f,.96f,1.f,.95f);
  if (bWeaponAimLocked && !IsValid(LockedAimActor))
  {
   DrawDebugSphere(GetWorld(),LockedAimPoint,AimMarkerRadius,24,Color.ToFColor(true),false,0,0,1.5f);

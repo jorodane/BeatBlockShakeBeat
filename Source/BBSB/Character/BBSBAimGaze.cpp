@@ -150,16 +150,20 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
    if(const auto* Library=Traversal->Presentation.Get())
    {
     MotionClip=Traversal->bWirePulling || Traversal->WireArrival==EBBSBWireArrival::Air ? Library->WirePull.Get():
+     Traversal->WireArrival==EBBSBWireArrival::Enemy ? (Library->EnemyVault ? Library->EnemyVault.Get():Library->WireLanding.Get()):
      Traversal->WireArrival==EBBSBWireArrival::Floor ? Library->WireLanding.Get():Library->WireWallLatch.Get();
     MotionWeight=WireWeight;MotionTime=MotionClip ? FMath::Clamp(Traversal->WireMotionAge,0.f,MotionClip->GetPlayLength()):0;
+    if(MotionClip && Traversal->bWireArrival && Traversal->WireArrival==EBBSBWireArrival::Enemy)
+     MotionTime=FMath::Clamp(Traversal->WireMotionAge/FMath::Max(.03f,Traversal->EnemyVaultContactSeconds),0.f,1.f)*MotionClip->GetPlayLength()*Traversal->EnemyVaultContactSeconds/(Traversal->EnemyVaultContactSeconds+Traversal->EnemyVaultRecoverySeconds);
     if(Traversal->bWireArrival && Traversal->WireArrival==EBBSBWireArrival::Wall && Traversal->WireMotionAge>=Traversal->WireWallSlideStartsAt && Library->WallSlide)
     { MotionClip=Library->WallSlide;MotionTime=FMath::Clamp(Traversal->WireMotionAge-Traversal->WireWallSlideStartsAt,0.f,MotionClip->GetPlayLength()); }
    }
    if(Traversal->bWireRecovering)
    {
-    const auto* Library=Traversal->Presentation.Get();const float Age=Traversal->WireRecoveryAge,Duration=FMath::Max(.35f,Traversal->WireRecoverySeconds);
-    MotionClip=Library ? Library->DoubleJump.Get():nullptr;
-    MotionTime=MotionClip ? FMath::Clamp(Age/Duration,0.f,1.f)*MotionClip->GetPlayLength():0;
+    const bool EnemyVault=Traversal->WireArrival==EBBSBWireArrival::Enemy;
+    const auto* Library=Traversal->Presentation.Get();const float Age=Traversal->WireRecoveryAge,Duration=EnemyVault ? FMath::Max(.15f,Traversal->EnemyVaultRecoverySeconds):FMath::Max(.35f,Traversal->WireRecoverySeconds);
+    MotionClip=Library ? (EnemyVault && Library->EnemyVault ? Library->EnemyVault.Get():Library->DoubleJump.Get()):nullptr;
+    MotionTime=MotionClip ? FMath::Clamp(EnemyVault ? (Traversal->EnemyVaultContactSeconds+Age)/(Traversal->EnemyVaultContactSeconds+Duration):Age/Duration,0.f,1.f)*MotionClip->GetPlayLength():0;
     MotionWeight=WireWeight*(1.f-FMath::SmoothStep(Duration-.12f,Duration,Age));
     HangWeight=WireWeight*Traversal->WireCatchAlpha;GlideWeight=FMath::Max(GlideWeight,HangWeight);
     const FVector Up=Player->GetMesh()->GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector);

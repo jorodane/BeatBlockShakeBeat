@@ -26,7 +26,7 @@ FVector UBBSBFieldActionComponent::MovementDashDirection() const
 bool UBBSBFieldActionComponent::IsSurfaceAimLocked() const
 {
  const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);
- return Buddy && Buddy->bSurfaceAttached && Buddy->bSurfaceViewLocked && IsValid(Buddy->SurfaceComponent);
+ return Buddy && Buddy->IsSurfaceFocusActive();
 }
 
 void UBBSBFieldActionComponent::UpdateAimPresentation()
@@ -50,7 +50,7 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
  if(IsEquipmentTarget(Hit.GetActor()))
  {
   AimPresentation=EBBSBAimPresentation::Interactive;
-  AimPresentationColor=Cast<ABBSBInteractionNPC>(Hit.GetActor()) ? NPCAimColor:Cast<ABBSBCarryObject>(Hit.GetActor()) ? CarryAimColor:FieldEquipment ? DeviceAimColor:AttackAimColor;
+  AimPresentationColor=Cast<ABBSBInteractionNPC>(Hit.GetActor()) ? NPCAimColor:Cast<ABBSBCarryObject>(Hit.GetActor()) ? CarryAimColor:Cast<ABBSBInkEnemy>(Hit.GetActor()) ? AttackAimColor:FieldEquipment ? DeviceAimColor:AttackAimColor;
   return;
  }
  AimPresentation=EBBSBAimPresentation::Surface;AimPresentationColor=SurfaceAimColor;
