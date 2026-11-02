@@ -529,12 +529,12 @@ void UBBSBViewOcclusionComponent::RestoreVisibility()
  GeometryOccluders=CharacterOccluders=FallbackOccluders=0;
 }
 void UBBSBViewOcclusionComponent::EndPlay(const EEndPlayReason::Type Reason)
-{ bSilhouetteEnding=true;UpdateOccludedSilhouettes(false);GetWorld()->RemoveOnActorSpawnedHandler(SpawnHandler);RestoreVisibility();Super::EndPlay(Reason); }
+{ bSilhouetteEnding=true;UpdateFocusEdgePass();UpdateOccludedSilhouettes(false);GetWorld()->RemoveOnActorSpawnedHandler(SpawnHandler);RestoreVisibility();Super::EndPlay(Reason); }
 void UBBSBViewOcclusionComponent::TickComponent(float DT,ELevelTick TickType,FActorComponentTickFunction* TickFunction)
 {
  Super::TickComponent(DT,TickType,TickFunction);auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
  auto* Camera=PC ? PC->PlayerCameraManager.Get():nullptr;
- UpdateOccludedSilhouettes(IsOccludedSilhouetteActive());
+ UpdateFocusEdgePass();UpdateOccludedSilhouettes(IsOccludedSilhouetteActive());
  if(!Library || !Library->Collection || !Camera || !PC->IsLocalController()) { RestoreVisibility();return; }
  const FVector Eye=Camera->GetCameraLocation(),Focus=Character->GetActorLocation()+FVector(0,0,5);int32 W=0,H=0;PC->GetViewportSize(W,H);
  const bool Active=bEnabled && PC->GetViewTarget()==Character && W>0 && H>0;
@@ -581,6 +581,23 @@ void UBBSBViewOcclusionComponent::TickComponent(float DT,ELevelTick TickType,FAc
  }
 }
 
+
+void UBBSBViewOcclusionComponent::UpdateFocusEdgePass()
+{
+ auto* Camera=Character ? Character->GetFollowCamera():nullptr;
+ const auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
+ const bool Wanted=!bSilhouetteEnding && Camera && PC && PC->IsLocalController();
+ if(Wanted && !BoundFocusEdgeMaterial)
+ {
+  if(auto* Material=FocusEdgeMaterial.LoadSynchronous())
+  { Camera->AddOrUpdateBlendable(Material,1.f);BoundFocusEdgeMaterial=Material; }
+ }
+ else if(!Wanted && BoundFocusEdgeMaterial)
+ {
+  if(Camera)Camera->RemoveBlendable(BoundFocusEdgeMaterial);
+  BoundFocusEdgeMaterial=nullptr;
+ }
+}
 
 bool UBBSBViewOcclusionComponent::IsOccludedSilhouetteActive() const
 {

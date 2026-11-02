@@ -70,6 +70,8 @@ public:
  /** Filled silhouettes for occluded player, projectile bodies and the locked enemy. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Occluded silhouettes") bool bOccludedSilhouettesEnabled=true;
  UPROPERTY(EditAnywhere,Category="Occluded silhouettes") TSoftObjectPtr<UMaterialInterface> SilhouetteOutlineMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Stylized/PostProcess/M_PP_FocusOutline.M_PP_FocusOutline")));
+ /** Full-resolution Roberts Cross edge buffer, shared by visible and hidden focus contours. */
+ UPROPERTY(EditAnywhere,Category="Occluded silhouettes") TSoftObjectPtr<UMaterialInterface> FocusEdgeMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Stylized/PostProcess/M_PP_FocusEdges.M_PP_FocusEdges")));
  UFUNCTION(BlueprintPure,Category="Occluded silhouettes") bool IsOccludedSilhouetteActive() const;
  /** Optional circular reveal for terrain and props; disabled by default. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="View occlusion",meta=(EditCondition="bEnabled")) bool bEnvironmentMaskEnabled=false;
@@ -124,8 +126,10 @@ private:
  void RestoreCharacterVisibility();
  void IgnoreCamera(UPrimitiveComponent* Primitive);
  void UpdateOccludedSilhouettes(bool Active);
+ void UpdateFocusEdgePass();
  TWeakObjectPtr<UMeshComponent> SilhouettePlayerMesh;
  bool bSilhouetteActive=false,bSilhouetteEnding=false,bOriginalPlayerDepth=false,bAddedSilhouetteBlendable=false;
  int32 OriginalPlayerStencil=0;
  UPROPERTY(Transient) TObjectPtr<UMaterialInterface> BoundSilhouetteMaterial;
+ UPROPERTY(Transient) TObjectPtr<UMaterialInterface> BoundFocusEdgeMaterial;
 };

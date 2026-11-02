@@ -1036,7 +1036,7 @@ void UBBSBFieldActionComponent::UpdateHover()
 	const bool LockedTarget=TargetCombat && TargetCombat->HasTargetLock() && TargetCombat->FieldLockedTarget==Target;
  const bool EquipmentFocus=!LockedTarget && (bWeaponAimLocked || LockedSurface);
 	const int32 BaseHighlightStencil=LockedTarget ? (TargetCombat->IsLockedTargetInAttackRange() ? 3:5):EquipmentFocus ? 4:2;
-	const int32 HighlightStencil=BBSBVisibilityStencil::Focus(BaseHighlightStencil,LockedTarget || EquipmentFocus,GetWorld());
+	const int32 HighlightStencil=BBSBVisibilityStencil::Focus(BaseHighlightStencil,Target!=nullptr,GetWorld());
 	const int32 BuddyStencil=BBSBVisibilityStencil::Focus(4,true,GetWorld());
 	if (Target==HoveredActor && LockedSurface==HoverLockedSurface.Get() && HighlightBuddy==HoverBuddy.Get())
 	{

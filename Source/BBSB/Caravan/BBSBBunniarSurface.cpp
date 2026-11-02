@@ -360,6 +360,8 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
  Player->FieldActions->EquipmentPointerMotion.BindUObject(this,&ABBSBBunniarCompanion::HandleSurfaceDrag);
  if (AActor* Target=SurfaceComponent->GetOwner(); Target && Target->Implements<UBBSBBunniarSurface>())
   IBBSBBunniarSurface::Execute_BunniarAttached(Target,this,SurfacePoint,SurfaceNormal);
+ // Enemy placement commits the same wire pull as the secondary press.
+ if(Enemy && Player->Traversal) Player->Traversal->TryWireRecall(this);
  return true;
 }
 bool ABBSBBunniarCompanion::BeginAirHoverFromCursor(APlayerController* Controller)
