@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "Hunting/BBSBHunting.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
 #include "Framework/Application/SlateApplication.h"
@@ -199,8 +200,11 @@ void UBBSBFieldActionComponent::BindControls()
 	Input->BindKey(EKeys::RightMouseButton, IE_Released, this, &UBBSBFieldActionComponent::SecondaryUp);
 	Input->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &UBBSBFieldActionComponent::RotateHeldObjectUp).bConsumeInput=false;
 	Input->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &UBBSBFieldActionComponent::RotateHeldObjectDown).bConsumeInput=false;
-	Input->BindKey(EKeys::Tab, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentTabDown);
-	Input->BindKey(EKeys::Tab, IE_Released, this, &UBBSBFieldActionComponent::EquipmentTabUp);
+	Input->BindKey(EKeys::Q, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentTabDown);
+ Input->BindKey(EKeys::Tab, IE_Pressed, this, &UBBSBFieldActionComponent::ToggleInventory);
+ if(auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>())
+ { Input->BindKey(EKeys::E,IE_Pressed,Hunting,&UBBSBHuntingComponent::QuickCollectDown);Input->BindKey(EKeys::E,IE_Released,Hunting,&UBBSBHuntingComponent::QuickCollectUp); }
+	Input->BindKey(EKeys::Q, IE_Released, this, &UBBSBFieldActionComponent::EquipmentTabUp);
 	if (bEnablePracticeControls)
 	{
 		Input->BindKey(EKeys::R, IE_Pressed, this, &UBBSBFieldActionComponent::ResetPracticeProps);
@@ -235,6 +239,15 @@ void UBBSBFieldActionComponent::RotateHeldObject(float Steps)
   Combat->CycleTargetLock(Steps>0 ? -1:Steps<0 ? 1:0);
 }
 void UBBSBFieldActionComponent::ToggleHelp() { bHelpVisible = !bHelpVisible; }
+void UBBSBFieldActionComponent::ToggleInventory()
+{
+ if(auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr)Hunting->ToggleInventory();
+}
+void UBBSBFieldActionComponent::CancelLootGesture()
+{
+ Channels[0].Cancel();bSyntheticInput=false;SyntheticMotion=FVector2D::ZeroVector;
+}
+
 
 void UBBSBFieldActionComponent::FieldGesturePress(int32 Channel)
 {
@@ -260,7 +273,11 @@ void UBBSBFieldActionComponent::ExerciseGesture(int32 Index)
 
 void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
 {
- if (bEquipmentWheelOpen) return;
+ if(bEquipmentWheelOpen) { if(Channel==0)ConfirmEquipmentWheelClick();return; }
+ if(bEquipmentInputBlocked)return;
+ if(bInventoryLoadoutManaged && ((FieldEquipment && !bBunniarAvailable) || (!FieldEquipment && !AvailableWeapons.Contains(PrototypeWeapon))))return;
+ if(auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;Hunting && Hunting->bCollectionHeld)
+ { if(!Hunting->bQuickCollection && Channel==1)return;if(Hunting->bQuickCollection && FieldEquipment==BunniarEquipment)return; }
  if(Channel==1 && CanUseBunniarZoom()) { bBunniarZoomHeld=true;return; }
  if (auto* Player=Cast<ABBSBCharacter>(Character);Player && Player->Traversal)
  {
@@ -273,11 +290,16 @@ void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
  }
  if (PendingEquipmentId!=INDEX_NONE) return;
 	if (!Character || bDodging || Channel < 0 || Channel > 1 || Channels[Channel].bHeld) return;
+ if(Channel==0)
+  if(auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>();Hunting && Hunting->TryBeginCollection())
+  { if(Hunting->bCollectionHeld)Channels[0].Begin(GetWorld()->GetTimeSeconds());return; }
 	if (EmitGesture(EBBSBFieldGesture::Beat, Channel, 0.f,false)) Channels[Channel].Begin(GetWorld()->GetTimeSeconds());
 }
 
 void UBBSBFieldActionComponent::EndGesture(int32 Channel)
 {
+ if(Channel==0)if(auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;Hunting && Hunting->bCollectionHeld && !Hunting->bQuickCollection)
+ { Hunting->StopCollection();return; }
  if(Channel==1 && bBunniarZoomHeld) { bBunniarZoomHeld=false;return; }
 	if (!Character || Channel < 0 || Channel > 1 || !Channels[Channel].bHeld) return;
 	const double Now = GetWorld()->GetTimeSeconds();
@@ -407,8 +429,12 @@ void UBBSBFieldActionComponent::UpdateMouseMotion(double Now)
 	SyntheticMotion=FVector2D::ZeroVector;
 	if (FieldEquipment && bEquipmentPointerCaptured && !bEquipmentWheelOpen) EquipmentPointerMotion.ExecuteIfBound(FVector2D(Motion.X,-Motion.Y));
 	const auto Settings=GetGestureSettings();
+ const auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>();
 	for (int32 Index=0; Index<2; ++Index)
+ {
+  if(Index==0 && Hunting && Hunting->bCollectionHeld && !Hunting->bQuickCollection)continue;
 		for (auto Event : Channels[Index].Update(Now,Motion,Settings)) EmitGesture(Event,Index,GetCharge());
+ }
 	TickPrototypeState();
 }
 
@@ -420,6 +446,7 @@ void UBBSBFieldActionComponent::RecordMoveInput(float Right, float Forward)
 
 bool UBBSBFieldActionComponent::TryDodge()
 {
+ if(bEquipmentInputBlocked)return false;
  if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive) return false;
 	if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && (P->Traversal->IsWireTraversalActive() || P->Traversal->IsParkourActive())) return false;
  if (!Character || bDodging || GetDodgeCooldownRemaining() > 0.f) return false;
@@ -566,10 +593,12 @@ FVector UBBSBFieldActionComponent::FindAimPoint() const
 {
 	const APlayerController* PC = IsValid(Character) ? Cast<APlayerController>(Character->GetController()):nullptr;
 	if (!IsValid(PC) || !PC->IsLocalController() || !GetWorld()) return FindPrototypeCursorPoint();
+ if(PC->bShowMouseCursor)return FindPrototypeCursorPoint();
 	FVector Eye; FRotator Rotation;
 	PC->GetPlayerViewPoint(Eye,Rotation);
 	const UBBSBCombatComponent* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
 	const bool bSelectedAim=Combat && (Combat->HasTargetLock() || (Combat->IsStageLocked() && IsValid(Combat->SelectedEnemy)));
+ if(!bSelectedAim)return FindPrototypeCursorPoint();
 	const FVector End = Eye + Rotation.Vector() * 2500.f;
 	FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBFieldAim),false,Character);
 	if (FloatingWeapon) Query.AddIgnoredActor(FloatingWeapon);
@@ -918,6 +947,7 @@ bool UBBSBFieldActionComponent::CanStartJump() const
 }
 bool UBBSBFieldActionComponent::CanMove() const
 {
+ if(bEquipmentInputBlocked)return false;
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && (P->Traversal->IsWireTraversalActive() || P->Traversal->IsParkourActive())) return false;
  if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive) return false;
 	if (bEquipmentWheelOpen) return false;
@@ -934,6 +964,7 @@ bool UBBSBFieldActionComponent::IsConductorAvailable() const
 }
 float UBBSBFieldActionComponent::GetLookInputScale() const
 {
+ if(bEquipmentInputBlocked)return 0.f;
 	const UBBSBCombatComponent* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>() : nullptr;
 	if (Combat && (Combat->IsStageLocked() || Combat->HasTargetLock())) return 0.f;
  // Wire commits actions, never the view; skip the old attachment/gesture look-return delay.
@@ -947,6 +978,7 @@ float UBBSBFieldActionComponent::GetLookInputScale() const
 }
 void UBBSBFieldActionComponent::CancelCurrentAction(bool bCancelGesture,bool bCountCancel)
 {
+ if(bCancelGesture)if(auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;Hunting && Hunting->bCollectionHeld && !Hunting->bQuickCollection)Hunting->StopCollection();
  // Capture the visible world pose before clearing the damaging action or detaching an embedded weapon.
  FTransform ReturnFrom[2];bool Return[2]={false,false};
  if(bCancelGesture && !FieldEquipment && PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy && GetWorld())
@@ -1170,6 +1202,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	UBBSBFieldActionComponent* Actions=Pawn ? Pawn->FindComponentByClass<UBBSBFieldActionComponent>() : nullptr;
 	if (!Canvas || !Actions) return;
  if(const auto* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>()) Combat->DrawDamageFeedback(this,Canvas);
+ if(const auto* Hunting=Pawn->FindComponentByClass<UBBSBHuntingComponent>()) { Hunting->DrawFeedback(this,Canvas);if(Hunting->bInventoryOpen)Hunting->DrawLootNames(this,Canvas); }
  if(const auto* Dialogue=Pawn->FindComponentByClass<UBBSBInteractionComponent>();Dialogue && Dialogue->bDialogueActive) { Dialogue->DrawDialogue(this,Canvas);return; }
 	if (Actions->bEquipmentWheelOpen) { Actions->DrawEquipmentWheel(this,Canvas); return; }
 	const float Scale=FMath::Clamp(Canvas->SizeX/1280.f,0.7f,1.35f);
@@ -1295,7 +1328,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	if (Actions->FieldEquipment || Actions->PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy)
 	{
 		const float X=Canvas->ClipX-260*Scale;
-		DrawText(Actions->EquipmentLabel(Actions->EquippedEquipmentId())+TEXT("  |  Tab 전환 · 길게 선택"),FLinearColor(0.94f,0.82f,0.9f),X,18*Scale,GEngine->GetSmallFont(),Scale);
+		DrawText(Actions->EquipmentLabel(Actions->EquippedEquipmentId())+TEXT("  |  Q 전환 · 길게 선택   Tab 소지품"),FLinearColor(0.94f,0.82f,0.9f),X,18*Scale,GEngine->GetSmallFont(),Scale);
 		if (Actions->PendingEquipmentId!=INDEX_NONE) DrawText(TEXT("행동 종료 후 → ")+Actions->EquipmentLabel(Actions->PendingEquipmentId),FLinearColor(.98f,.80f,.58f),X,58*Scale,GEngine->GetSmallFont(),1.15f*Scale);
 
 		if (!Actions->FieldEquipment)

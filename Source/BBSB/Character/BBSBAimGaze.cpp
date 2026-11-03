@@ -9,6 +9,7 @@
 #include "AnimationRuntime.h"
 #include "TwoBoneIK.h"
 #include "BBSBCharacter.h"
+#include "Hunting/BBSBHunting.h"
 #include "Combat/BBSBCombat.h"
 #include "Field/BBSBFieldActions.h"
 #include "Animation/AnimInstanceProxy.h"
@@ -41,7 +42,8 @@ void UBBSBAimGazeComponent::TickComponent(float DT,ELevelTick Type,FActorCompone
  const APlayerController* PC=Cast<APlayerController>(Player->GetController());
  const bool HasLocalPlayerView=IsValid(PC) && PC->IsLocalController();
  // Keep ticking while unpossessed so a later player possession can resume head gaze.
- AimPoint=HasLocalPlayerView ? Player->FieldActions->VisualAimPoint():Player->GetMesh()->GetSocketLocation(TEXT("head"))+Player->GetActorForwardVector()*100.f;
+ const bool CursorGaze=HasLocalPlayerView && (PC->bShowMouseCursor || (Player->Hunting && Player->Hunting->bInventoryOpen));
+ AimPoint=HasLocalPlayerView && !CursorGaze ? Player->FieldActions->VisualAimPoint():Player->GetMesh()->GetSocketLocation(TEXT("head"))+Player->GetActorForwardVector()*100.f;
  const FRotator Relative=(Player->GetActorQuat().UnrotateVector(AimPoint-Player->GetMesh()->GetSocketLocation(TEXT("head")))).Rotation();
  const bool Enabled=HasLocalPlayerView && bEnableHeadGaze && !(Player->Combat && Player->Combat->bDead) && !Player->FieldActions->IsDodging();
  const float Weight=Enabled ? FMath::Clamp(AimWeight,0.f,1.f):0;

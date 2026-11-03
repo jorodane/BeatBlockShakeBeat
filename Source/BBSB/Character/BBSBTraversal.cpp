@@ -5,6 +5,7 @@
 #include "Caravan/BBSBBunniarAnimation.h"
 #include "Combat/BBSBCombat.h"
 #include "Field/BBSBFieldActions.h"
+#include "Hunting/BBSBHunting.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -91,6 +92,7 @@ bool UBBSBTraversalComponent::TryJump()
 bool UBBSBTraversalComponent::BeginGlide(bool bApplyLift)
 {
  if (!Character || !Character->FieldActions || IsParkourActive()) return false;
+ if(!Character->FieldActions->bBunniarAvailable)return false;
  auto* Buddy=Cast<ABBSBBunniarCompanion>(Character->FieldActions->BunniarEquipment);
  if (!IsValid(Buddy)) return false;
  RestoreWallJumpMovement();EndAirWeaponHang();WallJumpAge=-1;

@@ -420,7 +420,7 @@ void ABBSBPuzzleFieldHUD::DrawHUD()
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.3f),W=Canvas->ClipX,H=Canvas->ClipY,CX=W*.5f,CY=H*.5f;
  const FLinearColor Ink(.94f,.90f,.78f),Green(.57f,.85f,.66f),Rose(.95f,.58f,.65f),Paper(.13f,.17f,.16f,.85f);
  DrawText(FString::Printf(TEXT("BUNNIAR MEADOW   %d / 20"),Field->SolvedCount),Ink,26*S,102*S,GEngine->GetSmallFont(),S);
- DrawText(TEXT("WASD Run   Shift Dash   Space Jump / Glide toggle   Tab Switch / Hold for wheel"),Ink,26*S,H-34*S,GEngine->GetSmallFont(),S);
+ DrawText(TEXT("WASD Run   Shift Dash   Space Jump / Glide toggle   Q Switch / Hold for wheel   Tab Inventory"),Ink,26*S,H-34*S,GEngine->GetSmallFont(),S);
  if(Field->bReturning) { DrawRect(Paper,CX-230*S,105*S,460*S,42*S);DrawText(TEXT("The meadow ends here. Move along the edge or turn back."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
  if(auto* Station=Field->Focus.Get())
  {

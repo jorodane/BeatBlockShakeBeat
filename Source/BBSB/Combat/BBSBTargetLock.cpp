@@ -14,6 +14,20 @@
 
 namespace
 {
+ float LockSwitchAlpha(double Now,double StartedAt,float Seconds)
+ {
+  if(StartedAt<0 || Seconds<=0.f)return 1.f;
+  const float T=FMath::Clamp(float((Now-StartedAt)/Seconds),0.f,1.f);
+  return T*T*(3.f-2.f*T);
+ }
+ FVector BlendLockAim(const FVector& From,const FVector& To,float Alpha)
+ {
+  if(Alpha>=1.f || From.IsNearlyZero() || To.IsNearlyZero())return To;
+  // Rotate the focus about the pawn with the same progress as the boom. A
+  // straight chord can cross the pawn when targets lie on opposite sides.
+  const FQuat Bearing=FQuat::Slerp(From.Rotation().Quaternion(),To.Rotation().Quaternion(),Alpha).GetNormalized();
+  return Bearing.GetForwardVector()*FMath::Lerp(From.Size(),To.Size(),Alpha);
+ }
  bool TargetVisible(const ACharacter* Player,const ABBSBInkEnemy* Enemy,const FVector& Eye)
  {
   if(!IsValid(Player) || !IsValid(Enemy)) return false;
@@ -89,7 +103,7 @@ void UBBSBCombatComponent::ReleaseTargetLock()
    TargetReleaseElapsed=0;bTargetReleaseBlending=true;PC->SetControlRotation(Control.Rotator());
   }
  if(IsValid(FieldLockedTarget) && FieldLockedTarget!=SelectedEnemy) FieldLockedTarget->SetSelected(false);
- FieldLockedTarget=nullptr;TargetOccludedAt=-1;TargetSwitchStartedAt=-100;
+ FieldLockedTarget=nullptr;TargetOccludedAt=-1;TargetSwitchStartedAt=-100;TargetViewLocalAim=FVector::ZeroVector;
  if(bTargetBoomSaved && Boom)
  {
   Boom->bEnableCameraLag=bTargetOriginalLag;Boom->bEnableCameraRotationLag=bTargetOriginalRotationLag;
@@ -104,15 +118,16 @@ bool UBBSBCombatComponent::CanSelectTargetLock() const
  const auto* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>();
  const auto* Dialogue=Character->FindComponentByClass<UBBSBInteractionComponent>();
  return PC && PC->IsLocalController() && PC->GetViewTarget()==Character
-  && !(Actions && Actions->bEquipmentWheelOpen) && !(Dialogue && Dialogue->bDialogueActive);
+  && !(Actions && (Actions->bEquipmentWheelOpen || Actions->bEquipmentInputBlocked)) && !(Dialogue && Dialogue->bDialogueActive);
 }
 
-ABBSBInkEnemy* UBBSBCombatComponent::NearestTargetToCursor(const ABBSBInkEnemy* Exclude) const
+ABBSBInkEnemy* UBBSBCombatComponent::NearestTargetToCursor(const ABBSBInkEnemy* Exclude,bool bAwareOnly) const
 {
  auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;if(!PC)return nullptr;
  const FVector2D Cursor=LockCursor(PC);ABBSBInkEnemy* Best=nullptr;double BestPixels=MAX_dbl,BestWorld=MAX_dbl;bool BestInRange=false;
  for(const auto& Candidate:LockCandidates(Character,PC,TargetLockRange,Exclude))
  {
+  if(bAwareOnly && !Candidate.Enemy->IsAwareOfPlayer(Character))continue;
   const double Pixels=FVector2D::DistSquared(Candidate.Screen,Cursor);
   const bool InRange=FieldLockedTarget && IsTargetInAttackRange(Candidate.Enemy);
   if(!Best || (InRange && !BestInRange) || (InRange==BestInRange && (Pixels<BestPixels || (Pixels==BestPixels && Candidate.DistanceSquared<BestWorld))))
@@ -125,19 +140,26 @@ void UBBSBCombatComponent::ActivateTargetLock(ABBSBInkEnemy* Target)
 {
  if(!IsValid(Target) || Target->bDefeated || !Character)return;
  auto* PC=Cast<APlayerController>(Character->GetController());if(!PC)return;
+ const FVector Bearing=Target->GetAimPoint()-Character->GetActorLocation();
  const bool Switching=FieldLockedTarget && FieldLockedTarget!=Target;
  if(Switching)
  {
-  TargetSwitchFromRotation=PC->PlayerCameraManager ? PC->PlayerCameraManager->GetCameraRotation():PC->GetControlRotation();
+  // Keep the acquisition's pawn-to-target composition. Rebasing its offset
+  // against every new target leaves the eye behind while only the view turns.
+  TargetSwitchFromOrbit=TargetOrbitRotation;
+  TargetSwitchFromLocalAim=TargetViewLocalAim.IsNearlyZero() ? Bearing:TargetViewLocalAim;
   TargetSwitchStartedAt=GetWorld()->GetTimeSeconds();
  }
- else TargetSwitchStartedAt=-100;
+ else
+ {
+  TargetSwitchStartedAt=-100;
+  TargetOrbitRotation=PC->GetControlRotation();
+  TargetOrbitOffset=(TargetOrbitRotation-Bearing.Rotation()).GetNormalized();TargetOrbitOffset.Roll=0;
+  TargetViewLocalAim=Bearing;
+ }
  auto* Previous=FieldLockedTarget.Get();FieldLockedTarget=Target;
  if(IsValid(Previous) && Previous!=Target && Previous!=SelectedEnemy)Previous->SetSelected(false);
  Target->SetSelected(true);TargetOccludedAt=-1;PracticeFocusUntil=-100;
- TargetOrbitRotation=PC->GetControlRotation();
- const FVector Bearing=Target->GetAimPoint()-Character->GetActorLocation();
- TargetOrbitOffset=(TargetOrbitRotation-Bearing.Rotation()).GetNormalized();TargetOrbitOffset.Roll=0;
  bTargetOrbitHasBearing=Bearing.SizeSquared2D()>FMath::Square(50.f);bTargetReleaseBlending=false;
  if(Boom)
  {
@@ -185,7 +207,7 @@ void UBBSBCombatComponent::NotifyLockedTargetDefeated(ABBSBInkEnemy* Defeated)
 {
  if(!FieldLockedTarget || FieldLockedTarget!=Defeated)return;
  if(bAutoRetargetOnDefeat && CanSelectTargetLock())
-  if(auto* Next=NearestTargetToCursor(Defeated)) { ActivateTargetLock(Next);return; }
+  if(auto* Next=NearestTargetToCursor(Defeated,true)) { ActivateTargetLock(Next);return; }
  ReleaseTargetLock();
 }
 
@@ -221,7 +243,13 @@ void UBBSBCombatComponent::TickTargetLock()
  if(!bTargetOrbitHasBearing) Desired.Yaw=TargetOrbitRotation.Yaw;
  Desired.Pitch=FMath::ClampAngle(Desired.Pitch,-65.f,65.f);Desired.Roll=0;
  const float DT=GetWorld()->GetDeltaSeconds();
- TargetOrbitRotation=FMath::RInterpConstantTo(TargetOrbitRotation,FMath::RInterpTo(TargetOrbitRotation,Desired,DT,12.f),DT,180.f);
+ if(TargetSwitchStartedAt>=0)
+ {
+  const float Alpha=LockSwitchAlpha(GetWorld()->GetTimeSeconds(),TargetSwitchStartedAt,TargetLockSwitchBlendSeconds);
+  TargetOrbitRotation=FQuat::Slerp(TargetSwitchFromOrbit.Quaternion(),Desired.Quaternion(),Alpha).GetNormalized().Rotator();
+  if(Alpha>=1.f)TargetSwitchStartedAt=-100;
+ }
+ else TargetOrbitRotation=FMath::RInterpConstantTo(TargetOrbitRotation,FMath::RInterpTo(TargetOrbitRotation,Desired,DT,12.f),DT,180.f);
  auto* Controller=Cast<APlayerController>(Character->GetController());
  Controller->RotationInput=FRotator::ZeroRotator;Controller->SetControlRotation(TargetOrbitRotation);
 }
@@ -232,16 +260,16 @@ void UBBSBCombatComponent::ApplyTargetLockCamera(FMinimalViewInfo& View)
  auto* PC=Cast<APlayerController>(Character->GetController());if(!PC || PC->GetViewTarget()!=Character) { bTargetReleaseBlending=false;return; }
  if(HasTargetLock())
  {
-  const FVector Aim=FieldLockedTarget->GetAimPoint()-View.Location;
+  const FVector Bearing=FieldLockedTarget->GetAimPoint()-Character->GetActorLocation();
+  const float Alpha=LockSwitchAlpha(GetWorld()->GetTimeSeconds(),TargetSwitchStartedAt,TargetLockSwitchBlendSeconds);
+  TargetViewLocalAim=BlendLockAim(TargetSwitchFromLocalAim,Bearing,Alpha);
+  const FVector Aim=Character->GetActorLocation()+TargetViewLocalAim-View.Location;
   // Compose below the target to keep the player's feet and nearby floor visible.
   // Rendered pitch must not steer the next frame's orbit.
   if(!Aim.IsNearlyZero())
   {
    View.Rotation=Aim.Rotation();
    View.Rotation.Pitch=FMath::ClampAngle(View.Rotation.Pitch-FMath::Clamp(TargetLockLookDownDegrees,0.f,30.f),-85.f,85.f);
-   const float T=TargetLockSwitchBlendSeconds>0.f ? FMath::Clamp(float((GetWorld()->GetTimeSeconds()-TargetSwitchStartedAt)/TargetLockSwitchBlendSeconds),0.f,1.f):1.f;
-   const float Alpha=T*T*(3.f-2.f*T);
-   if(T<1.f)View.Rotation=FQuat::Slerp(TargetSwitchFromRotation.Quaternion(),View.Rotation.Quaternion(),Alpha).GetNormalized().Rotator();
   }
   PC->RotationInput=FRotator::ZeroRotator;return;
  }

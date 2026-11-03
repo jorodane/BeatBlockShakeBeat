@@ -1,6 +1,8 @@
 #include "BBSBFieldActions.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
+#include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBItemIcon.h"
 #include "Character/BBSBTraversal.h"
 #include "BBSB.h"
 #include "Caravan/BBSBCaravan.h"
@@ -36,10 +38,11 @@ void UBBSBFieldActionComponent::EnsureBunniarEquipment()
  }
 }
 
-int32 UBBSBFieldActionComponent::EquippedEquipmentId() const { return FieldEquipment ? 0:int32(PrototypeWeapon); }
+int32 UBBSBFieldActionComponent::EquippedEquipmentId() const { return FieldEquipment ? 0:bInventoryLoadoutManaged && PrototypeWeapon==EBBSBPrototypeWeapon::Legacy ? INDEX_NONE:int32(PrototypeWeapon); }
 
 FString UBBSBFieldActionComponent::EquipmentLabel(int32 Id) const
 {
+ if(Id<0)return TEXT("장비 없음");
  const TCHAR* Names[]={TEXT("버니아"),TEXT("대검"),TEXT("창"),TEXT("해머"),TEXT("한손검"),TEXT("단검"),TEXT("크레센트")};
  return Names[FMath::Clamp(Id,0,6)];
 }
@@ -47,6 +50,7 @@ FString UBBSBFieldActionComponent::EquipmentLabel(int32 Id) const
 int32 UBBSBFieldActionComponent::WheelEquipmentId(int32 Index) const
 {
  if (Index<0 || Index>=EquipmentWheelSlotCount) return INDEX_NONE;
+ if(bInventoryLoadoutManaged)return EquipmentWheelIds.IsValidIndex(Index) && (EquipmentWheelIds[Index]!=0 || bBunniarAvailable) ? EquipmentWheelIds[Index]:INDEX_NONE;
  return Index==0 ? 0:AvailableWeapons.IsValidIndex(Index-1) ? int32(AvailableWeapons[Index-1]):INDEX_NONE;
 }
 
@@ -64,7 +68,7 @@ bool UBBSBFieldActionComponent::RequestEquipment(int32 Id)
  EnsureBunniarEquipment();
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  if (!Character || bEquipmentInputBlocked || (Combat && Combat->bDead)) return false;
- if (Id==0 ? !IsValid(BunniarEquipment):Id<1 || Id>6 || !AvailableWeapons.Contains(EBBSBPrototypeWeapon(Id))) return false;
+ if (Id==0 ? (!IsValid(BunniarEquipment) || !bBunniarAvailable):Id<1 || Id>6 || !AvailableWeapons.Contains(EBBSBPrototypeWeapon(Id))) return false;
  // Choosing the equipped item cancels an earlier request. Requests never accumulate.
  PendingEquipmentId=Id==EquippedEquipmentId() ? INDEX_NONE:Id;
  UE_LOG(LogBBSB,Display,TEXT("Equipment request id=%d pending=%d busy=%d"),Id,PendingEquipmentId,IsEquipmentActionBusy());
@@ -93,7 +97,9 @@ void UBBSBFieldActionComponent::EquipmentTabUp()
  else if (!bEquipmentTabCancelled)
  {
   const int32 Intended=PendingEquipmentId!=INDEX_NONE ? PendingEquipmentId:EquippedEquipmentId();
-  RequestEquipment(Intended==0 ? int32(LastCombatWeapon):0);
+  if(Intended==0) { if(!AvailableWeapons.IsEmpty())RequestEquipment(AvailableWeapons.Contains(LastCombatWeapon) ? int32(LastCombatWeapon):int32(AvailableWeapons[0])); }
+  else if(bBunniarAvailable)RequestEquipment(0);
+  else if(!AvailableWeapons.IsEmpty()) { const int32 Current=AvailableWeapons.IndexOfByKey(EBBSBPrototypeWeapon(Intended));RequestEquipment(int32(AvailableWeapons[(Current+1)%AvailableWeapons.Num()])); }
  }
 }
 
@@ -131,6 +137,7 @@ void UBBSBFieldActionComponent::CloseEquipmentWheel()
   else PC->SetInputMode(FInputModeGameOnly().SetConsumeCaptureMouseDown(false));
   if (Cursor && bWheelSavedMousePosition) PC->SetMouseLocation(FMath::RoundToInt(WheelSavedMousePosition.X),FMath::RoundToInt(WheelSavedMousePosition.Y));
   PC->RotationInput=FRotator::ZeroRotator;
+  if(auto* H=Character->FindComponentByClass<UBBSBHuntingComponent>();H && H->bInventoryOpen)H->RefreshInventoryInput();
  }
  // Cursor travel chooses a menu item; it must never become a weapon Flick or Shake.
  SyntheticMotion=FVector2D::ZeroVector; SampledMouseFrame=GFrameCounter;
@@ -149,6 +156,24 @@ void UBBSBFieldActionComponent::CancelEquipmentSelection()
  bEquipmentTabCancelled=true; bEquipmentTabHeld=false; PendingEquipmentId=INDEX_NONE; CloseEquipmentWheel();
 }
 
+int32 UBBSBFieldActionComponent::ReadEquipmentWheelIndex(bool RestrictToRing) const
+{
+ auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;float X=0,Y=0;int32 W=0,H=0;
+ if(!PC || !PC->GetMousePosition(X,Y))return INDEX_NONE;
+ PC->GetViewportSize(W,H);const FVector2D Offset(X-W*.5,Y-H*.5);
+ const float Scale=FMath::Clamp(FMath::Min(W/1280.f,H/720.f),.6f,1.5f),Radius=Offset.Size();
+ if(Radius<70*Scale || (RestrictToRing && Radius>200*Scale))return INDEX_NONE;
+ const float Angle=FMath::Fmod(FMath::Atan2(Offset.X,-Offset.Y)+2*PI,2*PI);
+ return FMath::RoundToInt(Angle/(2*PI/EquipmentWheelSlotCount))%EquipmentWheelSlotCount;
+}
+bool UBBSBFieldActionComponent::ConfirmEquipmentWheelClick()
+{
+ if(!bEquipmentWheelOpen)return false;
+ const int32 Choice=WheelEquipmentId(ReadEquipmentWheelIndex(true));if(Choice==INDEX_NONE)return false;
+ // The later physical Q release must not submit a second choice or toggle.
+ bEquipmentTabCancelled=true;bEquipmentTabHeld=false;CloseEquipmentWheel();return RequestEquipment(Choice);
+}
+
 void UBBSBFieldActionComponent::TickEquipmentSelection()
 {
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) { CancelEquipmentSelection();return; }
@@ -159,18 +184,7 @@ void UBBSBFieldActionComponent::TickEquipmentSelection()
  if (bEquipmentTabHeld && !bEquipmentTabCancelled && !bEquipmentWheelOpen && FPlatformTime::Seconds()-EquipmentTabPressedAt>=FMath::Max(.1f,EquipmentHoldSeconds)) OpenEquipmentWheel();
  if (bEquipmentWheelOpen)
  {
-  auto* PC=Cast<APlayerController>(Character->GetController()); float X=0,Y=0; int32 W=0,H=0;
-  EquipmentWheelIndex=INDEX_NONE;
-  if (PC && PC->GetMousePosition(X,Y))
-  {
-   PC->GetViewportSize(W,H); const FVector2D Offset(X-W*.5,Y-H*.5);
-   const float Scale=FMath::Clamp(FMath::Min(W/1280.f,H/720.f),.6f,1.5f);
-   if (Offset.Size()>52*Scale)
-   {
-    const float Angle=FMath::Fmod(FMath::Atan2(Offset.X,-Offset.Y)+2*PI,2*PI);
-    EquipmentWheelIndex=FMath::RoundToInt(Angle/(2*PI/EquipmentWheelSlotCount))%EquipmentWheelSlotCount;
-   }
-  }
+  EquipmentWheelIndex=ReadEquipmentWheelIndex(false);
   return;
  }
  if (bEquipmentTabHeld || PendingEquipmentId==INDEX_NONE || IsEquipmentActionBusy()) return;
@@ -199,7 +213,7 @@ void UBBSBFieldActionComponent::DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) co
   const bool Selected=Index==EquipmentWheelIndex;
   const bool Occupied=WheelEquipmentId(Index)!=INDEX_NONE;
   const float Middle=Index*2*PI/Count,Half=PI/Count-.018f;
-  const FLinearColor Color=Occupied ? (Selected ? (Index==0 ? Mint:Rose):FLinearColor(.20f,.17f,.23f,.94f)):FLinearColor(.12f,.11f,.15f,.90f);
+  const FLinearColor Color=Occupied ? (Selected ? (WheelEquipmentId(Index)==0 ? Mint:Rose):FLinearColor(.20f,.17f,.23f,.94f)):FLinearColor(.12f,.11f,.15f,.90f);
   TArray<FCanvasUVTri> Tris;
   for (int32 Segment=0;Segment<36;++Segment)
   {
@@ -221,28 +235,15 @@ void UBBSBFieldActionComponent::DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) co
   }
   Text(EquipmentLabel(WheelEquipmentId(Index)),P+FVector2D(0,12*S),1.2f*S,Paper);
   if (WheelEquipmentId(Index)==EquippedEquipmentId()) Text(TEXT("●"),Point(Middle,182*S),.65f*S,Paper);
-  if (Index==0)
-  {
-   // Small pencil-like rabbit mark; Bunniar always owns the top sector.
-   const FVector2D Q=P-FVector2D(0,17*S);
-   for (int32 E=0;E<20;++E)
-   {
-    const float A=E*2*PI/20,B=(E+1)*2*PI/20;
-    HUD->DrawLine(Q.X+FMath::Cos(A)*9*S,Q.Y+FMath::Sin(A)*7*S,Q.X+FMath::Cos(B)*9*S,Q.Y+FMath::Sin(B)*7*S,Paper,1.6f*S);
-   }
-   for (int32 Side:{-1,1}) HUD->DrawLine(Q.X+Side*5*S,Q.Y-5*S,Q.X+Side*8*S,Q.Y-20*S,Paper,2*S);
-  }
-  else
-  {
-   const FVector2D Q=P-FVector2D(0,17*S);
-   HUD->DrawLine(Q.X,Q.Y-16*S,Q.X,Q.Y+10*S,Paper,2.5f*S);
-   HUD->DrawLine(Q.X-7*S,Q.Y+3*S,Q.X+7*S,Q.Y+3*S,Paper,2*S);
-  }
+  const auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;
+  auto* Definition=Hunting ? Hunting->EquippedItemAt(Index==Hunting->CompanionWheelSlot ? 10:Index):nullptr;
+  const FName Kind=WheelEquipmentId(Index)==0 ? FName(TEXT("Bunniar")):Definition ? Definition->IconGlyph:FName(TEXT("Sword"));
+  BBSBItemIcon::DrawCanvas(HUD,Canvas,Definition,Kind,P-FVector2D(0,13*S),18*S,1.f,S,Paper);
  }
  Text(TEXT("장비 선택"),Center-FVector2D(0,Outer+34*S),1.65f*S,Paper);
  const int32 Choice=WheelEquipmentId(EquipmentWheelIndex);
  Text(EquipmentWheelIndex==INDEX_NONE ? TEXT("중앙: 취소"):Choice==INDEX_NONE ? TEXT("빈 슬롯"):EquipmentLabel(Choice),Center-FVector2D(0,5*S),1.35f*S,Paper);
- Text(TEXT("Tab 놓기"),Center+FVector2D(0,20*S),1.0f*S,FLinearColor(.75f,.67f,.71f));
- Text(TEXT("마우스로 선택 · Tab 놓아 장착"),Center+FVector2D(0,Outer+26*S),1.25f*S,Paper);
+ Text(TEXT("Q 놓기"),Center+FVector2D(0,20*S),1.0f*S,FLinearColor(.75f,.67f,.71f));
+ Text(TEXT("클릭 또는 Q 놓아 장착"),Center+FVector2D(0,Outer+26*S),1.25f*S,Paper);
  if (IsEquipmentActionBusy()) Text(TEXT("행동이 끝난 뒤 장착됩니다"),Center+FVector2D(0,Outer+52*S),1.15f*S,FLinearColor(.97f,.76f,.58f));
 }

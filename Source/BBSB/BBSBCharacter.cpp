@@ -18,6 +18,7 @@
 #include "Interaction/BBSBInteraction.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
+#include "Hunting/BBSBHunting.h"
 #include "Combat/BBSBCombatVerification.h"
 #include "Combat/BBSBFormationVerification.h"
 #include "Field/BBSBWeaponVerification.h"
@@ -33,6 +34,7 @@ ABBSBCharacter::ABBSBCharacter()
  Traversal=CreateDefaultSubobject<UBBSBTraversalComponent>(TEXT("Traversal"));
  Interaction=CreateDefaultSubobject<UBBSBInteractionComponent>(TEXT("Interaction"));
  ViewOcclusion=CreateDefaultSubobject<UBBSBViewOcclusionComponent>(TEXT("ViewOcclusion"));
+ Hunting=CreateDefaultSubobject<UBBSBHuntingComponent>(TEXT("Hunting"));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 		
@@ -157,6 +159,9 @@ void ABBSBCharacter::DoLook(float Yaw, float Pitch)
 
 void ABBSBCharacter::DoJumpStart()
 {
+ // Controller confirm is owned by the open bag; keyboard Space stays live.
+ if(Hunting && Hunting->bInventoryOpen)
+  if(const auto* PC=Cast<APlayerController>(GetController());PC && (PC->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom) || PC->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom)) && !PC->IsInputKeyDown(EKeys::SpaceBar) && !PC->WasInputKeyJustPressed(EKeys::SpaceBar))return;
 	if (Traversal) Traversal->TryJump();
 }
 

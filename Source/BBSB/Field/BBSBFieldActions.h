@@ -101,9 +101,14 @@ public:
  /** Always supplies the point on the rendered aim ray; true means a surface is in reach. */
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const;
  bool EquipmentAimRay(FVector& Origin,FVector& Direction) const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool CursorAimRay(FVector& Origin,FVector& Direction) const;
+ bool EquipmentWheelSavedCursor() const { return bWheelOriginalCursor; }
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsEquipmentTarget(AActor* Actor) const;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") TObjectPtr<AActor> BunniarEquipment;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") TArray<EBBSBPrototypeWeapon> AvailableWeapons={EBBSBPrototypeWeapon::Sword};
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") bool bInventoryLoadoutManaged=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") bool bBunniarAvailable=true;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") TArray<int32> EquipmentWheelIds;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") float EquipmentHoldSeconds=.25f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment", meta=(ClampMin="0.001",ClampMax="1")) float EquipmentWheelTimeScale=.025f;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentWheelOpen=false;
@@ -113,6 +118,7 @@ public:
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentInputBlocked=false;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentPointerCaptured=false;
 	void SetEquipmentPointerCapture(bool bCapture);
+ void CancelLootGesture();
 	FBBSBEquipmentPointerMotion EquipmentPointerMotion;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Debug") bool bEnablePracticeControls=false;
 	UFUNCTION(BlueprintCallable, Category="BBSB|Equipment") bool RequestEquipment(int32 EquipmentId);
@@ -122,6 +128,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") int32 EquippedEquipmentId() const;
 	static constexpr int32 EquipmentWheelSlotCount=10;
 	void DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) const;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool ConfirmEquipmentWheelClick();
 	double WeaponBeatPosition() const;
 	/** Fallback viewport position when the player cannot be projected; normally mirror the player across the crosshair. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Weapon", meta=(ClampMin="0.05", ClampMax="0.95")) FVector2D WeaponRestScreenPosition = FVector2D(0.76f,0.68f);
@@ -230,9 +237,10 @@ private:
 	FVector2D WheelSavedMousePosition=FVector2D::ZeroVector;
 	bool bWheelSavedMousePosition=false;
 	EBBSBPrototypeWeapon LastCombatWeapon=EBBSBPrototypeWeapon::Sword;
-	void EquipmentTabDown(); void EquipmentTabUp();
+	void EquipmentTabDown(); void EquipmentTabUp(); void ToggleInventory();
 	void TickEquipmentSelection(); void EnsureBunniarEquipment();
 	void OpenEquipmentWheel(); void CloseEquipmentWheel();
+ int32 ReadEquipmentWheelIndex(bool RestrictToRing) const;
 	int32 WheelEquipmentId(int32 Index) const;
 	struct FWeaponAction
 	{
@@ -253,6 +261,7 @@ private:
 		bool bPrototype=false;
   bool bGlideAttack=false;
   bool bSwordThrow=false;
+  bool bCursorTargetCaptured=false;
   bool bSwordTargetLocked=false;
   FQuat SwordThrowFrame=FQuat::Identity;
 		float ExactDamage=0;

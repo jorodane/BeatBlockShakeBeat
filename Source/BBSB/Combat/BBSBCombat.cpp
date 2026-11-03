@@ -1,4 +1,5 @@
 #include "BBSBCombat.h"
+#include "Hunting/BBSBHunting.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCombatVisuals.h"
 #include "Combat/BBSBDefensePresentation.h"
@@ -90,8 +91,8 @@ void UBBSBCombatComponent::BindControls()
 	Input->BindKey(EKeys::A,IE_Pressed,this,&UBBSBCombatComponent::LeftDown).bConsumeInput=false;
 	Input->BindKey(EKeys::A,IE_Released,this,&UBBSBCombatComponent::LeftUp).bConsumeInput=false;
 	Input->BindKey(EKeys::MiddleMouseButton,IE_Pressed,this,&UBBSBCombatComponent::ToggleTargetLock);
-	Input->BindKey(EKeys::Q,IE_Pressed,this,&UBBSBCombatComponent::PreviousTarget);
-	Input->BindKey(EKeys::E,IE_Pressed,this,&UBBSBCombatComponent::NextTarget);
+	Input->BindKey(EKeys::PageUp,IE_Pressed,this,&UBBSBCombatComponent::PreviousTarget);
+	Input->BindKey(EKeys::PageDown,IE_Pressed,this,&UBBSBCombatComponent::NextTarget);
 	if (auto* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>(); Actions && Actions->bEnablePracticeControls)
 	{
 		Input->BindKey(EKeys::F2,IE_Pressed,this,&UBBSBCombatComponent::GoToPractice);
@@ -518,6 +519,8 @@ float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AControll
 		GetCharacterMovement()->SetAvoidanceEnabled(false); GetCharacterMovement()->DisableMovement();
 		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Body->SetRelativeScale3D(FVector(0.85f,0.8f,0.08f)); Body->SetRelativeLocation(FVector(0,0,-65));
+  if(auto* RewardPlayer=UGameplayStatics::GetPlayerPawn(this,0))
+   if(auto* Hunting=RewardPlayer->FindComponentByClass<UBBSBHuntingComponent>())Hunting->GrantEnemyRewards(this);
 		if (IsValid(Stage)) Stage->EnemyDefeated(this);
   if(auto* Player=UGameplayStatics::GetPlayerPawn(this,0))
    if(auto* LocalCombat=Player->FindComponentByClass<UBBSBCombatComponent>()) LocalCombat->NotifyLockedTargetDefeated(this);
@@ -541,11 +544,12 @@ void ABBSBInkEnemy::ApplyWeaponImpulse(FVector Impulse)
 void ABBSBInkEnemy::JoinStage(ABBSBCombatStage* NewStage,bool bIsFront) { Stage=NewStage; bFront=bIsFront; UpdateLabel(); }
 void ABBSBInkEnemy::ResetEnemy()
 {
+ if(bHuntingRewardsGranted)SetActorHiddenInGame(false);
 	ResetFieldWander();WeaponImpulseUntil=-100;FieldTarget.Reset();bFieldAggro=false;FieldVolleysFired=FieldShotsFired=0;NextFieldVolleyAt=0;FieldLastSeenAt=-100;
  bFieldWindingUp=bFieldRecovering=bFieldSecondaryWindingUp=false;FieldReleaseAt=FieldRecoveryUntil=-100;
  FieldSecondaryVolleysFired=FieldBeatBurstsFired=FieldBeatShotsFired=0;LastFieldBeatTick=FieldLastFiredBeat=-1;
  BeatFireArmedAt=LastFieldMajorAt=FieldLastBeatShotAt=-100;
-	Stage=nullptr; bDefeated=bFront=false; Health=MaximumHealth; ResetHealthFeedback();SetSelected(false);
+	Stage=nullptr; bDefeated=bFront=false;bHuntingRewardsGranted=false; Health=MaximumHealth; ResetHealthFeedback();SetSelected(false);
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking); GetCharacterMovement()->SetAvoidanceEnabled(true);
  RebuildFieldAppearance();Body->SetRelativeScale3D(FieldRestScale); Body->SetRelativeLocation(FVector(0,0,-6));

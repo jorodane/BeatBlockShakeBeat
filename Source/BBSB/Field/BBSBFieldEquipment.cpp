@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "Hunting/BBSBHunting.h"
 #include "Combat/BBSBCombat.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Interaction/BBSBInteraction.h"
@@ -193,6 +194,8 @@ void UBBSBFieldActionComponent::IgnoreInkProjectiles(FCollisionQueryParams& Quer
 {
  if(!GetWorld()) return;
  for(TActorIterator<ABBSBInkProjectile> It(GetWorld());It;++It) Query.AddIgnoredActor(*It);
+ if(FieldEquipment!=BunniarEquipment)
+  if(const auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr)Hunting->IgnoreLoot(Query);
 }
 
 bool UBBSBFieldActionComponent::IsEquipmentTarget(AActor* Actor) const
@@ -208,20 +211,27 @@ bool UBBSBFieldActionComponent::IsEquipmentTarget(AActor* Actor) const
  if(const auto* Prop=Cast<ABBSBBreakableProp>(Actor)) return !Prop->bBroken;
  return Actor->ActorHasTag(TEXT("BBSBAttackable"));
 }
-bool UBBSBFieldActionComponent::EquipmentAimRay(FVector& Origin,FVector& Direction) const
+bool UBBSBFieldActionComponent::CursorAimRay(FVector& Origin,FVector& Direction) const
 {
  auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
  if(!PC || !PC->IsLocalController() || !GetWorld()) return false;
  FRotator View;PC->GetPlayerViewPoint(Origin,View);Direction=View.Vector();
+ if(PC->bShowMouseCursor && PC->DeprojectMousePositionToWorld(Origin,Direction)) { Direction.Normalize();return true; }
+ int32 Width=0,Height=0;PC->GetViewportSize(Width,Height);
+ if(Width>0 && Height>0)PC->DeprojectScreenPositionToWorld(Width*.5f,Height*.5f,Origin,Direction);
+ Direction.Normalize();return true;
+}
+bool UBBSBFieldActionComponent::EquipmentAimRay(FVector& Origin,FVector& Direction) const
+{
+ if(!CursorAimRay(Origin,Direction))return false;
+ const auto* PC=Cast<APlayerController>(Character->GetController());
+ if(PC->bShowMouseCursor)return true;
  if(FieldEquipment==BunniarEquipment && IsValid(FieldEquipment))
   if(const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock())
   {
    Direction=(Combat->FieldLockedTarget->GetAimPoint()-Origin).GetSafeNormal();return !Direction.IsNearlyZero();
   }
- if(PC->bShowMouseCursor && PC->DeprojectMousePositionToWorld(Origin,Direction)) { Direction.Normalize();return true; }
- int32 Width=0,Height=0;PC->GetViewportSize(Width,Height);
- if(Width>0 && Height>0) PC->DeprojectScreenPositionToWorld(Width*.5f,Height*.5f,Origin,Direction);
- Direction.Normalize();return true;
+ return true;
 }
 bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const
 {
@@ -250,9 +260,10 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
 }
 bool UBBSBFieldActionComponent::TraceEquipmentAim(FHitResult& Hit) const
 {
+ const auto* AimPC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
  // Combat framing deliberately looks below the target. Bunniar follows the
  // selected enemy, just as a weapon does, rather than hitting that lower ray's floor.
- if(Character && IsValid(FieldEquipment) && FieldEquipment==BunniarEquipment)
+ if(AimPC && !AimPC->bShowMouseCursor && IsValid(FieldEquipment) && FieldEquipment==BunniarEquipment)
   if(const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock())
   {
    // An unreachable enemy requests an air anchor along its bearing. Never
@@ -263,7 +274,7 @@ bool UBBSBFieldActionComponent::TraceEquipmentAim(FHitResult& Hit) const
    FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);
    FCollisionQueryParams Q(SCENE_QUERY_STAT(BunniarLockedEnemyAim),true,Character);Q.AddIgnoredActor(Enemy);
    for(AActor* Ignored:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get(),BunniarEquipment.Get()}) Q.AddIgnoredActor(Ignored);
-   IgnoreInkProjectiles(Q);FHitResult Cover;
+   IgnoreInkProjectiles(Q);if(const auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>())Hunting->IgnoreLoot(Q);FHitResult Cover;
    if(GetWorld()->LineTraceSingleByChannel(Cover,Eye,Enemy->GetAimPoint(),ECC_Visibility,Q)) return false;
    Hit=FHitResult(Enemy,Enemy->GetCapsuleComponent(),Enemy->GetAimPoint(),FVector::UpVector);Hit.bBlockingHit=true;return true;
   }

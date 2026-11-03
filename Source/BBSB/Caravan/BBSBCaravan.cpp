@@ -1,4 +1,5 @@
 #include "Caravan/BBSBCaravan.h"
+#include "Hunting/BBSBHunting.h"
 #include "Caravan/BBSBBunniarAnimation.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
@@ -136,6 +137,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
    SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;ReturnTransitSeconds=EquipmentTravelSeconds;bSurfaceReturning=true;
   }
  }
+ if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Hunting && P->Hunting->TickBuddyPresentation(DT))return;
  const float SmallScale=AnimationSet ? AnimationSet->CompanionScale:.12f;
  const float NormalScale=!bFollowing ? 1.f:bEquipped ? (AnimationSet ? AnimationSet->EquippedScale:.175f):SmallScale;
  const float TravelSeconds=bSurfaceReturning ? ReturnTransitSeconds:AnimationSet ? AnimationSet->AttachTravelSeconds:.24f;
@@ -155,7 +157,9 @@ void ABBSBBunniarCompanion::Tick(float DT)
    const FVector Aim=P->FieldActions->VisualAimPoint();
    FVector Eye;FRotator View;Cast<APlayerController>(P->GetController())->GetPlayerViewPoint(Eye,View);
    // A ray through the anchor has no look direction. Face the player until the aim moves away.
-   const FVector LookDirection=FVector::DistSquared(Aim,AirHoverPoint)>FMath::Square(12.f) ? Aim-AirHoverPoint:Eye-AirHoverPoint;
+   const auto* PC=Cast<APlayerController>(P->GetController());
+   const bool ForwardGaze=(PC && PC->bShowMouseCursor) || (P->Hunting && P->Hunting->bInventoryOpen);
+   const FVector LookDirection=ForwardGaze ? P->GetActorForwardVector():FVector::DistSquared(Aim,AirHoverPoint)>FMath::Square(12.f) ? Aim-AirHoverPoint:Eye-AirHoverPoint;
    const FQuat Look=FRotationMatrix::MakeFromXZ(LookDirection.GetSafeNormal(),FVector::UpVector).ToQuat()*ModelFrame.Inverse();
    AirHoverRotation=FMath::QInterpTo(AirHoverRotation,Look,DT,AirGazeInterpSpeed);
    SetActorRotation(Transit<1.f ? FQuat::Slerp(SurfaceTransitFrom.GetRotation(),AirHoverRotation,Ease):AirHoverRotation);
@@ -197,7 +201,9 @@ void ABBSBBunniarCompanion::Tick(float DT)
    const FVector FaceAxis=Visual->GetRelativeTransform().TransformVectorNoScale(Face.IsNearlyZero() ? FVector::RightVector:Face);
    const FQuat ModelFrame=FRotationMatrix::MakeFromXZ(FaceAxis,Visual->GetRelativeTransform().TransformVectorNoScale(FVector::UpVector)).ToQuat();
    const FVector Aim=P->FieldActions ? P->FieldActions->VisualAimPoint():GetActorLocation()+R.Vector()*1000;
-   const FQuat Look=FRotationMatrix::MakeFromXZ((Aim-Target).GetSafeNormal(),FVector::UpVector).ToQuat()*ModelFrame.Inverse();
+   const auto* PC=Cast<APlayerController>(P->GetController());
+   const bool ForwardGaze=(PC && PC->bShowMouseCursor) || (P->Hunting && P->Hunting->bInventoryOpen);
+   const FQuat Look=FRotationMatrix::MakeFromXZ(ForwardGaze ? P->GetActorForwardVector():(Aim-Target).GetSafeNormal(),FVector::UpVector).ToQuat()*ModelFrame.Inverse();
    SetActorRotation(bSurfaceReturning ? FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Look,Ease):FMath::QInterpTo(GetActorQuat(),Look,DT,10));
   }
  }
@@ -218,6 +224,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
 
 ABBSBCaravanPerformer::ABBSBCaravanPerformer()
 {
+ bGrantsHuntingRewards=false;
  BunniarVisual=CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("PerformerBunniar")); BunniarVisual->SetupAttachment(GetRootComponent());
  static ConstructorHelpers::FObjectFinder<USkeletalMesh> Model(TEXT("/Game/Meshes/Characters/Bunniar/Bunniar_Normal.Bunniar_Normal"));
  if (Model.Succeeded()) BunniarVisual->SetSkeletalMeshAsset(Model.Object);
@@ -468,7 +475,7 @@ bool ABBSBCaravanStage::EquipBunniar()
 }
 void ABBSBCaravanStage::EquipBunniarKey()
 {
- if (!EquipBunniar()) Say(TEXT("버니아는 Tab으로 선택하고 행동이 끝난 뒤 장착할 수 있다."),3);
+ if (!EquipBunniar()) Say(TEXT("버니아는 Q로 선택하고 행동이 끝난 뒤 장착할 수 있다."),3);
 }
 bool ABBSBCaravanStage::InteractWith(ABBSBBunniarDevice* D)
 {
@@ -476,7 +483,7 @@ bool ABBSBCaravanStage::InteractWith(ABBSBBunniarDevice* D)
  if (Player->FieldActions->bEquipmentWheelOpen) return false;
  if(Player->FieldActions->FieldEquipment!=Buddy || !Buddy->bSurfaceAttached || !Buddy->SurfaceComponent || Buddy->SurfaceComponent->GetOwner()!=D) return false;
  const bool Puzzle=D->Device==EBBSBBunniarDevice::Shutter || D->Device==EBBSBBunniarDevice::Lift || D->Device==EBBSBBunniarDevice::Winch;
- if (Puzzle && Player->FieldActions->FieldEquipment!=Buddy) { Say(TEXT("버니아 (Tab)를 장착하고 장치를 조준하자."),3); return false; }
+ if (Puzzle && Player->FieldActions->FieldEquipment!=Buddy) { Say(TEXT("버니아 (Q)를 장착하고 장치를 조준하자."),3); return false; }
  if (FVector::Dist(Player->GetActorLocation(),Buddy->SurfacePoint)>Player->FieldActions->WeaponReach) return false;
  if (Player->Combat->IsStageLocked() || !Player->FieldActions->CanMove()) return false;
  FHitResult Hit; FCollisionQueryParams Q(SCENE_QUERY_STAT(CaravanUse),false,Player); Q.AddIgnoredActor(Buddy);
@@ -486,7 +493,7 @@ bool ABBSBCaravanStage::InteractWith(ABBSBBunniarDevice* D)
  case EBBSBBunniarDevice::Bookstand:
   if (Step!=EBBSBCaravanStep::Rest) return false;
   Step=EBBSBCaravanStep::Detour; Buddy->bFollowing=true; Buddy->BandageA->SetVisibility(true); Buddy->BandageB->SetVisibility(true);
-  Say(TEXT("레파라도: 반창고는 효과가 없네. 떼는 건 나중에.\n버니아 (Tab) · 좌클릭을 누른 동안 부착 / 놓으면 회수. 6호차로 돌아가자."),9); return true;
+  Say(TEXT("레파라도: 반창고는 효과가 없네. 떼는 건 나중에.\n버니아 (Q) · 좌클릭을 누른 동안 부착 / 놓으면 회수. 6호차로 돌아가자."),9); return true;
  case EBBSBBunniarDevice::ArtShop: case EBBSBBunniarDevice::UtilityShop:
   OpenShop=D; ShopSelection=0; Player->FieldActions->bEquipmentInputBlocked=true; Player->FieldActions->CancelEquipmentSelection(); Player->FieldActions->InterruptAction(EBBSBActionState::Transition,100000);
   if (auto* PC=Cast<APlayerController>(Player->GetController())) { PC->SetIgnoreLookInput(true); PC->SetIgnoreMoveInput(true); bShopLookOwned=bShopMoveOwned=true; }
@@ -568,7 +575,7 @@ bool ABBSBCaravanStage::StartEncounter(bool Final)
  Encounter=S; Boss->bEncounterEnabled=true; Player->Combat->AttachStage(S);
  Step=Final ? EBBSBCaravanStep::CaptainDuel:EBBSBCaravanStep::Miniboss;
  Checkpoint=P(Final ? FVector(8000,-2420,310):FVector(5500,0,310));
-  Say(Final ? TEXT("상단장과 음악 경합 · Tab으로 한손검을 장착하자.\nWASD/X 방향 방어 · Space 회피 · 마우스로 무기 공격"):TEXT("삑사리를 즐기는 버니아 · Tab으로 한손검을 장착하자.\nWASD/X 방향 방어 · Space 회피 · 마우스로 무기 공격"),8);
+  Say(Final ? TEXT("상단장과 음악 경합 · Q로 한손검을 장착하자.\nWASD/X 방향 방어 · Space 회피 · 마우스로 무기 공격"):TEXT("삑사리를 즐기는 버니아 · Q로 한손검을 장착하자.\nWASD/X 방향 방어 · Space 회피 · 마우스로 무기 공격"),8);
  return true;
 }
 void ABBSBCaravanStage::RetryCheckpoint()
@@ -620,10 +627,10 @@ FString ABBSBCaravanStage::Objective() const
 {
  switch (Step)
  {
- case EBBSBCaravanStep::Rest: return TEXT("4호차 · 책상 기록 살펴보기 [버니아·좌클릭]\nTab 전환 · 길게 눌러 장비 선택");
- case EBBSBCaravanStep::Detour: return TEXT("버니아 (Tab) · 6호차 화물문 크랭크 조준\n좌클릭 유지 · 열린 뒤 버튼 놓기");
- case EBBSBCaravanStep::Cargo: return TEXT("버니아 (Tab) · 승강기에 좌클릭 유지\n발판에 올라 지붕까지 이동");
- case EBBSBCaravanStep::Rooftops: return !bBridgeOpen ? TEXT("버니아 (Tab) · 4호차 지붕 윈치에 좌클릭 유지"):Buddy && Buddy->bSurfaceAttached ? TEXT("버튼 놓아 회수 · 3호차 열린 지붕으로"):TEXT("다리를 건너 3호차 열린 지붕으로 내려가기");
+ case EBBSBCaravanStep::Rest: return TEXT("4호차 · 책상 기록 살펴보기 [버니아·좌클릭]\nQ 전환 · 길게 눌러 장비 선택");
+ case EBBSBCaravanStep::Detour: return TEXT("버니아 (Q) · 6호차 화물문 크랭크 조준\n좌클릭 유지 · 열린 뒤 버튼 놓기");
+ case EBBSBCaravanStep::Cargo: return TEXT("버니아 (Q) · 승강기에 좌클릭 유지\n발판에 올라 지붕까지 이동");
+ case EBBSBCaravanStep::Rooftops: return !bBridgeOpen ? TEXT("버니아 (Q) · 4호차 지붕 윈치에 좌클릭 유지"):Buddy && Buddy->bSurfaceAttached ? TEXT("버튼 놓아 회수 · 3호차 열린 지붕으로"):TEXT("다리를 건너 3호차 열린 지붕으로 내려가기");
  case EBBSBCaravanStep::Miniboss: return TEXT("3호차 · 버니아의 시끄러운 연주 멈추기");
  case EBBSBCaravanStep::SearchCaptain: return !bVisitedArtCar ? TEXT("2호차 · 상단장의 행적 확인하기"):!bReadCaptainNote ? TEXT("1호차 · 상단장의 연습 기록 읽기 [버니아·좌클릭]"):TEXT("2호차 밖 · 가설 공연장으로 이동");
  case EBBSBCaravanStep::CaptainDuel: return TEXT("가설 공연장 · 상단장과 음악 경합");
@@ -674,7 +681,7 @@ void ABBSBCaravanHUD::DrawHUD()
   DrawRect(Panel,W*.5f-210*S,H-100*S,420*S,47*S); WrappedText((Puzzle ? TEXT("[좌클릭] "):TEXT("[버니아·좌클릭] "))+D->Focus->DeviceLabel,Paper,W*.5f-193*S,H-88*S,390*S,1.3f*S);
  }
  if (D->Buddy && D->Buddy->bFollowing)
-  DrawText(D->Buddy->bSurfaceAttached ? TEXT("버니아: 등을 붙인 채 드래그 · 놓으면 회수"):D->Buddy->bEquipped ? TEXT("좌클릭 유지: 표면 부착 · 놓기: 회수"):TEXT("버니아: 작은 동행 장비 · [Tab] 장착"),Paper,W*.5f-180*S,H-40*S,GEngine->GetSmallFont(),1.2f*S);
+  DrawText(D->Buddy->bSurfaceAttached ? TEXT("버니아: 등을 붙인 채 드래그 · 놓으면 회수"):D->Buddy->bEquipped ? TEXT("좌클릭 유지: 표면 부착 · 놓기: 회수"):TEXT("버니아: 작은 동행 장비 · [Q] 장착"),Paper,W*.5f-180*S,H-40*S,GEngine->GetSmallFont(),1.2f*S);
  if (GetWorld()->GetTimeSeconds()<D->DialogueUntil && !D->OpenShop)
  { DrawRect(Panel,W*.5f-450*S,H-205*S,900*S,94*S); WrappedText(D->Dialogue,Paper,W*.5f-431*S,H-195*S,860*S,1.35f*S); }
  FVector2D Screen; const FVector Goal=D->ObjectiveLocation();

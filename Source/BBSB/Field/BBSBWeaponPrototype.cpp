@@ -204,13 +204,13 @@ FVector UBBSBFieldActionComponent::FindPrototypeCursorPoint(AActor** TargetActor
  const FVector ForwardAim=Character->GetPawnViewLocation()+Character->GetActorForwardVector()*FMath::Max(WeaponReach,100.f);
  const APlayerController* PC=Cast<APlayerController>(Character->GetController());
  if (!IsValid(PC) || !PC->IsLocalController() || !GetWorld()) return ForwardAim;
- FVector Eye,Direction; FRotator View; PC->GetPlayerViewPoint(Eye,View); Direction=View.Vector();
- if (PC->bShowMouseCursor) PC->DeprojectMousePositionToWorld(Eye,Direction);
+ FVector Eye,Direction;if(!CursorAimRay(Eye,Direction))return ForwardAim;
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBManualWeaponAim),false,Character); Q.AddIgnoredActor(FloatingWeapon); Q.AddIgnoredActor(OtherFloatingWeapon);IgnoreInkProjectiles(Q);
- FHitResult Hit; FVector Target=Eye+Direction*WeaponReach; AActor* Candidate=nullptr;
- if (GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Direction*2500,ECC_Visibility,Q)) { Target=Hit.ImpactPoint; Candidate=Hit.GetActor(); }
  const FVector Shoulder=Character->GetActorLocation()+FVector(0,0,30);
- if (FVector::Dist(Shoulder,Target)>WeaponReach) { Target=Shoulder+(Target-Shoulder).GetSafeNormal()*WeaponReach; Candidate=nullptr; }
+ const FVector Offset=Eye-Shoulder;const double B=FVector::DotProduct(Offset,Direction),D=B*B-Offset.SizeSquared()+FMath::Square(FMath::Max(50.f,WeaponReach));
+ const double RayDistance=FMath::Max(0.,-B+(D>=0 ? FMath::Sqrt(D):0.));
+ FHitResult Hit;FVector Target=Eye+Direction*RayDistance;AActor* Candidate=nullptr;
+ if(GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Direction*FMath::Max(2500.,RayDistance),ECC_Visibility,Q) && Hit.Distance<=RayDistance) { Target=Hit.ImpactPoint;Candidate=Hit.GetActor(); }
  if (GetWorld()->LineTraceSingleByChannel(Hit,Shoulder,Target,ECC_Visibility,Q)) { Target=Hit.ImpactPoint; Candidate=Hit.GetActor(); }
  if (TargetActor && IsEquipmentTarget(Candidate)) *TargetActor=Candidate;
  return Target;
@@ -327,6 +327,8 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  A.bGlideAttack=GlideAttack;A.bSwordThrow=SwordThrow;
  if (Clip) { A.Motion=*Clip; A.bAuthoredMotion=true; }
  A.Target=bWeaponAimLocked ? LockedAimPoint : PrototypeWeapon==EBBSBPrototypeWeapon::Dagger ? FindPrototypeCursorPoint() : FindAimPoint();
+ const auto* AimPC=Cast<APlayerController>(Character->GetController());const bool CursorCapture=AimPC && !bWeaponAimLocked && (AimPC->bShowMouseCursor || !C || (!C->HasTargetLock() && !C->IsStageLocked()));
+ if(CursorCapture) { AActor* AimActor=nullptr;A.Target=FindPrototypeCursorPoint(&AimActor);A.AimActor=AimActor;if(AimActor)A.AimLocalPoint=AimActor->GetActorTransform().InverseTransformPosition(A.Target); }
  if (bWeaponAimLocked)
  {
   A.AimActor=LockedAimActor;
@@ -334,7 +336,7 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
   A.bRestrictToAimActor=PrototypeWeapon==EBBSBPrototypeWeapon::Spear;
  }
  A.StartPose=StartPose; A.ComboStep=Combo;
- if(SwordThrow) UpdateSwordTarget(A);
+ if(SwordThrow) { UpdateSwordTarget(A);A.bCursorTargetCaptured=CursorCapture; }
  bHasFollowThrough[Independent && Channel==1 ? 1:0]=false;
  A.Direction=(A.Target-Character->GetActorLocation()).GetSafeNormal2D(); if (A.Direction.IsNearlyZero()) A.Direction=Character->GetActorForwardVector();
  if(SwordThrow) A.Direction=A.SwordThrowFrame.GetAxisX();
@@ -445,6 +447,7 @@ bool UBBSBFieldActionComponent::GetWeaponArmPose(FVector& Hand,FVector& Elbow,fl
 
 void UBBSBFieldActionComponent::UpdateSwordTarget(FWeaponAction& A)
 {
+ if(A.bCursorTargetCaptured) { if(A.AimActor.IsValid())A.Target=A.AimActor->GetActorTransform().TransformPosition(A.AimLocalPoint);LastAimPoint=A.Target;return; }
  A.Target=FindAimPoint();
  FVector Eye=Character->GetActorLocation()+FVector(0,0,50);FRotator View=Character->GetActorRotation();
  if(const auto* PC=Cast<APlayerController>(Character->GetController())) PC->GetPlayerViewPoint(Eye,View);

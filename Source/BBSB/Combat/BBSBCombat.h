@@ -24,6 +24,7 @@ class UCameraComponent;
 class APlayerController;
 class UAnimSequence;
 class UBBSBDefensePresentation;
+class UBBSBLootTable;
 class AHUD;
 class UCanvas;
 struct FMinimalViewInfo;
@@ -196,7 +197,7 @@ private:
  void TickTargetLock();
  bool CanSelectTargetLock() const;
  bool IsTargetInAttackRange(const ABBSBInkEnemy* Target) const;
- ABBSBInkEnemy* NearestTargetToCursor(const ABBSBInkEnemy* Exclude=nullptr) const;
+ ABBSBInkEnemy* NearestTargetToCursor(const ABBSBInkEnemy* Exclude=nullptr,bool bAwareOnly=false) const;
  void ActivateTargetLock(ABBSBInkEnemy* Target);
  void TickDamageFeedback();
  void StartPlayerDamageFeedback(float Damage);
@@ -205,7 +206,8 @@ private:
  int32 DamagePopupSerial=0;
  double TargetOccludedAt=-1;
  double TargetSwitchStartedAt=-100;
- FRotator TargetSwitchFromRotation=FRotator::ZeroRotator;
+ FRotator TargetSwitchFromOrbit=FRotator::ZeroRotator;
+ FVector TargetSwitchFromLocalAim=FVector::ZeroVector,TargetViewLocalAim=FVector::ZeroVector;
  bool bTargetBoomSaved=false,bTargetOriginalLag=false,bTargetOriginalRotationLag=false;
  FRotator TargetOrbitRotation=FRotator::ZeroRotator,TargetOrbitOffset=FRotator::ZeroRotator;
  bool bTargetOrbitHasBearing=false,bTargetReleaseBlending=false;
@@ -271,6 +273,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Enemy") int32 EncounterID=1;
  // Possession assigns Actor.Owner to the AI controller; keep the spawning area's identity separately.
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Practice") TObjectPtr<ABBSBCombatPracticeArea> PracticeArea;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards") bool bGrantsHuntingRewards=true;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards",meta=(ClampMin="0")) int32 ExperienceReward=25;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards") TSoftObjectPtr<UBBSBLootTable> LootTable;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") bool bHuntingRewardsGranted=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") bool bDefeated=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") bool bFront=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") TObjectPtr<ABBSBCombatStage> Stage;
@@ -329,6 +335,7 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldVolleysFired=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldShotsFired=0;
  UFUNCTION(BlueprintCallable,Category="BBSB|Field bullets") void AlertFieldPlayer(APawn* Target);
+ UFUNCTION(BlueprintPure,Category="BBSB|Field bullets") bool IsAwareOfPlayer(const APawn* Target) const { return !bDefeated && bFieldAggro && FieldTarget.Get()==Target; }
 	void JoinStage(ABBSBCombatStage* NewStage, bool bIsFront);
 	void ApplyWeaponImpulse(FVector Impulse);
 	void ResetEnemy();

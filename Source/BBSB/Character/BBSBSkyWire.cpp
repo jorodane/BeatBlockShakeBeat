@@ -14,7 +14,7 @@
 
 bool UBBSBTraversalComponent::CanWireRecall(ABBSBBunniarCompanion* Buddy) const
 {
- if(!Character || WireCharges<=0 || !IsValid(Buddy) || IsWireTraversalActive() || IsBunniarTraversalActive() || IsParkourActive() || !Character->FieldActions || Character->FieldActions->FieldEquipment!=Buddy || Character->FieldActions->IsDodging()) return false;
+ if(!Character || WireCharges<=0 || !IsValid(Buddy) || IsWireTraversalActive() || IsBunniarTraversalActive() || IsParkourActive() || !Character->FieldActions || !Character->FieldActions->bBunniarAvailable || Character->FieldActions->FieldEquipment!=Buddy || Character->FieldActions->IsDodging()) return false;
  const auto* PC=Cast<APlayerController>(Character->GetController());
  if(!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || Character->FieldActions->PendingEquipmentId!=INDEX_NONE || (Character->Combat && (!Character->Combat->CanAttack() || Character->Combat->bDead)) || (Character->Interaction && Character->Interaction->bDialogueActive)) return false;
  auto* Surface=Buddy->SurfaceComponent.Get();
@@ -33,7 +33,7 @@ bool UBBSBTraversalComponent::TrySkyWire()
  auto* Actions=Character ? Character->FieldActions.Get():nullptr;
  auto* Buddy=Actions ? Cast<ABBSBBunniarCompanion>(Actions->BunniarEquipment):nullptr;
  auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
- if(!Actions || WireCharges<=0 || !Buddy || IsWireTraversalActive() || IsParkourActive() || !PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || Actions->PendingEquipmentId!=INDEX_NONE || Actions->bEquipmentWheelOpen || Actions->bEquipmentInputBlocked || (!Actions->IsDodging() && !Actions->CanMove()) ||
+ if(!Actions || !Actions->bBunniarAvailable || WireCharges<=0 || !Buddy || IsWireTraversalActive() || IsParkourActive() || !PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || Actions->PendingEquipmentId!=INDEX_NONE || Actions->bEquipmentWheelOpen || Actions->bEquipmentInputBlocked || (!Actions->IsDodging() && !Actions->CanMove()) ||
   (Character->Combat && (Character->Combat->bDead || !Character->Combat->CanAttack() || Character->Combat->BlocksMovement())) || (Character->Interaction && Character->Interaction->bDialogueActive)) return false;
  const auto* Move=Character->GetCharacterMovement();
  if(!Move || (!Move->IsMovingOnGround() && !Move->IsFalling())) return false;
