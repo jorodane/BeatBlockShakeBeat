@@ -4,6 +4,7 @@
 #include "Hunting/BBSBInventoryWidget.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBRespawn.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Character/BBSBTraversal.h"
 #include "Combat/BBSBCombat.h"
@@ -207,12 +208,13 @@ bool UBBSBHuntingComponent::SaveProgress()
 {
  if(!bPersistProgress || bSaveLoadFailed || SaveSlotName.IsEmpty())return false;
  auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::CreateSaveGameObject(UBBSBHuntingSave::StaticClass()));
- Save->Version=5;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
+ Save->Version=6;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
  if(Player)
  {
   Save->bBunniarSelected=Player->FieldActions->EquippedEquipmentId()==0;
   Save->SelectedWeaponInstance=Player->FieldActions->EquippedWeaponInstance;Save->LastCombatWeaponInstance=Player->FieldActions->LastCombatWeaponInstance;
   if(Player->EquipmentGrowth)Player->EquipmentGrowth->StoreInSave(Save);
+  if(Player->Respawn)Player->Respawn->StoreTravel(Save);
  }
  const bool Saved=UGameplayStatics::SaveGameToSlot(Save,SaveSlotName,0);
  if(Saved)bDirtyProgress=false;else SaveAt=GetWorld()->GetRealTimeSeconds()+3.;
@@ -222,7 +224,7 @@ bool UBBSBHuntingComponent::LoadProgress()
 {
  if(SaveSlotName.IsEmpty() || !UGameplayStatics::DoesSaveGameExist(SaveSlotName,0))return false;
  bSaveLoadFailed=true;auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));
- if(!Save || Save->Version<1 || Save->Version>5)return false;
+ if(!Save || Save->Version<1 || Save->Version>6)return false;
  const int32 PreviousRows=Rows,OldWheel=CompanionWheelSlot;
  if(Save->Version>=5)Rows=FMath::Clamp(Save->InventoryRows,8,24);
  TArray<FBBSBInventoryEntry> Previous=MoveTemp(Items);Items.Reset();TSet<FGuid> Seen;
@@ -266,6 +268,7 @@ bool UBBSBHuntingComponent::LoadProgress()
  if(Player)
  {
   if(Save->Version>=4) { Player->FieldActions->EquippedWeaponInstance=Save->SelectedWeaponInstance;Player->FieldActions->LastCombatWeaponInstance=Save->LastCombatWeaponInstance;if(Save->bBunniarSelected)Player->FieldActions->RequestEquipment(0); }
+  if(Player->Respawn)Player->Respawn->LoadTravel(Save);
   if(Player->EquipmentGrowth) { Player->EquipmentGrowth->LoadFromSave(Save);Player->EquipmentGrowth->InitializeProfile(Save->Version<4); }
  }
  return true;

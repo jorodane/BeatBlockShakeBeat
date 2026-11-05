@@ -143,7 +143,6 @@ void UBBSBEquipmentGrowthComponent::TickComponent(float DT,ELevelTick Type,FActo
   if(bPendingDirectional) { DirectionalModule=PendingDirectionalModule;bPendingDirectional=false;bStatsPending=true;Changed(); }
   bModuleChangePending=bPendingAerial || bPendingDirectional;if(bStatsPending)ApplyModuleStats();
  }
- if(!bConcertoActive)AddConcertoCharge(DT*Settings->PassiveChargePerSecond);
  TickPerformances(DT);
 }
 void UBBSBEquipmentGrowthComponent::EndPlay(const EEndPlayReason::Type Reason)

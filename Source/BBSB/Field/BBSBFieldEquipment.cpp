@@ -232,7 +232,10 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
  Hit=FHitResult();Point=Character ? Character->GetActorLocation():FVector::ZeroVector;
  if(bBunniarShortcutActive)
  {
-  if(!QuickInteractionHit.GetActor() || !QuickInteractionHit.GetComponent())return false;
+  const auto* Interaction=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;
+  if(!Interaction || !Interaction->IsQuickInteractable(QuickInteractionHit.GetActor()) || !IsValid(QuickInteractionHit.GetComponent()))return false;
+  const FVector Current=QuickInteractionHit.GetComponent()->GetComponentTransform().TransformPosition(QuickInteractionLocalPoint);
+  if(FVector::DistSquared(Character->GetActorLocation(),Current)>FMath::Square(WeaponReach))return false;
   Hit=QuickInteractionHit;Point=Hit.GetComponent()->GetComponentTransform().TransformPosition(QuickInteractionLocalPoint);Hit.Location=Hit.ImpactPoint=Point;return true;
  }
  FVector Origin,Direction;

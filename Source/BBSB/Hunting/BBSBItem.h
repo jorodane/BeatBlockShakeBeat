@@ -155,4 +155,6 @@ public:
  UPROPERTY(SaveGame) FName AerialModule;
  UPROPERTY(SaveGame) FName DirectionalModule;
  UPROPERTY(SaveGame) float ConcertoCharge=0;
+ UPROPERTY(SaveGame) TSet<FString> DiscoveredRespawnPoints;
+ UPROPERTY(SaveGame) FString ActiveRespawnPoint;
 };

@@ -61,17 +61,17 @@ struct FBBSBInventoryDraw
   const int32 Count=Item.SocketCount;int32 Visible=FMath::Min(Count,6);FString Overflow;float ExtraWidth=0,Width=0;
   do
   {
-   Overflow=Count>Visible ? FString::Printf(TEXT("+%d"),Count-Visible):FString();ExtraWidth=Overflow.IsEmpty() ? 0:Measure(Overflow,7).X+3*S;
-   Width=(Visible*7-2)*S+ExtraWidth;if(Width<=Size.X-10*S || Visible==1)break;--Visible;
+   Overflow=Count>Visible ? FString::Printf(TEXT("+%d"),Count-Visible):FString();ExtraWidth=Overflow.IsEmpty() ? 0:Measure(Overflow,14).X+6*S;
+   Width=(Visible*14-4)*S+ExtraWidth;if(Width<=Size.X-10*S || Visible==1)break;--Visible;
   }while(true);
-  const float Start=P.X+Size.X-5*S-Width,Y=P.Y+Size.Y-6*S;
+  const float Start=P.X+Size.X-5*S-Width,Y=P.Y+Size.Y-10*S;
   for(int32 I=0;I<Visible;++I)
   {
    const auto* Orb=Item.Orbs.IsValidIndex(I) ? Item.Orbs[I].Item.Get():nullptr;auto Fill=Orb ? OrbColor(Orb):CellGround();auto Edge=Orb ? Paper():Faint();Fill.A=Edge.A=Alpha;
-   const FSlateRoundedBoxBrush Brush(Fill,Edge,.55f*S);const FVector2D Center(Start+(2.5f+I*7)*S,Y);
-   FSlateDrawElement::MakeBox(E,Layer+12,G.ToPaintGeometry(FVector2D(5*S),FSlateLayoutTransform(Center-FVector2D(2.5f*S))),&Brush,ESlateDrawEffect::None,Fill);
+   const FSlateRoundedBoxBrush Brush(Fill,Edge,1.1f*S);const FVector2D Center(Start+(5.f+I*14)*S,Y);
+   FSlateDrawElement::MakeBox(E,Layer+12,G.ToPaintGeometry(FVector2D(10*S),FSlateLayoutTransform(Center-FVector2D(5.f*S))),&Brush,ESlateDrawEffect::None,Fill);
   }
-  if(!Overflow.IsEmpty()) { auto C=Paper();C.A=Alpha;Text(Overflow,FVector2D(Start+(Visible*7-2)*S+3*S,Y-4*S),7,C,13); }
+  if(!Overflow.IsEmpty()) { auto C=Paper();C.A=Alpha;Text(Overflow,FVector2D(Start+(Visible*14-4)*S+6*S,Y-8*S),14,C,13); }
  }
  void Icon(UBBSBItemDefinition* Item,FName Glyph,FVector2D P,float R,float Alpha=1,int32 Z=7) const
  { BBSBItemIcon::DrawSlate(E,G,Layer+Z,Item,Glyph,P,R,Alpha,S,Paper()); }

@@ -1,8 +1,13 @@
 #include "Combat/BBSBCombat.h"
+#include "BBSBCharacter.h"
 #include "Combat/BBSBCombatVisuals.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Field/BBSBFieldActions.h"
 #include "Interaction/BBSBInteraction.h"
+#include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
+#include "GameFramework/PlayerInput.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Camera/CameraTypes.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -103,6 +108,7 @@ void UBBSBCombatComponent::ReleaseTargetLock()
    TargetReleaseElapsed=0;bTargetReleaseBlending=true;PC->SetControlRotation(Control.Rotator());
   }
  if(IsValid(FieldLockedTarget) && FieldLockedTarget!=SelectedEnemy) FieldLockedTarget->SetSelected(false);
+ LockMouseMotion=FVector2D::ZeroVector;bLockPointerTracked=false;
  FieldLockedTarget=nullptr;TargetOccludedAt=-1;TargetSwitchStartedAt=-100;TargetViewLocalAim=FVector::ZeroVector;
  if(bTargetBoomSaved && Boom)
  {
@@ -157,6 +163,7 @@ void UBBSBCombatComponent::ActivateTargetLock(ABBSBInkEnemy* Target)
   TargetOrbitOffset=(TargetOrbitRotation-Bearing.Rotation()).GetNormalized();TargetOrbitOffset.Roll=0;
   TargetViewLocalAim=Bearing;
  }
+ LockMouseMotion=FVector2D::ZeroVector;LockMouseNextAt=GetWorld()->GetRealTimeSeconds()+FMath::Max(.15f,TargetSwitchMouseCooldown);bLockPointerTracked=false;
  auto* Previous=FieldLockedTarget.Get();FieldLockedTarget=Target;
  if(IsValid(Previous) && Previous!=Target && Previous!=SelectedEnemy)Previous->SetSelected(false);
  Target->SetSelected(true);TargetOccludedAt=-1;PracticeFocusUntil=-100;
@@ -203,6 +210,52 @@ bool UBBSBCombatComponent::CycleTargetLock(int32 Step)
  ActivateTargetLock(Next);return true;
 }
 
+bool UBBSBCombatComponent::HandleLockMouseInput(FVector2D ScreenDelta)
+{
+ const auto* Player=Cast<ABBSBCharacter>(Character);
+ const auto* Actions=Player ? Player->FieldActions.Get():nullptr;
+ if(!HasTargetLock() || !CanSelectTargetLock() || !Player || Player->Hunting->bInventoryOpen ||
+    Player->EquipmentGrowth->bConcertoActive || (Actions && (Actions->IsGestureCaptured() || Actions->bEquipmentPointerCaptured)))
+ { LockMouseMotion=FVector2D::ZeroVector;return false; }
+ const double Now=GetWorld()->GetRealTimeSeconds();
+ if(Now<LockMouseNextAt || ScreenDelta.IsNearlyZero())return false;
+ if(Now-LockMouseWindowAt>FMath::Max(.1f,TargetSwitchMouseWindow)) { LockMouseWindowAt=Now;LockMouseMotion=FVector2D::ZeroVector; }
+ LockMouseMotion+=ScreenDelta;
+ if(LockMouseMotion.Size()<FMath::Max(40.f,TargetSwitchMousePixels))return false;
+ const FVector2D Direction=LockMouseMotion.GetSafeNormal();LockMouseMotion=FVector2D::ZeroVector;
+ LockMouseNextAt=Now+FMath::Max(.15f,TargetSwitchMouseCooldown);
+ auto* PC=Cast<APlayerController>(Character->GetController());FVector2D Origin;
+ if(!PC || !PC->ProjectWorldLocationToScreen(FieldLockedTarget->GetAimPoint(),Origin,true))return false;
+ int32 W=0,H=0;PC->GetViewportSize(W,H);const double Diagonal=FMath::Max(1.,FVector2D(W,H).Size());
+ ABBSBInkEnemy* Best=nullptr;double BestScore=MAX_dbl;
+ for(const auto& Candidate:LockCandidates(Character,PC,TargetLockRange,FieldLockedTarget))
+ {
+  const FVector2D Offset=Candidate.Screen-Origin;const double Distance=Offset.Size();if(Distance<8.)continue;
+  const double Along=FVector2D::DotProduct(Direction,Offset/Distance);if(Along<.5)continue;
+  const double Score=(1.-Along)*2.+Distance/Diagonal;
+  if(Score<BestScore) { Best=Candidate.Enemy;BestScore=Score; }
+ }
+ if(!Best)return false;ActivateTargetLock(Best);return true;
+}
+
+void UBBSBCombatComponent::TickTargetLockMouse()
+{
+ const auto* Player=Cast<ABBSBCharacter>(Character);auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
+ if(!PC || !HasTargetLock() || !CanSelectTargetLock() || Player->Hunting->bInventoryOpen ||
+    Player->EquipmentGrowth->bConcertoActive || Player->FieldActions->IsGestureCaptured() ||
+    (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()))
+ { LockMouseMotion=FVector2D::ZeroVector;bLockPointerTracked=false;return; }
+ FVector2D Motion=FVector2D::ZeroVector;
+ if(PC->bShowMouseCursor)
+ {
+  float X,Y;if(PC->GetMousePosition(X,Y))
+  { const FVector2D At(X,Y);if(bLockPointerTracked)Motion=At-LockLastPointer;LockLastPointer=At;bLockPointerTracked=true; }
+ }
+ else
+ { bLockPointerTracked=false;if(PC->PlayerInput)Motion=FVector2D(PC->PlayerInput->GetRawKeyValue(EKeys::MouseX),-PC->PlayerInput->GetRawKeyValue(EKeys::MouseY)); }
+ HandleLockMouseInput(Motion);
+}
+
 void UBBSBCombatComponent::NotifyLockedTargetDefeated(ABBSBInkEnemy* Defeated)
 {
  if(!FieldLockedTarget || FieldLockedTarget!=Defeated)return;
@@ -213,6 +266,7 @@ void UBBSBCombatComponent::NotifyLockedTargetDefeated(ABBSBInkEnemy* Defeated)
 
 void UBBSBCombatComponent::TickTargetLock()
 {
+ TickTargetLockMouse();
  // Handles removal/death from another source as well as the immediate damage event.
  if(FieldLockedTarget && (!IsValid(FieldLockedTarget) || FieldLockedTarget->bDefeated))NotifyLockedTargetDefeated(FieldLockedTarget);
  TargetLockCameraLift=FMath::FInterpTo(TargetLockCameraLift,HasTargetLock() ? FMath::Max(0.f,TargetLockCameraHeight):0.f,GetWorld()->GetDeltaSeconds(),12.f);

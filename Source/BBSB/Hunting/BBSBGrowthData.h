@@ -146,7 +146,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Prototype compatibility") bool bGrantPrototypeTraversalModules=true;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Modules") TArray<TObjectPtr<UBBSBModuleDefinition>> StartingModules;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin=".1")) float Duration=3.5f;
- UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float PassiveChargePerSecond=.75f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float PassiveChargePerSecond=0.f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float ChargePerDamage=.12f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float SupportChargeScale=.3f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="100")) float BulletClearRadius=1800;

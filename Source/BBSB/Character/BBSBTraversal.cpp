@@ -1,6 +1,6 @@
-#include "Hunting/BBSBEquipmentGrowth.h"
-#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Character/BBSBTraversal.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Animation/BlendSpace.h"
 #include "BBSBCharacter.h"
 #include "Caravan/BBSBCaravan.h"

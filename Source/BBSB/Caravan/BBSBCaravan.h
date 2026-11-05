@@ -84,6 +84,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float EquipmentTravelSeconds=.32f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="1")) float AirGazeInterpSpeed=5.f;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Glide") bool bGliding=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Respawn") bool bRescueFlying=false;
  void BeginGlidePresentation();
  void EndGlidePresentation();
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bSurfaceAttached=false;

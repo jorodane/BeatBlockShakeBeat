@@ -85,6 +85,7 @@ void UBBSBBunniarAnimInstance::NativeUpdateAnimation(float DT)
   Motion=Buddy->bGliding ? EBBSBBunniarMotion::Gliding:Buddy->bSurfaceAttached ? EBBSBBunniarMotion::Attached:Buddy->bEquipped || Buddy->bAirHovering ? EBBSBBunniarMotion::Equipped:
    Player && Player->GetVelocity().Size2D()>(AnimationSet ? AnimationSet->TravelSpeedThreshold:60) ? EBBSBBunniarMotion::Travel:EBBSBBunniarMotion::Idle;
   if(Buddy->bGliding && Reparado && Reparado->Traversal && Reparado->Traversal->bGlideDashing) Motion=EBBSBBunniarMotion::AirDash;
+  if(Buddy->bRescueFlying)Motion=EBBSBBunniarMotion::Gliding;
  }
  else if (const auto* Performer=Cast<ABBSBCaravanPerformer>(GetOwningActor())) Motion=Performer->bDefeated ? EBBSBBunniarMotion::Idle:EBBSBBunniarMotion::Equipped;
 }

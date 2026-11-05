@@ -8,6 +8,7 @@
 #include "BBSB.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
+#include "Interaction/BBSBInteraction.h"
 #include "CanvasItem.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -107,6 +108,30 @@ bool UBBSBFieldActionComponent::IsWheelSlotEquipped(int32 Index) const
 {
  if(WheelEquipmentId(Index)==0)return EquippedEquipmentId()==0;
  return bInventoryLoadoutManaged ? !FieldEquipment && EquipmentWheelInstances.IsValidIndex(Index) && EquippedWeaponInstance.IsValid() && EquipmentWheelInstances[Index]==EquippedWeaponInstance:WheelEquipmentId(Index)==EquippedEquipmentId();
+}
+
+bool UBBSBFieldActionComponent::CycleEquipmentWheel(int32 Direction)
+{
+ const auto* Player=Cast<ABBSBCharacter>(Character);
+ if(Direction==0 || !Player || bEquipmentInputBlocked || bEquipmentWheelOpen || Player->Combat->bDead ||
+    Player->Hunting->bInventoryOpen || Player->Interaction->bDialogueActive || Player->Traversal->IsWireTraversalActive())return false;
+ // Repeated notches continue from the latest request while a busy action finishes.
+ int32 Start=INDEX_NONE;
+ for(int32 Index=0;Index<EquipmentWheelSlotCount;++Index)
+ {
+  const bool Pending=PendingEquipmentId!=INDEX_NONE && (PendingEquipmentId==0 ? WheelEquipmentId(Index)==0:
+   bInventoryLoadoutManaged ? EquipmentWheelInstances.IsValidIndex(Index) && EquipmentWheelInstances[Index]==PendingWeaponInstance:WheelEquipmentId(Index)==PendingEquipmentId);
+  if(Pending) { Start=Index;break; }
+  if(PendingEquipmentId==INDEX_NONE && IsWheelSlotEquipped(Index)) { Start=Index;break; }
+ }
+ if(Start==INDEX_NONE)Start=Direction>0 ? EquipmentWheelSlotCount-1:0;
+ const int32 Step=Direction>0 ? 1:-1;
+ for(int32 Offset=1;Offset<EquipmentWheelSlotCount;++Offset)
+ {
+  const int32 Index=(Start+Step*Offset+EquipmentWheelSlotCount)%EquipmentWheelSlotCount;
+  if(WheelEquipmentId(Index)!=INDEX_NONE)return RequestEquipmentSlot(Index);
+ }
+ return false;
 }
 
 void UBBSBFieldActionComponent::EquipmentTabDown()

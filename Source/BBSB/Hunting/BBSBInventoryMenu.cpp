@@ -1,6 +1,8 @@
 #include "Hunting/BBSBHunting.h"
 #include "Hunting/BBSBInventoryWidget.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBRespawn.h"
+#include "Character/BBSBWorldMap.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
 #include "Character/BBSBTraversal.h"
@@ -22,7 +24,8 @@ bool UBBSBHuntingComponent::OpenInventory()
 {
  if(bInventoryOpen)return true;
  auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
- if(!PC || !PC->IsLocalController())return false;
+ if(!PC || !PC->IsLocalController() || (Player->Respawn && Player->Respawn->IsSequenceActive()))return false;
+ if(Player->WorldMap)Player->WorldMap->CloseMap();
  const bool CursorAlreadyVisible=PC->bShowMouseCursor;
  if(!InventoryWidget)
  {

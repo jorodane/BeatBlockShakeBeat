@@ -1,9 +1,10 @@
-#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Caravan/BBSBCaravan.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
 #include "Caravan/BBSBBunniarAnimation.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
+#include "Character/BBSBRespawn.h"
 #include "Interaction/BBSBInteraction.h"
 #include "BBSB.h"
 #include "Combat/BBSBCombatVisuals.h"
@@ -90,6 +91,7 @@ ABBSBBunniarCompanion::ABBSBBunniarCompanion()
 void ABBSBBunniarCompanion::Tick(float DT)
 {
  Super::Tick(DT);
+ if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Respawn && P->Respawn->IsSequenceActive())return;
  if(bRestOccluded) { SetActorHiddenInGame(false);bRestOccluded=false; }
  const float T=GetWorld()->GetTimeSeconds(); FVector Target=GetActorLocation();
  if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Traversal) P->Traversal->UpdateWirePresentation();

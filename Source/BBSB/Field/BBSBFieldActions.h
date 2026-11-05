@@ -122,6 +122,9 @@ public:
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool RequestWeaponInstance(FGuid Id);
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool RequestEquipmentSlot(int32 Index);
  UFUNCTION(BlueprintPure,Category="BBSB|Equipment") bool IsWheelSlotEquipped(int32 Index) const;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool CycleEquipmentWheel(int32 Direction);
+ void FreezeDeathEquipment(TArray<AActor*>& Out);
+ void RestoreDeathEquipment();
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") float EquipmentHoldSeconds=.25f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment", meta=(ClampMin="0.001",ClampMax="1")) float EquipmentWheelTimeScale=.025f;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentWheelOpen=false;
@@ -250,7 +253,7 @@ private:
 	FVector2D WheelSavedMousePosition=FVector2D::ZeroVector;
 	bool bWheelSavedMousePosition=false;
 	EBBSBPrototypeWeapon LastCombatWeapon=EBBSBPrototypeWeapon::Sword;
-	void EquipmentTabDown(); void EquipmentTabUp(); void ToggleInventory();
+	void EquipmentTabDown(); void EquipmentTabUp(); void ToggleInventory(); void ToggleWorldMap();
 	void TickEquipmentSelection(); void EnsureBunniarEquipment();
 	void OpenEquipmentWheel(); void CloseEquipmentWheel();
  FGuid PresentedWeaponInstance;
@@ -379,8 +382,8 @@ private:
 	void BindControls();
  void UpdateHurtSphereGuide();
 	void PrimaryDown(); void PrimaryUp(); void SecondaryDown(); void SecondaryUp();
-	void RotateHeldObject(float Steps);
-	void RotateHeldObjectUp(); void RotateHeldObjectDown();
+	void EquipmentScrollUp();void EquipmentScrollDown();
+ bool bDeathEquipmentFrozen=false;
 	void ToggleHelp();
 	void BeginGesture(int32 Channel);
  bool CanUseBunniarZoom() const;

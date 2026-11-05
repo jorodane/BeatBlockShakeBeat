@@ -15,6 +15,8 @@
 #include "Character/BBSBAimGaze.h"
 #include "Character/BBSBTraversal.h"
 #include "Character/BBSBViewOcclusion.h"
+#include "Character/BBSBRespawn.h"
+#include "Character/BBSBWorldMap.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
@@ -29,6 +31,8 @@
 
 ABBSBCharacter::ABBSBCharacter()
 {
+ Respawn=CreateDefaultSubobject<UBBSBRespawnComponent>(TEXT("Respawn"));
+ WorldMap=CreateDefaultSubobject<UBBSBWorldMapComponent>(TEXT("WorldMap"));
 	FieldActions = CreateDefaultSubobject<UBBSBFieldActionComponent>(TEXT("FieldActions"));
 	Combat = CreateDefaultSubobject<UBBSBCombatComponent>(TEXT("Combat"));
 	AimGaze = CreateDefaultSubobject<UBBSBAimGazeComponent>(TEXT("AimGaze"));
@@ -149,6 +153,7 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 
 void ABBSBCharacter::DoLook(float Yaw, float Pitch)
 {
+ if((Respawn && Respawn->IsSequenceActive()) || (Combat && Combat->HasTargetLock()))return;
 	if (FieldActions && FieldActions->GetLookInputScale()<=0.f) return;
 	if (GetController() != nullptr)
 	{
@@ -161,6 +166,7 @@ void ABBSBCharacter::DoLook(float Yaw, float Pitch)
 
 void ABBSBCharacter::DoJumpStart()
 {
+ if(Respawn && Respawn->IsSequenceActive())return;
  // Controller confirm is owned by the open bag; keyboard Space stays live.
  if(Hunting && Hunting->bInventoryOpen)
   if(const auto* PC=Cast<APlayerController>(GetController());PC && (PC->IsInputKeyDown(EKeys::Gamepad_FaceButton_Bottom) || PC->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom)) && !PC->IsInputKeyDown(EKeys::SpaceBar) && !PC->WasInputKeyJustPressed(EKeys::SpaceBar))return;
@@ -174,6 +180,7 @@ void ABBSBCharacter::DoJumpEnd()
 
 void ABBSBCharacter::DoDash()
 {
+ if(Respawn && Respawn->IsSequenceActive())return;
  if(Traversal && Traversal->IsParkourActive()) { LastDashPressAt=-100;Traversal->DropParkour();return; }
  if(Traversal && Traversal->IsWireTraversalActive()) { LastDashPressAt=-100;return; }
  if(!GetWorld()) return;
@@ -209,6 +216,7 @@ void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
 	if(auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->BunniarEquipment):nullptr) Buddy->ApplySurfaceFocus(DeltaTime,OutResult);
  if(Combat) Combat->ApplyTargetLockCamera(OutResult);
  if(EquipmentGrowth)EquipmentGrowth->ApplyConcertoCamera(DeltaTime,OutResult);
+ if(Respawn)Respawn->ApplyCamera(DeltaTime,OutResult);
 }
 
 void ABBSBCharacter::FieldPress(int32 Channel) { if (FieldActions) FieldActions->FieldGesturePress(Channel); }
@@ -235,7 +243,7 @@ void ABBSBCharacter::CombatLabKey(FString KeyName,bool bPressed)
 {
 #if !UE_BUILD_SHIPPING
 	const FKey Key{FName(*KeyName)};
-	const TArray<FKey> Allowed={EKeys::LeftMouseButton,EKeys::RightMouseButton,EKeys::MiddleMouseButton,EKeys::LeftControl,EKeys::RightControl,EKeys::SpaceBar,EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
+	const TArray<FKey> Allowed={EKeys::LeftMouseButton,EKeys::RightMouseButton,EKeys::MiddleMouseButton,EKeys::LeftControl,EKeys::RightControl,EKeys::SpaceBar,EKeys::MouseScrollUp,EKeys::MouseScrollDown,EKeys::M,EKeys::Enter,EKeys::F,EKeys::Tab,EKeys::Escape,EKeys::Seven,EKeys::F1,EKeys::F2,EKeys::F3,EKeys::F4,EKeys::F5,EKeys::F6,EKeys::F7,EKeys::One,EKeys::Two,EKeys::Three,EKeys::Four,EKeys::Five,EKeys::Six,EKeys::Q,EKeys::E,EKeys::W,EKeys::A,EKeys::S,EKeys::D,EKeys::LeftShift,EKeys::RightShift,EKeys::R,EKeys::BackSpace};
 	if (Allowed.Contains(Key))
 		if (APlayerController* PC=Cast<APlayerController>(GetController())) PC->InputKey(FInputKeyEventArgs::CreateSimulated(Key,bPressed ? IE_Pressed : IE_Released,bPressed ? 1.f : 0.f));
 #endif

@@ -134,6 +134,11 @@ public:
  void DrawDefenseDirectionCues(AHUD* HUD,UCanvas* Canvas) const;
  UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ToggleTargetLock();
  UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") bool CycleTargetLock(int32 Step);
+ UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") bool HandleLockMouseInput(FVector2D ScreenDelta);
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin="40")) float TargetSwitchMousePixels=130.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin=".1",ClampMax=".5",Units="s")) float TargetSwitchMouseWindow=.22f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Target lock",meta=(ClampMin=".15",Units="s")) float TargetSwitchMouseCooldown=.4f;
+ void RestoreAfterRespawn();
  void NotifyLockedTargetDefeated(ABBSBInkEnemy* Defeated);
  UFUNCTION(BlueprintCallable,Category="BBSB|Target lock") void ReleaseTargetLock();
  UFUNCTION(BlueprintPure,Category="BBSB|Target lock") bool HasTargetLock() const;
@@ -202,6 +207,10 @@ private:
 	TArray<TPair<int32,FKeyBind>> SavedViewBindings;
 	void RestoreViewBindings();
  void TickTargetLock();
+ void TickTargetLockMouse();
+ FVector2D LockMouseMotion=FVector2D::ZeroVector,LockLastPointer=FVector2D::ZeroVector;
+ double LockMouseWindowAt=-100,LockMouseNextAt=-100;
+ bool bLockPointerTracked=false;
  bool CanSelectTargetLock() const;
  bool IsTargetInAttackRange(const ABBSBInkEnemy* Target) const;
  ABBSBInkEnemy* NearestTargetToCursor(const ABBSBInkEnemy* Exclude=nullptr,bool bAwareOnly=false) const;

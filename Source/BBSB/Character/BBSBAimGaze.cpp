@@ -1,5 +1,6 @@
 #include "Character/BBSBAimGaze.h"
 #include "Character/BBSBTraversal.h"
+#include "Character/BBSBRespawn.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
 #include "PoseSearch/AnimNode_PoseSearchHistoryCollector.h"
@@ -71,6 +72,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
  UBlendSpace* DashBlend=nullptr;
  float DashPhase=0,DashAngle=0,DashWeight=0;
  double MatchedDashStarted=-100;float MatchedDashAngle=0,MatchedDashInput=0,MatchedDashTime=0;bool bMatchedDash=false;
+ UAnimSequence* RescueCarry=nullptr;UAnimSequence* RescueFallen=nullptr;float RescueAlpha=0;bool bRescueHands=false;
  bool bGlideHands=false;
  bool bRelaxedGlide=false;
  float LimbExtension=.99f;
@@ -91,6 +93,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   const auto* Player=Cast<ABBSBCharacter>(Instance->GetOwningActor());
   Offset=Player && Player->AimGaze ? Player->AimGaze->ComponentAimRotation:FQuat::Identity;
   const auto* Traversal=Player ? Player->Traversal.Get():nullptr;
+  RescueCarry=RescueFallen=nullptr;RescueAlpha=0;bRescueHands=false;
   DefenseClip=nullptr;DefenseTime=DefenseWeight=0;
   if(Player && Player->Combat) Player->Combat->GetDefensePose(DefenseClip,DefenseTime,DefenseWeight);
   WeaponArmWeight=WeaponBodyTurn=0;
@@ -254,12 +257,27 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     if(DashWeight>0) { GlideWeight=HangWeight=WireWeight=MotionWeight=ParkourWeight=EdgeHandWeight=FootPlantWeight=0; }
    }
   }
+  if(Player && Player->Respawn && Player->Respawn->bCarryingPlayer)
+  {
+   Player->Respawn->GetCarryPose(RescueCarry,RescueFallen,RescueAlpha);bRescueHands=true;
+   Offset=BodyTilt=AirSpin=WireTilt=FQuat::Identity;
+   GlideWeight=WireWeight=MotionWeight=ParkourWeight=EdgeHandWeight=FootPlantWeight=DashWeight=WeaponArmWeight=WeaponBodyTurn=WeaponStepWeight=DefenseWeight=GlideAttackWeight=0;
+   bGlideHands=true;bRelaxedGlide=false;HangWeight=RescueAlpha;
+   const FTransform Mesh=Player->GetMesh()->GetComponentTransform();
+   for(int32 Side=0;Side<2;++Side) { Grips[Side]=Mesh.InverseTransformPosition(Player->Respawn->CarryGrip(Side==0));Elbows[Side]=Mesh.InverseTransformPosition(Player->GetActorTransform().TransformPosition(FVector(20,Side==0 ? -45:45,35))); }
+  }
  }
  virtual bool Evaluate(FPoseContext& Output) override
  {
   if (!Input) return false;
   Input->Evaluate_AnyThread(Output);
-  if (Offset.Equals(FQuat::Identity,.00001f) && GlideWeight<.0001f && WireWeight<.0001f && MotionWeight<.0001f && DashWeight<.0001f && WeaponArmWeight<.0001f && WeaponStepWeight<.0001f && DefenseWeight<.0001f && FMath::IsNearlyZero(WeaponBodyTurn)) return true;
+  if(bRescueHands)
+  {
+   FAnimationPoseData Result(Output);
+   if(RescueFallen)RescueFallen->GetAnimationPose(Result,FAnimExtractContext(double(FMath::Max(0.f,RescueFallen->GetPlayLength()-.01f)),false));
+   if(RescueCarry) { FPoseContext Carry(this);Carry.ResetToRefPose();FAnimationPoseData Data(Carry);RescueCarry->GetAnimationPose(Data,FAnimExtractContext(0.0,false));FAnimationRuntime::BlendTwoPosesTogetherInPlace(Result,Data,1.f-RescueAlpha); }
+  }
+  if (!bRescueHands && Offset.Equals(FQuat::Identity,.00001f) && GlideWeight<.0001f && WireWeight<.0001f && MotionWeight<.0001f && DashWeight<.0001f && WeaponArmWeight<.0001f && WeaponStepWeight<.0001f && DefenseWeight<.0001f && FMath::IsNearlyZero(WeaponBodyTurn)) return true;
   if (GlidePose && GlideWeight>.0001f)
   {
    FPoseContext Authored(this);Authored.ResetToRefPose();
@@ -448,7 +466,7 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   if (bGlideHands && HangWeight>.0001f)
   {
    const FName ArmNames[2][3]={{TEXT("upperarm_l"),TEXT("lowerarm_l"),TEXT("hand_l")},{TEXT("upperarm_r"),TEXT("lowerarm_r"),TEXT("hand_r")}};
-   for (int32 Side=0;Side<1;++Side)
+   for (int32 Side=0;Side<(bRescueHands ? 2:1);++Side)
    {
     TArray<FCompactPoseBoneIndex> Indices;
     for (const FName Name:ArmNames[Side])

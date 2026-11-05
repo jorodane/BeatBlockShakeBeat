@@ -4,6 +4,8 @@
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBRespawn.h"
+#include "Character/BBSBWorldMap.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Character/BBSBTraversal.h"
 #include "Character/BBSBMovementAuthoring.h"
@@ -200,11 +202,12 @@ void UBBSBFieldActionComponent::BindControls()
 	Input->BindKey(EKeys::LeftMouseButton, IE_Released, this, &UBBSBFieldActionComponent::PrimaryUp);
 	Input->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &UBBSBFieldActionComponent::SecondaryDown);
 	Input->BindKey(EKeys::RightMouseButton, IE_Released, this, &UBBSBFieldActionComponent::SecondaryUp);
-	Input->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &UBBSBFieldActionComponent::RotateHeldObjectUp).bConsumeInput=false;
-	Input->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &UBBSBFieldActionComponent::RotateHeldObjectDown).bConsumeInput=false;
+	Input->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentScrollUp).bConsumeInput=false;
+	Input->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentScrollDown).bConsumeInput=false;
 	Input->BindKey(EKeys::E, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentTabDown);
  Input->BindKey(EKeys::Q,IE_Pressed,this,&UBBSBFieldActionComponent::UltimateDown);
  Input->BindKey(EKeys::Tab, IE_Pressed, this, &UBBSBFieldActionComponent::ToggleInventory);
+ Input->BindKey(EKeys::M,IE_Pressed,this,&UBBSBFieldActionComponent::ToggleWorldMap);
  Input->BindKey(EKeys::F,IE_Pressed,this,&UBBSBFieldActionComponent::QuickBunniarDown);
  Input->BindKey(EKeys::F,IE_Released,this,&UBBSBFieldActionComponent::QuickBunniarUp);
 	Input->BindKey(EKeys::E, IE_Released, this, &UBBSBFieldActionComponent::EquipmentTabUp);
@@ -224,7 +227,11 @@ void UBBSBFieldActionComponent::BindControls()
 	UE_LOG(LogBBSB, Display, TEXT("Field controls ready: %s"), *Character->GetName());
 }
 
-void UBBSBFieldActionComponent::PrimaryDown() { if(IsBunniarControlActive())BeginBunniarPrimary(1);else BeginGesture(0); }
+void UBBSBFieldActionComponent::PrimaryDown()
+{
+ if(auto* P=Cast<ABBSBCharacter>(Character);P && P->Respawn && P->Respawn->TryActivateFromAim())return;
+ if(IsBunniarControlActive())BeginBunniarPrimary(1);else BeginGesture(0);
+}
 void UBBSBFieldActionComponent::PrimaryUp() { if(BunniarPrimarySources&1)EndBunniarPrimary(1);else if(!BunniarPrimarySources)EndGesture(0); }
 bool UBBSBFieldActionComponent::BeginBunniarPrimary(uint8 Source)
 {
@@ -249,7 +256,10 @@ void UBBSBFieldActionComponent::QuickBunniarDown()
  if(!BunniarPrimarySources)
  {
   const bool HasTarget=I->FindQuickInteraction(LootHit);auto* Loot=Cast<ABBSBLootPickup>(LootHit.GetActor());
-  if(!HasTarget || Loot) { if(Hunting)Hunting->TryBeginQuickCollection(Loot);return; }
+  if(!HasTarget)return;
+  if(Loot) { if(Hunting)Hunting->TryBeginQuickCollection(Loot);return; }
+  if(auto* Target=LootHit.GetActor();Target && Target->Implements<UBBSBBunniarSurface>() &&
+     IBBSBBunniarSurface::Execute_BunniarQuickUse(Target,Cast<ABBSBBunniarCompanion>(BunniarEquipment)))return;
  }
  if(Hunting && Hunting->bCollectionHeld)return;
  if(Channels[0].bHeld && !IsBunniarControlActive())return;
@@ -276,20 +286,11 @@ void UBBSBFieldActionComponent::UltimateDown()
 { if(auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth)P->EquipmentGrowth->TryConcerto(); }
 void UBBSBFieldActionComponent::SecondaryDown() { BeginGesture(1); }
 void UBBSBFieldActionComponent::SecondaryUp() { EndGesture(1);if(!BunniarPrimarySources)bBunniarShortcutActive=false; }
-void UBBSBFieldActionComponent::RotateHeldObjectUp() { RotateHeldObject(1); }
-void UBBSBFieldActionComponent::RotateHeldObjectDown() { RotateHeldObject(-1); }
-void UBBSBFieldActionComponent::RotateHeldObject(float Steps)
-{
-	if(bEquipmentWheelOpen || bEquipmentInputBlocked) return;
-	if(IsGestureChannelHeld(0))
-	 if(auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
-		if(auto* Object=Cast<ABBSBCarryObject>(Buddy->SurfaceComponent->GetOwner())) { Object->RotateFromWheel(Steps);return; }
- // Wheel up/down selects the previous/next on-screen target. Carry rotation
- // keeps priority when the same wheel is manipulating a held Bunniar object.
- if(auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;Combat && Combat->HasTargetLock())
-  Combat->CycleTargetLock(Steps>0 ? -1:Steps<0 ? 1:0);
-}
+void UBBSBFieldActionComponent::EquipmentScrollUp() { CycleEquipmentWheel(-1); }
+void UBBSBFieldActionComponent::EquipmentScrollDown() { CycleEquipmentWheel(1); }
 void UBBSBFieldActionComponent::ToggleHelp() { bHelpVisible = !bHelpVisible; }
+void UBBSBFieldActionComponent::ToggleWorldMap()
+{ if(auto* P=Cast<ABBSBCharacter>(Character);P && P->WorldMap)P->WorldMap->ToggleMap(); }
 void UBBSBFieldActionComponent::ToggleInventory()
 {
  if(auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr)Hunting->ToggleInventory();
@@ -400,6 +401,7 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
 	if (!PC) { BoundInput.Reset(); return; }
 	BindControls();
+ if(bDeathEquipmentFrozen) { ClearHover();return; }
 
  if(bBunniarZoomHeld && (!CanUseBunniarZoom() || (!bSyntheticInput && !PC->IsInputKeyDown(EKeys::RightMouseButton)) ||
     (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()))) bBunniarZoomHeld=false;
@@ -734,8 +736,18 @@ FTransform UBBSBFieldActionComponent::GetWeaponRestTransform() const
 	return FTransform(Rotation,Position);
 }
 
+void UBBSBFieldActionComponent::FreezeDeathEquipment(TArray<AActor*>& Out)
+{
+ bDeathEquipmentFrozen=true;ClearHover();
+ for(AActor* Actor:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get()})
+  if(IsValid(Actor) && !Actor->IsHidden())Out.AddUnique(Actor);
+}
+void UBBSBFieldActionComponent::RestoreDeathEquipment()
+{ bDeathEquipmentFrozen=false;ResetActionState(); }
+
 void UBBSBFieldActionComponent::UpdateWeaponPresentation()
 {
+ if(bDeathEquipmentFrozen)return;
  // Traversal borrows the companion without changing the selected weapon or its form.
  for (AActor* Visual:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get()}) if (Visual) Visual->SetActorHiddenInGame(false);
 	if (IsValid(FieldEquipment))

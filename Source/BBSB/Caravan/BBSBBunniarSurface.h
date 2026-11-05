@@ -15,6 +15,9 @@ class BBSB_API IBBSBBunniarSurface
 public:
  UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") FText BunniarInteractionText() const;
  virtual FText BunniarInteractionText_Implementation() const { return FText(); }
+ /** Return true when F can complete the interaction without placing the companion. */
+ UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") bool BunniarQuickUse(ABBSBBunniarCompanion* Bunniar);
+ virtual bool BunniarQuickUse_Implementation(ABBSBBunniarCompanion* Bunniar) { return false; }
  UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") void BunniarAttached(ABBSBBunniarCompanion* Bunniar,FVector WorldPoint,FVector WorldNormal);
  /** Actual visible arrival; logical attachment retains the existing puzzle press timing. */
  UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") void BunniarArrived(ABBSBBunniarCompanion* Bunniar);

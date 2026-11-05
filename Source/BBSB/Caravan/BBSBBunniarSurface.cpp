@@ -333,7 +333,8 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
  auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
  if (!PC || Player->FieldActions->InteractionEquipment()!=this || bSurfaceAttached || bAirHovering) return false;
  FRotator View=PC->GetControlRotation();
- FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit)) return BeginAirHoverFromCursor(PC);
+ FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit)) return Player->FieldActions->bBunniarShortcutActive ? false:BeginAirHoverFromCursor(PC);
+ if(Player->FieldActions->bBunniarShortcutActive && (!IsValid(Hit.GetActor()) || !Hit.GetActor()->Implements<UBBSBBunniarSurface>()))return false;
  UPrimitiveComponent* TargetComponent=Hit.GetComponent();
  const auto* Enemy=Cast<ABBSBInkEnemy>(Hit.GetActor());
  if(Enemy)
@@ -367,7 +368,7 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
 bool ABBSBBunniarCompanion::BeginAirHoverFromCursor(APlayerController* Controller)
 {
  auto* Player=Cast<ABBSBCharacter>(Controller ? Controller->GetPawn():nullptr);
- if(!Player || !Player->FieldActions || Player->FieldActions->InteractionEquipment()!=this) return false;
+ if(!Player || !Player->FieldActions || Player->FieldActions->bBunniarShortcutActive || Player->FieldActions->InteractionEquipment()!=this) return false;
  FVector Eye,Ray,Point;FHitResult Hit;
  if(!Player->FieldActions->EquipmentAimRay(Eye,Ray)) return false;
  Player->FieldActions->ResolveEquipmentAim(Point,Hit);

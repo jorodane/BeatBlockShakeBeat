@@ -1,6 +1,7 @@
+#include "BBSBCombat.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
-#include "BBSBCombat.h"
+#include "Character/BBSBRespawn.h"
 #include "Combat/BBSBDamageEvents.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
@@ -276,6 +277,7 @@ void UBBSBCombatComponent::LeaveStage(bool bVictory)
 void UBBSBCombatComponent::TakeCombatDamage(float Damage,AActor* Causer,bool bInterrupt)
 {
 	if (bDead || Damage<=0 || !Character) return;
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Respawn && P->Respawn->IsDamageProtected())return;
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth && P->EquipmentGrowth->IsConcertoInvulnerable())return;
  const auto* FieldShot=Cast<ABBSBInkProjectile>(Causer);
  if(FieldShot && FieldShot->bFieldProjectile && GetWorld()->GetTimeSeconds()<FieldDamageGraceUntil) return;
@@ -294,9 +296,17 @@ void UBBSBCombatComponent::TakeCombatDamage(float Damage,AActor* Causer,bool bIn
 		bDead=true; ClearParry();
 		if (Actions) Actions->InterruptAction(EBBSBActionState::Dead,100000.f);
 		if (IsStageLocked()) Stage->Dissolve(false);
-		SetFeedback(TEXT("DOWN  |  R to reset encounter"));
+		SetFeedback(TEXT("버니아가 곁에서 기다리고 있어요"));
+  if(auto* P=Cast<ABBSBCharacter>(Character);P && P->Respawn)P->Respawn->BeginDeath();
 	}
 	UE_LOG(LogBBSB,Display,TEXT("Player damage %.1f HP=%.1f source=%s"),Damage,Health,*GetNameSafe(Causer));
+}
+
+void UBBSBCombatComponent::RestoreAfterRespawn()
+{
+ ReleaseTargetLock();LeaveStage(false);ClearParry();CancelDefenseMotion();ResetDamageFeedback();
+ bDead=false;Health=MaximumHealth;Ecstatic=0;DefenseCombo=0;LastDefenseImpactAt=-100;
+ FieldDamageGraceUntil=GetWorld()->GetTimeSeconds()+1.5;
 }
 
 void UBBSBCombatComponent::GetParryPlane(FVector& Origin,FVector& Normal,FVector& Right) const
@@ -390,6 +400,7 @@ FString UBBSBCombatComponent::StatusString() const
 
 void UBBSBCombatComponent::ResetEncounter()
 {
+ if(auto* P=Cast<ABBSBCharacter>(Character);P && P->Respawn)P->Respawn->ResetPresentation();
  ReleaseTargetLock();ResetDamageFeedback();
 	if (IsStageLocked()) Stage->Dissolve(false);
 	for (TActorIterator<ABBSBInkProjectile> It(GetWorld()); It; ++It) It->Destroy();

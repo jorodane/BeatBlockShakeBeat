@@ -1,5 +1,5 @@
-#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Puzzle/BBSBPuzzleField.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Caravan/BBSBCaravan.h"
