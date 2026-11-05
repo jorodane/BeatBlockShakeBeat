@@ -17,6 +17,8 @@ UENUM(BlueprintType)
 enum class EBBSBItemEquipmentKind : uint8 { None,Weapon,Companion,Armor,Accessory,Orb };
 UENUM(BlueprintType)
 enum class EBBSBItemCategory : uint8 { Equipment,Consumable,Material,Quest,Misc,Orb };
+UENUM(BlueprintType)
+enum class EBBSBRewardResource : uint8 { None,Ecstatic,Note,Crystal };
 
 UCLASS(BlueprintType)
 class BBSB_API UBBSBItemDefinition : public UDataAsset
@@ -35,6 +37,20 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Equipment",meta=(ClampMin="1",ClampMax="6",EditCondition="EquipmentKind==EBBSBItemEquipmentKind::Weapon")) int32 WeaponId=4;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Equipment",meta=(EditCondition="EquipmentKind==EBBSBItemEquipmentKind::Companion")) TSoftObjectPtr<USkeletalMesh> CompanionMesh;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Item",meta=(MultiLine=true)) FText Description;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards") EBBSBRewardResource RewardResource=EBBSBRewardResource::None;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards",meta=(ClampMin="1")) int32 ResourceValue=1;
+ UFUNCTION(BlueprintPure,Category="Rewards") bool IsFieldResource() const { return RewardResource==EBBSBRewardResource::Ecstatic || RewardResource==EBBSBRewardResource::Note; }
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Growth",meta=(ClampMin="1",ClampMax="999")) int32 MaximumWeaponLevel=99;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Growth",meta=(ClampMin="1",ClampMax="1000000")) int32 WeaponExperienceBase=100;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Growth",meta=(ClampMin="0",ClampMax="1000000")) int32 WeaponExperienceIncrease=50;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Growth",meta=(ClampMin="0",ClampMax="2")) float EcstasyAttackBonus=.15f;
+ UFUNCTION(BlueprintPure,Category="Weapon|Growth") int64 WeaponExperienceRequirement(int32 Level) const
+ { return int64(FMath::Clamp(WeaponExperienceBase,1,1000000))+int64(FMath::Clamp(Level,1,999)-1)*FMath::Clamp(WeaponExperienceIncrease,0,1000000); }
+ UFUNCTION(BlueprintPure,Category="Weapon|Growth") int64 WeaponExperienceForLevel(int32 Level) const
+ {
+  const int64 Steps=FMath::Clamp(Level,1,FMath::Clamp(MaximumWeaponLevel,1,999))-1;
+  return Steps*FMath::Clamp(WeaponExperienceBase,1,1000000)+(Steps*(Steps-1)/2)*FMath::Clamp(WeaponExperienceIncrease,0,1000000);
+ }
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Instance",meta=(ClampMin="1")) int32 DefaultWeaponLevel=1;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Instance",meta=(ClampMin="0")) int32 DefaultSocketCount=1;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Loot",meta=(ClampMin="1")) int32 MinimumDropLevel=1;
@@ -111,6 +127,10 @@ struct FBBSBInventoryEntry
  UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) int32 GridY=0;
  UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) bool bRotated=false;
  UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) int32 WeaponLevel=1;
+ // -1 identifies pre-growth profiles and levelled drops, which retain their starting level.
+ UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) int64 WeaponEcstatic=-1;
+ // Only experience actually invested after acquisition is eligible for a refund.
+ UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) int64 InvestedEcstatic=0;
  // -1 means the field was absent in a legacy profile. Zero is a valid socket count.
  UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) int32 SocketCount=-1;
  UPROPERTY(SaveGame,VisibleAnywhere,BlueprintReadOnly) TArray<FBBSBOrbSocket> Orbs;
@@ -128,8 +148,24 @@ struct FBBSBInventoryEntry
  void NormalizeWeapon()
  {
   if(!Item || Item->EquipmentKind!=EBBSBItemEquipmentKind::Weapon) { SocketCount=0;Orbs.Reset();return; }
-  WeaponLevel=FMath::Max(1,WeaponLevel);if(SocketCount<0)SocketCount=FMath::Max(0,Item->DefaultSocketCount);Orbs.SetNum(SocketCount=FMath::Max(SocketCount,Orbs.Num()));
+  WeaponLevel=FMath::Clamp(WeaponLevel,1,FMath::Clamp(Item->MaximumWeaponLevel,1,999));
+  const int64 Cap=Item->WeaponExperienceForLevel(Item->MaximumWeaponLevel);
+  WeaponEcstatic=WeaponEcstatic<0 ? Item->WeaponExperienceForLevel(WeaponLevel):FMath::Clamp<int64>(WeaponEcstatic,0,Cap);
+  WeaponLevel=1;while(WeaponLevel<FMath::Clamp(Item->MaximumWeaponLevel,1,999) && WeaponEcstatic>=Item->WeaponExperienceForLevel(WeaponLevel+1))++WeaponLevel;
+  InvestedEcstatic=FMath::Clamp<int64>(InvestedEcstatic,0,WeaponEcstatic);
+  if(SocketCount<0)SocketCount=FMath::Max(0,Item->DefaultSocketCount);Orbs.SetNum(SocketCount=FMath::Max(SocketCount,Orbs.Num()));
  }
+};
+
+USTRUCT(BlueprintType)
+struct FBBSBWeaponDismantlePreview
+{
+ GENERATED_BODY()
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly) bool bAllowed=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 CrystalCount=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int64 RefundedEcstatic=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 ReturnedOrbs=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly) FText Reason;
 };
 
 UCLASS()
@@ -142,6 +178,8 @@ public:
  UPROPERTY(SaveGame) int32 Version=1;
  UPROPERTY(SaveGame) int32 Level=1;
  UPROPERTY(SaveGame) int32 Experience=0;
+ UPROPERTY(SaveGame) int64 Notes=0;
+ UPROPERTY(SaveGame) int64 TotalEcstaticCollected=0;
  UPROPERTY(SaveGame) int32 InventoryRows=8;
  UPROPERTY(SaveGame) TArray<FBBSBInventoryEntry> Items;
  UPROPERTY(SaveGame) TArray<FBBSBInventoryEntry> EquippedItems;

@@ -65,6 +65,7 @@ void UBBSBHuntingComponent::TickComponent(float DT,ELevelTick Type,FActorCompone
  { if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())StopCollection();else TickQuickCollectionIntent(); }
  if(bCollectionHeld) { if(bQuickCollection)TickQuickCollection(DT);else UpdateVacuum(DT); }
  TickEquipmentLoadout();
+ TickResourcePickups();
  if(bDirtyProgress && bPersistProgress && GetWorld()->GetRealTimeSeconds()>=SaveAt)SaveProgress();
 }
 int32 UBBSBHuntingComponent::ExperienceToNextLevel() const
@@ -73,13 +74,8 @@ int32 UBBSBHuntingComponent::ExperienceToNextLevel() const
 }
 void UBBSBHuntingComponent::AddExperience(int32 Amount)
 {
- if(Amount<=0 || Level>=MaximumLevel)return;
- int64 Total=int64(Experience)+Amount;const int32 Before=Level;
- while(Level<MaximumLevel && Total>=ExperienceToNextLevel()) { Total-=ExperienceToNextLevel();++Level; }
- Experience=Level>=MaximumLevel ? 0:int32(FMath::Min<int64>(Total,MAX_int32));
- LastExperienceGain=Amount;LastExperienceAt=GetWorld()->GetTimeSeconds();
- if(Level>Before)LastLevelUpAt=LastExperienceAt;
- ProgressChanged();
+ // Compatibility entry point for existing Blueprints. Combat growth now belongs to weapons.
+ CollectEcstatic(Amount);
 }
 void UBBSBHuntingComponent::GrantEnemyRewards(ABBSBInkEnemy* Enemy)
 {
@@ -89,15 +85,22 @@ void UBBSBHuntingComponent::GrantEnemyRewards(ABBSBInkEnemy* Enemy)
  FActorSpawnParameters BurstParams;BurstParams.Owner=Enemy;BurstParams.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
  if(auto* Burst=GetWorld()->SpawnActor<ABBSBLootBurst>(BurstOrigin,FRotator::ZeroRotator,BurstParams))Burst->StartBurst(Enemy->Tint);
  Enemy->SetActorHiddenInGame(true);
- AddExperience(FMath::Max(0,Enemy->ExperienceReward));
+ int32 Index=0;SpawnBasicRewards(Enemy,Index);
  auto* Table=Enemy->LootTable.IsNull() ? LoadedDefaultLoot.Get():Enemy->LootTable.LoadSynchronous();
  if(!Table && Enemy->LootTable.IsNull()) { LoadedDefaultLoot=DefaultLootTable.LoadSynchronous();Table=LoadedDefaultLoot.Get(); }
  if(!Table)return;
  if(Player->EquipmentGrowth)for(auto Module:Table->ModuleRewards)Player->EquipmentGrowth->GrantModule(Module,true);
- const FVector Origin=Enemy->GetActorLocation();int32 Index=0;
- for(const auto& Roll:Table->Drops)
+ const FVector Origin=Enemy->GetActorLocation();
+ TArray<int32> Order;for(int32 I=0;I<Table->Drops.Num();++I)Order.Add(I);
+ for(int32 I=Order.Num()-1;I>0;--I)Order.Swap(I,FMath::RandRange(0,I));
+ int32 OrdinaryDrops=0;
+ for(int32 RollIndex:Order)
  {
-  if(!Roll.Item || Roll.Chance<=0 || FMath::FRand()>=FMath::Clamp(Roll.Chance,0.f,1.f))continue;
+  const auto& Roll=Table->Drops[RollIndex];if(!Roll.Item)continue;
+  const bool Ordinary=!Roll.Item->IsFieldResource() && Roll.Item->ItemCategory!=EBBSBItemCategory::Quest;
+  if(Ordinary && OrdinaryDrops>=FMath::Clamp(RewardSettings()->MaximumOrdinaryDrops,0,8))continue;
+  const float Chance=Roll.Chance*(Ordinary ? FMath::Clamp(RewardSettings()->OrdinaryItemChanceScale,0.f,1.f):1.f);
+  if(Chance<=0 || FMath::FRand()>=FMath::Clamp(Chance,0.f,1.f))continue;
   const int32 Low=FMath::Clamp(Roll.MinimumQuantity,1,999),High=FMath::Clamp(Roll.MaximumQuantity,Low,999);
   const float Angle=Index++*2.399963f+FMath::FRandRange(-.25f,.25f);
   const float Radius=FMath::FRandRange(120.f,270.f);
@@ -109,7 +112,10 @@ void UBBSBHuntingComponent::GrantEnemyRewards(ABBSBInkEnemy* Enemy)
   FTransform Transform(FRotator::ZeroRotator,Origin+FVector::UpVector*35);
   auto* Loot=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(ABBSBLootPickup::StaticClass(),Transform,Enemy,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
   if(!Loot)continue;
-  Loot->Item=Roll.Item;Loot->Quantity=FMath::RandRange(Low,High);Loot->FinishSpawning(Transform);Loot->BeginDrop(Ground+FVector::UpVector*16);
+  Loot->Item=Roll.Item;Loot->Quantity=FMath::RandRange(Low,High);
+  Loot->bConcertoReward=Roll.Item->IsFieldResource() && Player->EquipmentGrowth && Player->EquipmentGrowth->bConcertoActive;
+  Loot->FinishSpawning(Transform);Loot->BeginDrop(Ground+FVector::UpVector*16);if(Loot->bConcertoReward)Collect(Loot);
+  if(Ordinary)++OrdinaryDrops;
  }
 }
 bool UBBSBHuntingComponent::CanPlace(UBBSBItemDefinition* Item,int32 X,int32 Y,bool Rotated,FGuid Ignore) const
@@ -136,6 +142,12 @@ bool UBBSBHuntingComponent::FindSpace(UBBSBItemDefinition* Item,int32& X,int32& 
 int32 UBBSBHuntingComponent::AddItem(UBBSBItemDefinition* Item,int32 Quantity)
 {
  if(!Item || Item->IsBuiltInCompanion() || Quantity<=0)return 0;
+ if(Item->IsFieldResource())
+ {
+  const int64 Amount=int64(Quantity)*FMath::Max(1,Item->ResourceValue);
+  const bool Accepted=Item->RewardResource==EBBSBRewardResource::Ecstatic ? CollectEcstatic(Amount):AddNotes(Amount);
+  if(Accepted)ShowPickup(Item,Quantity);return Accepted ? Quantity:0;
+ }
  const int32 Limit=Item->StackLimit();int32 Remaining=Quantity;
  for(auto& Entry:Items)if(Entry.Item==Item && Entry.Quantity<Limit)
  {
@@ -208,7 +220,8 @@ bool UBBSBHuntingComponent::SaveProgress()
 {
  if(!bPersistProgress || bSaveLoadFailed || SaveSlotName.IsEmpty())return false;
  auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::CreateSaveGameObject(UBBSBHuntingSave::StaticClass()));
- Save->Version=6;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
+ Save->Version=7;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
+ Save->Notes=Notes;Save->TotalEcstaticCollected=TotalEcstaticCollected;
  if(Player)
  {
   Save->bBunniarSelected=Player->FieldActions->EquippedEquipmentId()==0;
@@ -224,7 +237,7 @@ bool UBBSBHuntingComponent::LoadProgress()
 {
  if(SaveSlotName.IsEmpty() || !UGameplayStatics::DoesSaveGameExist(SaveSlotName,0))return false;
  bSaveLoadFailed=true;auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));
- if(!Save || Save->Version<1 || Save->Version>6)return false;
+ if(!Save || Save->Version<1 || Save->Version>7 || Save->Notes<0 || Save->TotalEcstaticCollected<0)return false;
  const int32 PreviousRows=Rows,OldWheel=CompanionWheelSlot;
  if(Save->Version>=5)Rows=FMath::Clamp(Save->InventoryRows,8,24);
  TArray<FBBSBInventoryEntry> Previous=MoveTemp(Items);Items.Reset();TSet<FGuid> Seen;
@@ -265,6 +278,7 @@ bool UBBSBHuntingComponent::LoadProgress()
  Level=FMath::Clamp(Save->Level,1,FMath::Max(2,MaximumLevel));int64 XP=FMath::Max(0,Save->Experience);
  while(Level<MaximumLevel && XP>=ExperienceToNextLevel()) { XP-=ExperienceToNextLevel();++Level; }
  Experience=Level>=MaximumLevel ? 0:int32(XP);bDirtyProgress=false;bSaveLoadFailed=false;
+ Notes=Save->Notes;TotalEcstaticCollected=Save->TotalEcstaticCollected;
  if(Player)
  {
   if(Save->Version>=4) { Player->FieldActions->EquippedWeaponInstance=Save->SelectedWeaponInstance;Player->FieldActions->LastCombatWeaponInstance=Save->LastCombatWeaponInstance;if(Save->bBunniarSelected)Player->FieldActions->RequestEquipment(0); }

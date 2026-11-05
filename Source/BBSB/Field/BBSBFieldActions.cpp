@@ -1023,9 +1023,15 @@ bool UBBSBFieldActionComponent::CanStartJump() const
 {
  return Character && GetWorld() && CanMove() && (!Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) || (CurrentAction.IsSet() && (CurrentAction.GetValue().bSwordThrow || CurrentAction.GetValue().bGlideAttack)) || (OtherWeaponAction.IsSet() && OtherWeaponAction.GetValue().bGlideAttack));
 }
-bool UBBSBFieldActionComponent::CanMove() const
+bool UBBSBFieldActionComponent::CanMove() const { return CanMoveWithInputBlock(false); }
+bool UBBSBFieldActionComponent::CanSustainTraversal() const
 {
- if(bEquipmentInputBlocked)return false;
+ const auto* P=Cast<ABBSBCharacter>(Character);
+ return CanMoveWithInputBlock(P && P->WorldMap && P->WorldMap->OwnsOnlyMapInputBlock());
+}
+bool UBBSBFieldActionComponent::CanMoveWithInputBlock(bool bIgnoreEquipmentInputBlock) const
+{
+ if(bEquipmentInputBlocked && !bIgnoreEquipmentInputBlock)return false;
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && (P->Traversal->IsWireTraversalActive() || P->Traversal->IsParkourActive())) return false;
  if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive) return false;
 	if (bEquipmentWheelOpen) return false;
@@ -1448,7 +1454,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 		DrawRect(FLinearColor(0.28f,0.2f,0.27f),22*Scale,23*Scale,BarW,10*Scale);
 		DrawRect(FLinearColor(0.88f,0.58f,0.65f),22*Scale,23*Scale,BarW*FMath::Clamp(Combat->Health/Combat->MaximumHealth,0.f,1.f),10*Scale);
 		DrawRect(FLinearColor(0.64f,0.57f,0.84f),22*Scale,40*Scale,BarW*FMath::Clamp(Combat->Ecstatic/Combat->MaximumEcstatic,0.f,1.f),6*Scale);
-		DrawText(FString::Printf(TEXT("HP %.0f  |  Ecstatic %d  |  %s"),Combat->Health,FMath::FloorToInt(Combat->Ecstatic/100.f),Combat->IsStageLocked() ? (Combat->bCombatStance ? TEXT("STANCE") : TEXT("FREE")) : TEXT("FIELD")),FLinearColor(0.95f,0.87f,0.94f),22*Scale,56*Scale,GEngine->GetSmallFont(),Scale);
+		DrawText(Combat->IsStageLocked() ? FString::Printf(TEXT("HP %.0f  |  Rhythm %d  |  %s"),Combat->Health,FMath::FloorToInt(Combat->Ecstatic/100.f),Combat->bCombatStance ? TEXT("STANCE"):TEXT("FREE")):FString::Printf(TEXT("HP %.0f  |  FIELD"),Combat->Health),FLinearColor(0.95f,0.87f,0.94f),22*Scale,56*Scale,GEngine->GetSmallFont(),Scale);
 		if (Combat->FeedbackExperiment==2)
 		{
 			const float X=22*Scale,Y=100*Scale,MeterW=306*Scale;

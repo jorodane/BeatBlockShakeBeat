@@ -290,9 +290,16 @@ public:
  // Possession assigns Actor.Owner to the AI controller; keep the spawning area's identity separately.
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Practice") TObjectPtr<ABBSBCombatPracticeArea> PracticeArea;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards") bool bGrantsHuntingRewards=true;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards",meta=(ClampMin="0")) int32 ExperienceReward=25;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards",meta=(ClampMin="0",DisplayName="Ecstatic reward")) int32 ExperienceReward=25;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards",meta=(ClampMin="0")) int32 NoteReward=12;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hunting rewards") TSoftObjectPtr<UBBSBLootTable> LootTable;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") bool bHuntingRewardsGranted=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") int32 EcstaticRewardBudget=-1;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") int32 NoteRewardBudget=-1;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") int32 EcstaticRewardsDropped=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") int32 NoteRewardsDropped=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hunting rewards") float RewardLowestHealthFraction=1;
+ int32 RewardDropSerial=0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") bool bDefeated=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") bool bFront=false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") TObjectPtr<ABBSBCombatStage> Stage;

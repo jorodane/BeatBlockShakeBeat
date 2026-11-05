@@ -3,6 +3,7 @@
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBInventoryTheme.h"
 #include "BBSBCharacter.h"
+#include "Engine/World.h"
 #include "Field/BBSBFieldActions.h"
 #include "Components/Image.h"
 #include "Components/CanvasPanelSlot.h"
@@ -72,6 +73,8 @@ int32 UBBSBInventoryWidget::NativePaint(const FPaintArgs& Args,const FGeometry& 
  auto Hit=[&](UImage* Image,FVector2D P,FVector2D Size){if(Image)if(auto* Slot=Cast<UCanvasPanelSlot>(Image->Slot)) { if(!Slot->GetPosition().Equals(P,.01))Slot->SetPosition(P);if(!Slot->GetSize().Equals(Size,.01))Slot->SetSize(Size); }};
  Hit(PanelHit,L.Panel,L.Size);Hit(EquipmentHit,L.Equipment,L.EquipmentSize);D.Panel(L.Panel,L.Size);
  const TCHAR* Pages[]={TEXT("소지품"),TEXT("무기"),TEXT("버니아")};D.Text(Pages[GrowthPage],L.Panel+FVector2D(18,12)*S,21,D.Paper());
+ const FString Notes=FString::Printf(TEXT("노트 %s"),*FText::AsNumber(Hunting->Notes).ToString());
+ D.Text(Notes,L.Panel+FVector2D(110,23)*S,9,D.Accent());
  const float TW=(L.Size.X-40*S)/3;
  for(int32 I=0;I<3;++I) { const auto P=L.Panel+FVector2D(20*S+I*TW,51*S);D.Box(P,FVector2D(TW-3*S,25*S),I==GrowthPage ? FLinearColor(.26f,.20f,.23f):D.CellGround(),5);D.Lines({P+FVector2D(0,25*S),P+FVector2D(TW-3*S,25*S)},I==GrowthPage ? D.Paper():D.Faint(),I==GrowthPage ? 2.f:1.f,6);D.Text(Pages[I],P+FVector2D(8,5)*S,11,I==GrowthPage ? D.Paper():D.Faint(),7); }
  const bool SortHover=bPointerInside && Inside(Pointer,L.Sort,L.SortSize),CloseHover=bPointerInside && IsClosePoint(L,Pointer);
@@ -89,7 +92,8 @@ int32 UBBSBInventoryWidget::NativePaint(const FPaintArgs& Args,const FGeometry& 
   }
  }
  else PaintGrowthPanel(G,E,Layer+12);
- D.Text(TEXT("클릭 집기/놓기 · 우클릭 취소"),L.Panel+FVector2D(20*S,L.Size.Y-43*S),10,D.Faint(),15);D.Text(TEXT("Tab 닫기 · E 전환 · F 상호작용"),L.Panel+FVector2D(20*S,L.Size.Y-24*S),9,D.Faint(),15);
+ const bool GrowthMessage=!GrowthNotice.IsEmpty() && GetWorld()->GetRealTimeSeconds()<GrowthNoticeUntil;
+ D.Text(GrowthMessage ? GrowthNotice:TEXT("클릭 집기/놓기 · 우클릭 취소"),L.Panel+FVector2D(20*S,L.Size.Y-43*S),GrowthMessage ? 9:10,GrowthMessage ? D.Accent():D.Faint(),15);D.Text(TEXT("Tab 닫기 · E 전환 · F 상호작용"),L.Panel+FVector2D(20*S,L.Size.Y-24*S),9,D.Faint(),15);
  auto* Player=Cast<ABBSBCharacter>(GetOwningPlayerPawn());auto* Growth=Player ? Player->EquipmentGrowth.Get():nullptr;
  const auto* Held=Hunting->FindOwnedEntry(HeldId);const auto* Module=Growth ? Growth->ModuleDefinition(HeldModule):nullptr;
  if(HasCarriedItem())
@@ -131,6 +135,8 @@ int32 UBBSBInventoryWidget::PaintTooltip(const FGeometry& G,FSlateWindowElementL
  auto* Player=Cast<ABBSBCharacter>(GetOwningPlayerPawn());auto* Growth=Player ? Player->EquipmentGrowth.Get():nullptr;TArray<FStatHint> Stats;TArray<FActionHint> Actions;
  if(Weapon)
  {
+  const bool Ecstasy=Hunting->IsEcstasyWeapon(Entry->InstanceId);
+  Stats.Add({EBBSBGameIcon::Level,Ecstasy ? FString::Printf(TEXT("Lv.%d · 엑스타시 · 공격력 +%.0f%%"),Entry->WeaponLevel,Item->EcstasyAttackBonus*100):FString::Printf(TEXT("Lv.%d · 엑스태틱 %lld / %lld"),Entry->WeaponLevel,Hunting->WeaponExperienceInLevel(Entry->InstanceId),Hunting->WeaponExperienceToNextLevel(Entry->InstanceId))});
   const auto Snapshot=Growth ? Growth->WeaponSnapshot(Entry->InstanceId):FBBSBWeaponSnapshot();const float Multiplier=Snapshot.InstanceId.IsValid() ? Snapshot.DamageMultiplier:Item->WeaponDamageMultiplier*(1+(FMath::Max(1,Entry->WeaponLevel)-1)*Item->DamagePerLevel);
   Stats.Add({EBBSBGameIcon::Attack,FString::Printf(TEXT("공격력  %.1f"),(Player ? Player->FieldActions->BaseDamage:18.f)*Multiplier+Snapshot.FlatDamage)});Stats.Add({EBBSBGameIcon::Cooldown,FString::Printf(TEXT("쿨타임  %.2f초"),Item->NormalBeatCooldown*Snapshot.CooldownMultiplier)});
   Actions=Patterns(Item->WeaponId);

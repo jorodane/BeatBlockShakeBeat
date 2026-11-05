@@ -44,7 +44,23 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Progression",meta=(ClampMin="2",ClampMax="999")) int32 MaximumLevel=99;
  UFUNCTION(BlueprintPure,Category="Progression") int32 ExperienceToNextLevel() const;
  UFUNCTION(BlueprintCallable,Category="Progression") void AddExperience(int32 Amount);
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Rewards") int64 Notes=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Rewards") int64 TotalEcstaticCollected=0;
+ UFUNCTION(BlueprintPure,Category="Rewards") FGuid RewardWeaponInstance() const;
+ UFUNCTION(BlueprintCallable,Category="Rewards") bool CollectEcstatic(int64 Amount,bool ChargeConcerto=true);
+ UFUNCTION(BlueprintCallable,Category="Rewards") bool AddNotes(int64 Amount);
+ UFUNCTION(BlueprintCallable,Category="Rewards") bool SpendNotes(int64 Amount);
+ UFUNCTION(BlueprintCallable,Category="Rewards") int32 CollectLoot(ABBSBLootPickup* Loot) { return Collect(Loot); }
+ UFUNCTION(BlueprintCallable,Category="Weapons|Growth") int64 AddWeaponEcstatic(FGuid WeaponId,int64 Amount);
+ UFUNCTION(BlueprintPure,Category="Weapons|Growth") bool IsEcstasyWeapon(FGuid WeaponId) const;
+ UFUNCTION(BlueprintPure,Category="Weapons|Growth") int64 WeaponExperienceToNextLevel(FGuid WeaponId) const;
+ UFUNCTION(BlueprintPure,Category="Weapons|Growth") int64 WeaponExperienceInLevel(FGuid WeaponId) const;
+ UFUNCTION(BlueprintPure,Category="Weapons|Growth") FBBSBWeaponDismantlePreview PreviewDismantleWeapon(FGuid WeaponId) const;
+ UFUNCTION(BlueprintCallable,Category="Weapons|Growth") bool DismantleWeapon(FGuid WeaponId);
+ UFUNCTION(BlueprintCallable,Category="Weapons|Growth") bool UseEcstaticCrystals(FGuid WeaponId,int32 Count=1);
+ UFUNCTION(BlueprintPure,Category="Weapons|Growth") UBBSBItemDefinition* EcstaticCrystalDefinition() const;
  void GrantEnemyRewards(ABBSBInkEnemy* Enemy);
+ void GrantEnemyDamageRewards(ABBSBInkEnemy* Enemy);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Loot") TSoftObjectPtr<UBBSBLootTable> DefaultLootTable;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Loot",meta=(ClampMin="200",Units="cm")) float LootLabelDistance=2400.f;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Inventory") TArray<FBBSBInventoryEntry> Items;
@@ -153,6 +169,13 @@ private:
  void ProgressChanged();
  void ShowPickup(UBBSBItemDefinition* Item,int32 Quantity);
  int32 Collect(ABBSBLootPickup* Loot);
+ const class UBBSBGrowthSettings* RewardSettings() const;
+ UBBSBItemDefinition* ResourceDefinition(EBBSBRewardResource Resource) const;
+ void SpawnBasicRewards(ABBSBInkEnemy* Enemy,int32& Index);
+ int32 SpawnResourceAmount(ABBSBInkEnemy* Enemy,EBBSBRewardResource Resource,int32 Amount,bool FinalBurst,int32& Index);
+ void TickResourcePickups();
+ double NextResourceScanAt=0;
+ FGuid LastExperienceWeapon;
  bool ResolveVacuumAim(FVector& Point,FVector& Normal) const;
  bool LootVisible(const ABBSBLootPickup* Loot,const FVector& From) const;
  void UpdateVacuum(float DT);

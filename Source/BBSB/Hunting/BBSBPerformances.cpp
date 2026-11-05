@@ -25,7 +25,7 @@
 #include "Kismet/GameplayStatics.h"
 
 void UBBSBEquipmentGrowthComponent::AddConcertoCharge(float Amount)
-{ if(FMath::IsFinite(Amount) && Amount>0 && !bConcertoActive)ConcertoCharge=FMath::Clamp(ConcertoCharge+Amount,0.f,100.f); }
+{ if(FMath::IsFinite(Amount) && Amount>0 && !bConcertoActive) { const float Before=ConcertoCharge;ConcertoCharge=FMath::Clamp(ConcertoCharge+Amount,0.f,100.f);if(ConcertoCharge!=Before)Changed(); } }
 
 void UBBSBEquipmentGrowthComponent::NotifyWeaponHit(const FBBSBWeaponSnapshot& S,AActor* Target,float Damage,const FVector& Point,bool Support)
 {

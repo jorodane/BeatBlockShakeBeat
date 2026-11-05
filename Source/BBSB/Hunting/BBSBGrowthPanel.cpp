@@ -4,6 +4,7 @@
 #include "Hunting/BBSBItemIcon.h"
 #include "Hunting/BBSBInventoryTheme.h"
 #include "BBSBCharacter.h"
+#include "Engine/World.h"
 #include "Field/BBSBFieldActions.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -23,7 +24,7 @@ TArray<const FBBSBInventoryEntry*> Weapons(const UBBSBHuntingComponent* H)
 }
 }
 void UBBSBInventoryWidget::SetGrowthPage(int32 Page)
-{ GrowthPage=FMath::Clamp(Page,0,2);GridScrollRow=0;if(auto* P=Cast<ABBSBCharacter>(GetOwningPlayerPawn());P && P->EquipmentGrowth)P->EquipmentGrowth->EnsureBunniarBag();bSortOpen=bSortPressed=false;bKeyboardMode=false;FocusIndex=0;HoverIndex=INDEX_NONE;UpdatePointerSurface();InvalidateLayoutAndVolatility(); }
+{ GrowthPage=FMath::Clamp(Page,0,2);DismantleConfirmation.Invalidate();GridScrollRow=0;if(auto* P=Cast<ABBSBCharacter>(GetOwningPlayerPawn());P && P->EquipmentGrowth)P->EquipmentGrowth->EnsureBunniarBag();bSortOpen=bSortPressed=false;bKeyboardMode=false;FocusIndex=0;HoverIndex=INDEX_NONE;UpdatePointerSurface();InvalidateLayoutAndVolatility(); }
 FVector2D UBBSBInventoryWidget::GrowthTabCenter(int32 Page) const
 {
  const auto& L=PaintedLayout;const float W=(L.Size.X-40*L.Scale)/3;return L.Panel+FVector2D(20*L.Scale+(FMath::Clamp(Page,0,2)+.5f)*W,63.5f*L.Scale);
@@ -68,7 +69,7 @@ bool UBBSBInventoryWidget::ActivateGrowthControl(int32 Index)
   case 1:
   {
    const auto W=Weapons(Hunting);const int32 Current=W.IndexOfByPredicate([&](const auto* E){return E->InstanceId==InspectedWeapon;});
-   if(W.Num()>0) { InspectedWeapon=W[(FMath::Max(0,Current)+C.Index+W.Num())%W.Num()]->InstanceId;SocketPage=0;Applied=true; }break;
+   if(W.Num()>0) { InspectedWeapon=W[(FMath::Max(0,Current)+C.Index+W.Num())%W.Num()]->InstanceId;DismantleConfirmation.Invalidate();SocketPage=0;Applied=true; }break;
   }
   case 2:
   {
@@ -81,6 +82,12 @@ bool UBBSBInventoryWidget::ActivateGrowthControl(int32 Index)
   case 4:SocketPage=FMath::Max(0,SocketPage+C.Index);Applied=true;break;
   case 5:Applied=Hunting->EquipOwnedWeapon(InspectedWeapon);if(Growth && !Applied)Growth->Feedback=TEXT("장비 휠에 빈칸이 필요해요");break;
   case 6:OrbPage=FMath::Max(0,OrbPage+C.Index);Applied=true;break;
+  case 7:Applied=Hunting->UseEcstaticCrystals(InspectedWeapon);break;
+  case 8:DismantleConfirmation=InspectedWeapon;DismantleConfirmationAt=GetWorld()->GetRealTimeSeconds();HeldId.Invalidate();HeldModule=NAME_None;Applied=true;break;
+  case 9:
+   if(DismantleConfirmation==InspectedWeapon && GetWorld()->GetRealTimeSeconds()-DismantleConfirmationAt>=.35) { Applied=Hunting->DismantleWeapon(InspectedWeapon);if(Applied)InspectedWeapon.Invalidate(); }
+   DismantleConfirmation.Invalidate();break;
+  case 14:DismantleConfirmation.Invalidate();Applied=true;break;
   case 10:if(Growth)if(const auto* D=Growth->ModuleDefinition(C.Module))Applied=Growth->EquipModule(D->Slot,C.Module);break;
   case 11:if(Growth)Applied=Growth->UpgradeModule(C.Module);break;
   case 12:if(Growth)Applied=Growth->EquipModule(EBBSBModuleSlot(C.Index),NAME_None);break;
@@ -90,6 +97,7 @@ bool UBBSBInventoryWidget::ActivateGrowthControl(int32 Index)
   case 30:ActivateSlot(C.Index);Applied=true;break;
   case 13:ModulePage=FMath::Max(0,ModulePage+C.Index);Applied=true;break;
  }
+ if(Growth && (C.Action==7 || C.Action==9)) { GrowthNotice=Growth->Feedback;GrowthNoticeUntil=GetWorld()->GetRealTimeSeconds()+3.2; }
  UpdatePointerSurface();InvalidateLayoutAndVolatility();return Applied;
 }
 
@@ -121,12 +129,16 @@ int32 UBBSBInventoryWidget::PaintGrowthPanel(const FGeometry& G,FSlateWindowElem
    Button(TEXT("WeaponPrevious"),At,FVector2D(26,28)*S,TEXT("<"),1,FGuid(),-1,NAME_None,List.Num()>1,TEXT("이전 무기"));
    Button(TEXT("WeaponNext"),At+FVector2D(W-26*S,0),FVector2D(26,28)*S,TEXT(">"),1,FGuid(),1,NAME_None,List.Num()>1,TEXT("다음 무기"));
    Text(E.Item->DisplayName.ToString(),At+FVector2D(34,2)*S,14,Ink);Text(FString::Printf(TEXT("%d / %d"),Current+1,List.Num()),At+FVector2D(35,23)*S,9,Faint);
-   Text(FString::Printf(TEXT("Lv.%d   ·   소켓 %d"),E.WeaponLevel,E.SocketCount),At+FVector2D(0,47)*S,12,Rose);
+   const bool Ecstasy=Hunting->IsEcstasyWeapon(E.InstanceId);
+   const int64 Required=Hunting->WeaponExperienceToNextLevel(E.InstanceId),Progress=Hunting->WeaponExperienceInLevel(E.InstanceId);
+   Text(Ecstasy ? FString::Printf(TEXT("Lv.%d · 엑스타시"),E.WeaponLevel):FString::Printf(TEXT("Lv.%d · 엑스태틱 %lld / %lld"),E.WeaponLevel,Progress,Required),At+FVector2D(0,46)*S,11,Rose);
+   Box(At+FVector2D(0,62)*S,FVector2D(W,3*S),Draw.CellGround(),3);
+   Box(At+FVector2D(0,62)*S,FVector2D(W*(Ecstasy ? 1.f:Required>0 ? float(Progress)/Required:0.f),3*S),Rose,4);
    Draw.GameIcon(EBBSBGameIcon::Attack,At+FVector2D(8,76)*S,7.5f*S,Ink);Text(FString::Printf(TEXT("공격력 %.1f"),Player ? Player->FieldActions->BaseDamage*Stats.DamageMultiplier+Stats.FlatDamage:0),At+FVector2D(23,68)*S,10,Ink);
    Draw.GameIcon(EBBSBGameIcon::Cooldown,At+FVector2D(168,76)*S,7.5f*S,Ink);Text(FString::Printf(TEXT("쿨타임 %.2f초"),E.Item->NormalBeatCooldown*Stats.CooldownMultiplier),At+FVector2D(183,68)*S,10,Ink);
    const bool Equipped=Player && Player->FieldActions->EquippedEquipmentId()!=0 && Player->FieldActions->EquippedWeaponInstance==E.InstanceId;
    Button(TEXT("WeaponEquip"),At+FVector2D(0,92)*S,FVector2D(W,28*S),Equipped ? TEXT("장착 중"):TEXT("이 무기 장착"),5,E.InstanceId,0,NAME_None,!Equipped,TEXT("가방의 무기는 빈 장비 휠 칸에 배치해요"));
-   Text(TEXT("속성 구슬"),At+FVector2D(0,135)*S,12,Ink);const int32 Pages=FMath::Max(1,FMath::DivideAndRoundUp(E.SocketCount,6)),Page=FMath::Clamp(SocketPage,0,Pages-1);
+   Text(FString::Printf(TEXT("속성 구슬 · %d칸"),E.SocketCount),At+FVector2D(0,135)*S,12,Ink);const int32 Pages=FMath::Max(1,FMath::DivideAndRoundUp(E.SocketCount,6)),Page=FMath::Clamp(SocketPage,0,Pages-1);
    Button(TEXT("SocketPrevious"),At+FVector2D(W-55*S,130*S),FVector2D(25,24)*S,TEXT("<"),4,FGuid(),-1,NAME_None,Page>0,TEXT("이전 소켓"));
    Button(TEXT("SocketNext"),At+FVector2D(W-25*S,130*S),FVector2D(25,24)*S,TEXT(">"),4,FGuid(),1,NAME_None,Page<Pages-1,TEXT("다음 소켓"));
    const float Cell=(W+6*S)/3;
@@ -152,6 +164,16 @@ int32 UBBSBInventoryWidget::PaintGrowthPanel(const FGeometry& G,FSlateWindowElem
    if(Orbs.IsEmpty())Text(TEXT("사냥으로 속성 구슬을 획득해 보세요"),At+FVector2D(0,315)*S,10,Faint);
    Button(TEXT("OrbPrevious"),At+FVector2D(0,450)*S,FVector2D(26,24)*S,TEXT("<"),6,FGuid(),-1,NAME_None,OP>0,TEXT("이전 구슬"));
    Button(TEXT("OrbNext"),At+FVector2D(W-26*S,450*S),FVector2D(26,24)*S,TEXT(">"),6,FGuid(),1,NAME_None,OP<OrbPages-1,TEXT("다음 구슬"));
+   auto* Crystal=Hunting->EcstaticCrystalDefinition();const int32 Crystals=Crystal ? Hunting->ItemCount(Crystal):0;
+   const FString CrystalLabel=Crystal ? FString::Printf(TEXT("결정 사용 · +%d 엑스태틱 · 보유 %d개"),Crystal->ResourceValue,Crystals):TEXT("엑스태틱 결정");
+   Button(TEXT("UseCrystal"),At+FVector2D(0,485)*S,FVector2D(W,26*S),CrystalLabel,7,E.InstanceId,0,NAME_None,Crystal && Crystals>0 && !Ecstasy,TEXT("지금 살펴보는 무기에 결정 1개를 사용해요. 협주곡은 충전되지 않아요."));
+   const auto Preview=Hunting->PreviewDismantleWeapon(E.InstanceId);
+   if(DismantleConfirmation==E.InstanceId)
+   {
+    Button(TEXT("ConfirmDismantle"),At+FVector2D(0,516)*S,FVector2D(W*.67f,24*S),TEXT("정말 파기 · 되돌릴 수 없음"),9,E.InstanceId,0,NAME_None,Preview.bAllowed && GetWorld()->GetRealTimeSeconds()-DismantleConfirmationAt>=.35,TEXT("구슬은 전부 반환하고 투자한 엑스태틱 일부를 결정으로 돌려받아요."));
+    Button(TEXT("CancelDismantle"),At+FVector2D(W*.69f,516*S),FVector2D(W*.31f,24*S),TEXT("취소"),14,FGuid(),0,NAME_None,true,TEXT("이 무기를 보관해요"));
+   }
+   else Button(TEXT("DismantleWeapon"),At+FVector2D(0,516)*S,FVector2D(W,24*S),FString::Printf(TEXT("무기 파기 · 결정 %d개 / 구슬 %d개 반환"),Preview.CrystalCount,Preview.ReturnedOrbs),8,E.InstanceId,0,NAME_None,Preview.bAllowed,Preview.bAllowed ? TEXT("가방에 있는 무기를 파기해요. 다음 화면에서 한 번 더 확인해요."):Preview.Reason.ToString());
   }
  }
  else if(Growth)

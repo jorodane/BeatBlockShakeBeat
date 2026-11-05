@@ -71,6 +71,9 @@ private:
  struct FGrowthControl { FName Key;FVector2D Position,Size;int32 Action=0,Index=0;FGuid Item;FName Module;bool Enabled=true;FString Tooltip; };
  mutable TArray<FGrowthControl> GrowthControls;
  mutable FGuid InspectedWeapon;
+ FGuid DismantleConfirmation;
+ double DismantleConfirmationAt=-100,GrowthNoticeUntil=-100;
+ FString GrowthNotice;
  int32 SocketPage=0,OrbPage=0,ModulePage=0,GridScrollRow=0;
  FName HeldModule,SelectedModule;
  void ActivateModuleCell(int32 Cell);

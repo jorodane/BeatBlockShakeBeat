@@ -109,6 +109,8 @@ FBBSBWeaponSnapshot UBBSBEquipmentGrowthComponent::WeaponSnapshot(FGuid Id) cons
   const auto& Effect=Orb.Item->OrbEffect;S.Effects.Add(Effect);
   if(Effect.Effect==EBBSBOrbEffect::Stats) { S.DamageMultiplier+=Effect.AttackBonus;S.FlatDamage+=Effect.FlatDamage;S.CooldownMultiplier*=1-FMath::Clamp(Effect.CooldownReduction,0.f,.8f); }
  }
+ if(Player->Hunting->IsEcstasyWeapon(Id))
+ { const float Ecstasy=1+FMath::Clamp(E->Item->EcstasyAttackBonus,0.f,2.f);S.DamageMultiplier*=Ecstasy;S.FlatDamage*=Ecstasy; }
  S.CooldownMultiplier=FMath::Clamp(S.CooldownMultiplier,.2f,3.f);
  if(!S.Mesh && !E->Item->WeaponAnimation.IsNull())if(const auto* Animation=E->Item->WeaponAnimation.LoadSynchronous())S.Mesh=Animation->WeaponMesh;
  if(!S.Mesh && Player->FieldActions)if(const auto* Asset=Player->FieldActions->WeaponAnimationSets.Find(EBBSBPrototypeWeapon(S.TemplateId)))if(const auto* Animation=Asset->LoadSynchronous())S.Mesh=Animation->WeaponMesh;

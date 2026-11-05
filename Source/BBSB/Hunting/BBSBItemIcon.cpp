@@ -21,6 +21,7 @@ void Glyph(UBBSBItemDefinition* Item,FName Kind,FVector2D C,float R,float Alpha,
   else if(Kind==TEXT("Ring")) { Circle(C,R*.75f);Circle(C+FVector2D(0,-R*.7f),R*.25f); }
   else if(Kind==TEXT("Core")) { for(int32 I=0;I<=24;++I)P.Add(C+FVector2D(FMath::Cos(I*PI/12),FMath::Sin(I*PI/12))*R*(I%2 ? .78f:1.f));Circle(C,R*.35f); }
   else if(Kind==TEXT("Shard"))P={C+FVector2D(0,-R),C+FVector2D(R*.6f,0),C+FVector2D(0,R),C-FVector2D(R*.6f,0),C+FVector2D(0,-R)};
+  else if(Kind==TEXT("Note")) { Circle(C+FVector2D(-R*.25f,R*.57f),R*.3f);Lines({C+FVector2D(R*.05f,R*.58f),C+FVector2D(R*.05f,-R*.85f),C+FVector2D(R*.7f,-R*.55f),C+FVector2D(R*.55f,-R*.1f)},Color,1.8f,Z); }
   else if(Item)P={C+FVector2D(0,-R),C+FVector2D(R*.65f,R*.15f),C+FVector2D(R*.5f,R*.7f),C+FVector2D(0,R*.9f),C+FVector2D(-R*.5f,R*.7f),C+FVector2D(-R*.65f,R*.15f),C+FVector2D(0,-R)};
   else { Lines({C-FVector2D(R*.35f,0),C+FVector2D(R*.35f,0)},Color,1,Z);Lines({C-FVector2D(0,R*.35f),C+FVector2D(0,R*.35f)},Color,1,Z); }
   if(!P.IsEmpty())Lines(P,Color,1.8f,Z);

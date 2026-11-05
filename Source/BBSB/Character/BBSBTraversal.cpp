@@ -281,7 +281,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
  if (IsBunniarTraversalActive())
  {
   const auto* PC=Cast<APlayerController>(Character->GetController());
-  const bool Interrupted=Character->FieldActions && !Character->FieldActions->CanMove() && !Character->FieldActions->IsDodging() && !Character->FieldActions->bEquipmentWheelOpen;
+  const bool Interrupted=Character->FieldActions && !Character->FieldActions->CanSustainTraversal() && !Character->FieldActions->IsDodging() && !Character->FieldActions->bEquipmentWheelOpen;
   if (!IsValid(Glider) || !PC || !PC->IsLocalController() || !Move->IsFalling() || Interrupted || (Character->Combat && Character->Combat->bDead)) EndGlide();
   else
   {

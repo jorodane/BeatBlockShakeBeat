@@ -536,6 +536,9 @@ float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AControll
  if(Stage && Stage->IsCounterWindow()) Amount*=Stage->CounterDamageMultiplier;
 	const float HealthBefore=Health;
 	LastDamageTaken=FMath::Min(Amount,Health); Health=FMath::Max(0.f,Health-Amount);RecordHealthDamage(HealthBefore);
+ if(Health>0 && LastDamageTaken>0)
+  if(auto* RewardPlayer=UGameplayStatics::GetPlayerPawn(this,0))
+   if(auto* Hunting=RewardPlayer->FindComponentByClass<UBBSBHuntingComponent>())Hunting->GrantEnemyDamageRewards(this);
 	HitFlashUntil=GetWorld()->GetTimeSeconds()+0.13; UpdateLabel();
 	if (Health<=0)
 	{
@@ -575,6 +578,7 @@ void ABBSBInkEnemy::ResetEnemy()
  FieldSecondaryVolleysFired=FieldBeatBurstsFired=FieldBeatShotsFired=0;LastFieldBeatTick=FieldLastFiredBeat=-1;
  BeatFireArmedAt=LastFieldMajorAt=FieldLastBeatShotAt=-100;
 	Stage=nullptr; bDefeated=bFront=false;bHuntingRewardsGranted=false; Health=MaximumHealth; ResetHealthFeedback();SetSelected(false);
+ EcstaticRewardBudget=NoteRewardBudget=-1;EcstaticRewardsDropped=NoteRewardsDropped=RewardDropSerial=0;RewardLowestHealthFraction=1;
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking); GetCharacterMovement()->SetAvoidanceEnabled(true);
  RebuildFieldAppearance();Body->SetRelativeScale3D(FieldRestScale); Body->SetRelativeLocation(FVector(0,0,-6));

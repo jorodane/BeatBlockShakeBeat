@@ -190,6 +190,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") FVector2D GestureReleaseDirection(int32 Channel) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Gestures") float GestureHeldSeconds(int32 Channel) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Action") bool CanMove() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Action") bool CanSustainTraversal() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Movement") bool CanStartJump() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Action") bool IsConductorAvailable() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Camera") float GetLookInputScale() const;
@@ -242,6 +243,7 @@ protected:
 	virtual void RegisterComponentTickFunctions(bool bRegister) override;
 
 private:
+ bool CanMoveWithInputBlock(bool bIgnoreEquipmentInputBlock) const;
 	friend class ABBSBWeaponVerification;
  friend class ABBSBPlayerWeaponProjectile;
  struct FRestEquipmentPoseState { FVector OwnerOffset=FVector::ZeroVector,CollisionOffset=FVector::ZeroVector; double UpdatedAt=-1; };

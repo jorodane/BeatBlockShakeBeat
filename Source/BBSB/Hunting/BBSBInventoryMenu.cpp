@@ -1,5 +1,6 @@
 #include "Hunting/BBSBHunting.h"
 #include "Hunting/BBSBInventoryWidget.h"
+#include "Hunting/BBSBItemIcon.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBRespawn.h"
 #include "Character/BBSBWorldMap.h"
@@ -75,19 +76,25 @@ void UBBSBHuntingComponent::DrawFeedback(AHUD* HUD,UCanvas* Canvas) const
  const float W=Canvas->SizeX,H=Canvas->SizeY,S=FMath::Clamp(W/1280.f,.7f,1.4f);
  const FLinearColor Paper(.98f,.93f,.84f),Rose(.94f,.63f,.74f),Mint(.65f,.93f,.81f);
  const double Now=GetWorld()->GetTimeSeconds();
- const float X=W-270*S,Y=48*S;const float Fraction=Level>=MaximumLevel ? 1.f:float(Experience)/ExperienceToNextLevel();
- HUD->DrawRect(FLinearColor(.09f,.07f,.12f,.7f),X-9*S,Y-7*S,252*S,42*S);
- HUD->DrawText(FString::Printf(TEXT("Lv. %d"),Level),Paper,X,Y,GEngine->GetSmallFont(),1.15f*S);
- const FString XP=Level>=MaximumLevel ? TEXT("MAX"):FString::Printf(TEXT("%d / %d XP"),Experience,ExperienceToNextLevel());
- HUD->DrawText(XP,Rose,X+88*S,Y+1*S,GEngine->GetSmallFont(),S);
- HUD->DrawRect(FLinearColor(.34f,.28f,.36f),X,Y+23*S,230*S,4*S);
- HUD->DrawRect(Rose,X,Y+23*S,230*S*FMath::Clamp(Fraction,0.f,1.f),4*S);
+ const float X=W-280*S,Y=48*S;const FGuid Id=RewardWeaponInstance();const auto* Weapon=FindOwnedEntry(Id);
+ const bool Ecstasy=IsEcstasyWeapon(Id);const int64 Required=WeaponExperienceToNextLevel(Id),XPInLevel=WeaponExperienceInLevel(Id);
+ const float Fraction=Ecstasy ? 1.f:Required>0 ? float(XPInLevel)/Required:0.f;
+ HUD->DrawRect(FLinearColor(.09f,.07f,.12f,.7f),X-9*S,Y-7*S,262*S,74*S);
+ FString Name=Weapon && Weapon->Item ? Weapon->Item->DisplayName.ToString():TEXT("무기 성장");if(Name.Len()>14)Name=Name.Left(13)+TEXT("…");
+ HUD->DrawText(Weapon ? FString::Printf(TEXT("%s · Lv.%d"),*Name,Weapon->WeaponLevel):Name,Paper,X,Y,GEngine->GetSmallFont(),1.05f*S);
+ const FString XP=Ecstasy ? TEXT("엑스타시 · MAX"):FString::Printf(TEXT("엑스태틱 %lld / %lld"),XPInLevel,Required);
+ HUD->DrawText(XP,Rose,X,Y+19*S,GEngine->GetSmallFont(),.95f*S);
+ HUD->DrawRect(FLinearColor(.34f,.28f,.36f),X,Y+37*S,240*S,4*S);
+ HUD->DrawRect(Rose,X,Y+37*S,240*S*FMath::Clamp(Fraction,0.f,1.f),4*S);
+ BBSBItemIcon::DrawCanvas(HUD,Canvas,ResourceDefinition(EBBSBRewardResource::Note),TEXT("Note"),FVector2D(X+7*S,Y+54*S),7*S,1,S,Paper);
+ HUD->DrawText(FString::Printf(TEXT("노트 %s"),*FText::AsNumber(Notes).ToString()),Paper,X+23*S,Y+46*S,GEngine->GetSmallFont(),S);
  if(Now-LastExperienceAt<1.5)
-  HUD->DrawText(FString::Printf(TEXT("+%d XP"),LastExperienceGain),Mint,X+130*S,Y+39*S,GEngine->GetSmallFont(),1.15f*S);
+  HUD->DrawText(FString::Printf(TEXT("+%d 엑스태틱"),LastExperienceGain),Mint,X+104*S,Y+76*S,GEngine->GetSmallFont(),S);
  if(Now-LastLevelUpAt<2.3)
  {
   const float Age=Now-LastLevelUpAt,Alpha=FMath::Clamp((2.3f-Age)/.5f,0.f,1.f),Scale=(1.2f+.18f*FMath::Sin(FMath::Min(Age/.22f,1.f)*PI))*S;
-  const FString Text=FString::Printf(TEXT("LEVEL UP   Lv. %d"),Level);float TW=0,TH=0;HUD->GetTextSize(Text,TW,TH,GEngine->GetMediumFont(),Scale);
+  const auto* Upgraded=FindOwnedEntry(LastExperienceWeapon);
+  const FString Text=Upgraded ? FString::Printf(TEXT("%s   Lv.%d%s"),*Upgraded->Item->DisplayName.ToString(),Upgraded->WeaponLevel,IsEcstasyWeapon(LastExperienceWeapon) ? TEXT(" · 엑스타시"):TEXT("")):TEXT("");float TW=0,TH=0;HUD->GetTextSize(Text,TW,TH,GEngine->GetMediumFont(),Scale);
   HUD->DrawText(Text,FLinearColor(Paper.R,Paper.G,Paper.B,Alpha),W*.5f-TW*.5f,110*S,GEngine->GetMediumFont(),Scale);
  }
  int32 Row=0;

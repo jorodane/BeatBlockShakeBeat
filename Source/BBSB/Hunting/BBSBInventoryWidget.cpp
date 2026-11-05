@@ -79,6 +79,8 @@ const FBBSBInventoryEntry* UBBSBInventoryWidget::EntryForSlot(int32 I) const
 }
 void UBBSBInventoryWidget::ResetInteraction()
 {
+ DismantleConfirmation.Invalidate();
+ GrowthNotice.Reset();GrowthNoticeUntil=-100;
  HeldId.Invalidate();HeldModule=NAME_None;SelectedModule=NAME_None;GridScrollRow=0;bHoldingCompanionPosition=bClosePressed=bPointerInside=bSortOpen=bSortPressed=false;HoverIndex=INDEX_NONE;FocusIndex=0;GrowthPage=0;bKeyboardMode=false;GrowthControls.Reset();UIButtons.Reset();InvalidateLayoutAndVolatility();
  UpdatePointerSurface();
 }
@@ -154,7 +156,7 @@ FReply UBBSBInventoryWidget::NativeOnMouseButtonDown(const FGeometry& G,const FP
  if(!InRect(Pointer,L.Panel,L.Size) && !InRect(Pointer,L.Equipment,L.EquipmentSize) && !HasCarriedItem())return FReply::Unhandled();
  UIButtons.Add(E.GetEffectingButton());
  if(E.GetEffectingButton()==EKeys::RightMouseButton)
- { if(bSortOpen)bSortOpen=false;else { HeldId.Invalidate();HeldModule=NAME_None;bHoldingCompanionPosition=false; } }
+ { if(DismantleConfirmation.IsValid())DismantleConfirmation.Invalidate();else if(bSortOpen)bSortOpen=false;else { HeldId.Invalidate();HeldModule=NAME_None;bHoldingCompanionPosition=false; } }
  else if(E.GetEffectingButton()==EKeys::LeftMouseButton)
  {
   const int32 Tab=GrowthTabAt(L,Pointer);
@@ -193,7 +195,7 @@ FReply UBBSBInventoryWidget::NativeOnKeyDown(const FGeometry&,const FKeyEvent& E
 bool UBBSBInventoryWidget::ProcessMenuKey(FKey K)
 {
  if(K==EKeys::Tab) { ResetInteraction();if(Hunting)Hunting->CloseInventory(); }
- else if(K==EKeys::Escape || K==EKeys::Gamepad_FaceButton_Right) { if(bSortOpen) { bSortOpen=false;UpdatePointerSurface();InvalidateLayoutAndVolatility(); }else if(HasCarriedItem()) { HeldId.Invalidate();HeldModule=NAME_None;bHoldingCompanionPosition=false;UpdatePointerSurface();InvalidateLayoutAndVolatility(); }else if(Hunting)Hunting->CloseInventory(); }
+ else if(K==EKeys::Escape || K==EKeys::Gamepad_FaceButton_Right) { if(DismantleConfirmation.IsValid()) { DismantleConfirmation.Invalidate();InvalidateLayoutAndVolatility(); }else if(bSortOpen) { bSortOpen=false;UpdatePointerSurface();InvalidateLayoutAndVolatility(); }else if(HasCarriedItem()) { HeldId.Invalidate();HeldModule=NAME_None;bHoldingCompanionPosition=false;UpdatePointerSurface();InvalidateLayoutAndVolatility(); }else if(Hunting)Hunting->CloseInventory(); }
  else if(K==EKeys::PageUp || K==EKeys::Gamepad_LeftShoulder)SetGrowthPage((GrowthPage+2)%3);
  else if(K==EKeys::PageDown || K==EKeys::Gamepad_RightShoulder)SetGrowthPage((GrowthPage+1)%3);
  else if(K==EKeys::Left || K==EKeys::Gamepad_DPad_Left)Navigate(-1,0);

@@ -143,12 +143,25 @@ class BBSB_API UBBSBGrowthSettings : public UDataAsset
 {
  GENERATED_BODY()
 public:
+ UBBSBGrowthSettings();
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Prototype compatibility") bool bGrantPrototypeTraversalModules=true;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Modules") TArray<TObjectPtr<UBBSBModuleDefinition>> StartingModules;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin=".1")) float Duration=3.5f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float PassiveChargePerSecond=0.f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float ChargePerDamage=.12f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float SupportChargeScale=.3f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards") TSoftObjectPtr<UBBSBItemDefinition> EcstaticPickup;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards") TSoftObjectPtr<UBBSBItemDefinition> NotePickup;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards") TSoftObjectPtr<UBBSBItemDefinition> EcstaticCrystal;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards",meta=(ClampMin="0",ClampMax="8")) float ConcertoChargePerEcstatic=.2f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards|Legacy",meta=(ClampMin="1",ClampMax="8")) int32 ResourceBundles=3;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards",meta=(ClampMin="0",ClampMax="500",Units="cm")) float ResourcePickupRadius=270.f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards|Scatter",meta=(ClampMin="0",ClampMax="1")) float ResourceSingleFraction=.8f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards|Scatter",meta=(ClampMin="2",ClampMax="20")) int32 LargeResourceUnits=5;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards|Scatter",meta=(ClampMin="0",ClampMax=".9")) float AliveResourceFraction=.4f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards|Items",meta=(ClampMin="0",ClampMax="1")) float OrdinaryItemChanceScale=.15f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards|Items",meta=(ClampMin="0",ClampMax="8")) int32 MaximumOrdinaryDrops=1;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Rewards",meta=(ClampMin="0",ClampMax="1")) float CrystalRefundFraction=.5f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="100")) float BulletClearRadius=1800;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float MainDamageMultiplier=2.5f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Concerto",meta=(ClampMin="0")) float SubDamageMultiplier=.7f;

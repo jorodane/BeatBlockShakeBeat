@@ -80,10 +80,13 @@ bool UBBSBHuntingComponent::BeginQuickCollection(ABBSBLootPickup* Loot,bool From
   if(!Player->Traversal->PrepareSurfaceAttachment(true))return false;
  if(!Player || Player->Combat->bDead || IsBunniarBusyForCollection() || (Loot && (!IsValid(Loot) || !Loot->IsAvailable())))return false;
  auto* Buddy=Player->FieldActions->BunniarEquipment.Get();
+ if(Loot && (FVector::DistSquared(Loot->GetActorLocation(),Player->GetActorLocation())>FMath::Square(Player->FieldActions->WeaponReach) || !LootVisible(Loot,Buddy->GetActorLocation())))return false;
  bCollectionHeld=bQuickCollection=bQuickInputHeld=true;bVacuuming=bBuddyLootReturning=false;
  CollectionStartedAt=GetWorld()->GetTimeSeconds()-(FromHold ? VacuumHoldSeconds:0);NextVacuumScanAt=CollectionStartedAt;
  VacuumPoint=Loot ? Loot->GetActorLocation():Buddy->GetActorLocation()-FVector::UpVector*55;VacuumNormal=FVector::UpVector;QuickTravelFrom=Buddy->GetActorTransform();
- QuickPendingLoot=Loot;return true;
+ QuickPendingLoot=Loot;
+ if(Loot)Collect(Loot);
+ return true;
 }
 void UBBSBHuntingComponent::QuickCollectDown()
 { if(Player && Player->FieldActions)Player->FieldActions->QuickBunniarDown(); }
@@ -95,9 +98,8 @@ void UBBSBHuntingComponent::TickQuickCollection(float DT)
  if(!Buddy || Buddy->bGliding || Buddy->bSurfaceAttached || Buddy->bAirHovering || Player->Traversal->IsWireTraversalActive()) { StopCollection();return; }
  if(auto* Loot=QuickPendingLoot.Get())
  {
-  VacuumPoint=Loot->GetActorLocation();
+  if(Loot->IsAvailable())VacuumPoint=Loot->GetActorLocation();
   if(GetWorld()->GetTimeSeconds()-CollectionStartedAt<QuickTravelSeconds)return;
-  if(FVector::DistSquared(Loot->GetActorLocation(),Player->GetActorLocation())<=FMath::Square(Player->FieldActions->WeaponReach) && LootVisible(Loot,Buddy->GetActorLocation()))Collect(Loot);
   QuickPendingLoot.Reset();
  }
  if(!bQuickInputHeld || !Cast<APlayerController>(Player->GetController())->IsInputKeyDown(EKeys::F)) { StopCollection();return; }
@@ -106,12 +108,19 @@ void UBBSBHuntingComponent::TickQuickCollection(float DT)
 int32 UBBSBHuntingComponent::Collect(ABBSBLootPickup* Loot)
 {
  if(!IsValid(Loot) || !Loot->IsAvailable())return 0;
- const int32 Accepted=Loot->Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon ? (AddWeaponEntry(Loot->WeaponPayload) ? 1:0):AddItem(Loot->Item,Loot->Quantity);
+ int32 Accepted=0;
+ if(Loot->Item->IsFieldResource())
+ {
+  const int64 Amount=int64(Loot->Quantity)*FMath::Max(1,Loot->Item->ResourceValue);
+  const bool Granted=Loot->Item->RewardResource==EBBSBRewardResource::Ecstatic ? CollectEcstatic(Amount,!Loot->bConcertoReward):AddNotes(Amount);
+  if(Granted) { Accepted=Loot->Quantity;ShowPickup(Loot->Item,Accepted); }
+ }
+ else Accepted=Loot->Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon ? (AddWeaponEntry(Loot->WeaponPayload) ? 1:0):AddItem(Loot->Item,Loot->Quantity);
  if(Accepted>0)
  {
-  Loot->TakeQuantity(Accepted);if(Loot->Quantity<=0)Loot->BeginCollectionFlight(this);
+  Loot->TakeQuantity(Accepted);Loot->PlayCollectionFlight(this);
  }
- if(Loot->Quantity>0 && GetWorld()->GetTimeSeconds()-LastFullNoticeAt>1.)
+ if(Loot->Quantity>0 && !Loot->Item->IsFieldResource() && GetWorld()->GetTimeSeconds()-LastFullNoticeAt>1.)
  { LastFullNoticeAt=GetWorld()->GetTimeSeconds();StatusNotice=TEXT("가방이 가득 찼어요");StatusUntil=LastFullNoticeAt+2.; }
  return Accepted;
 }
@@ -164,9 +173,8 @@ void UBBSBHuntingComponent::UpdateVacuum(float DT)
 }
 FVector UBBSBHuntingComponent::CollectionMouth() const
 {
- if((bVacuuming || bQuickCollection) && Player)
-  if(auto* Buddy=Player->FieldActions->BunniarEquipment.Get();IsValid(Buddy))return Buddy->GetActorLocation();
- return Player ? Player->GetActorLocation()+FVector::UpVector*45:VacuumPoint;
+ if(Player && Player->GetMesh() && Player->GetMesh()->DoesSocketExist(TEXT("spine_03")))return Player->GetMesh()->GetSocketLocation(TEXT("spine_03"));
+ return Player ? Player->GetActorLocation()+FVector::UpVector*30:VacuumPoint;
 }
 void UBBSBHuntingComponent::SetVacuumVisible(bool Visible)
 { for(auto Ribbon:VacuumRibbons)if(Ribbon)Ribbon->SetVisibility(Visible); }
