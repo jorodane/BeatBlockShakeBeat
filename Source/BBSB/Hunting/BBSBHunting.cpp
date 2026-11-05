@@ -2,6 +2,7 @@
 #include "Hunting/BBSBLootPickup.h"
 #include "Hunting/BBSBLootBurst.h"
 #include "Hunting/BBSBInventoryWidget.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Character/BBSBTraversal.h"
@@ -36,7 +37,7 @@ void UBBSBHuntingComponent::BeginPlay()
 void UBBSBHuntingComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
  StopCollection();CloseInventory();
- if(bDirtyProgress && bPersistProgress)SaveProgress();
+ if(bPersistProgress)SaveProgress();
  for(auto Ribbon:VacuumRibbons)if(Ribbon)Ribbon->DestroyComponent();
  VacuumRibbons.Reset();if(VacuumRoot)VacuumRoot->DestroyComponent();
  Super::EndPlay(Reason);
@@ -48,15 +49,19 @@ void UBBSBHuntingComponent::TickComponent(float DT,ELevelTick Type,FActorCompone
  if(!bHuntingInitialized)
  {
   bHuntingInitialized=true;LoadedDefaultLoot=DefaultLootTable.LoadSynchronous();
-  if(bPersistProgress)LoadProgress();
+  if(Player->EquipmentGrowth)Player->EquipmentGrowth->EnsureInitialized();
+  const bool Loaded=bPersistProgress && LoadProgress();
+  if(!Loaded && Player->EquipmentGrowth)Player->EquipmentGrowth->InitializeProfile(true);
   if(!bEquipmentInitialized)InitializeEquipment();
   for(TActorIterator<ABBSBLootPickup> It(GetWorld());It;++It)RegisterLoot(*It);
  }
  const bool Dead=Player->Combat && Player->Combat->bDead;
  if(Dead)StopCollection();
- if(bCollectionHeld && (!Player->FieldActions || (!bQuickCollection && (Player->FieldActions->FieldEquipment!=Player->FieldActions->BunniarEquipment ||
+ if(bCollectionHeld && (!Player->FieldActions || (!bQuickCollection && (Player->FieldActions->InteractionEquipment()!=Player->FieldActions->BunniarEquipment ||
     !Player->FieldActions->IsGestureChannelHeld(0))) ||
     (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())))StopCollection();
+ if(bQuickSuctionPending)
+ { if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())StopCollection();else TickQuickCollectionIntent(); }
  if(bCollectionHeld) { if(bQuickCollection)TickQuickCollection(DT);else UpdateVacuum(DT); }
  TickEquipmentLoadout();
  if(bDirtyProgress && bPersistProgress && GetWorld()->GetRealTimeSeconds()>=SaveAt)SaveProgress();
@@ -87,6 +92,7 @@ void UBBSBHuntingComponent::GrantEnemyRewards(ABBSBInkEnemy* Enemy)
  auto* Table=Enemy->LootTable.IsNull() ? LoadedDefaultLoot.Get():Enemy->LootTable.LoadSynchronous();
  if(!Table && Enemy->LootTable.IsNull()) { LoadedDefaultLoot=DefaultLootTable.LoadSynchronous();Table=LoadedDefaultLoot.Get(); }
  if(!Table)return;
+ if(Player->EquipmentGrowth)for(auto Module:Table->ModuleRewards)Player->EquipmentGrowth->GrantModule(Module,true);
  const FVector Origin=Enemy->GetActorLocation();int32 Index=0;
  for(const auto& Roll:Table->Drops)
  {
@@ -139,7 +145,7 @@ int32 UBBSBHuntingComponent::AddItem(UBBSBItemDefinition* Item,int32 Quantity)
  {
   int32 X=0,Y=0;bool Rotated=false;if(!FindSpace(Item,X,Y,Rotated))break;
   FBBSBInventoryEntry Entry;Entry.InstanceId=FGuid::NewGuid();Entry.Item=Item;Entry.Quantity=FMath::Min(Remaining,Limit);
-  Entry.GridX=X;Entry.GridY=Y;Entry.bRotated=Rotated;Items.Add(Entry);Remaining-=Entry.Quantity;
+  Entry.GridX=X;Entry.GridY=Y;Entry.bRotated=false;Entry.WeaponLevel=Item->DefaultWeaponLevel;Entry.NormalizeWeapon();Items.Add(Entry);Remaining-=Entry.Quantity;
  }
  const int32 Added=Quantity-Remaining;
  if(Added>0) { ShowPickup(Item,Added);ProgressChanged(); }
@@ -199,9 +205,15 @@ void UBBSBHuntingComponent::ShowPickup(UBBSBItemDefinition* Item,int32 Quantity)
 }
 bool UBBSBHuntingComponent::SaveProgress()
 {
- if(!bPersistProgress || SaveSlotName.IsEmpty())return false;
+ if(!bPersistProgress || bSaveLoadFailed || SaveSlotName.IsEmpty())return false;
  auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::CreateSaveGameObject(UBBSBHuntingSave::StaticClass()));
- Save->Version=3;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
+ Save->Version=5;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
+ if(Player)
+ {
+  Save->bBunniarSelected=Player->FieldActions->EquippedEquipmentId()==0;
+  Save->SelectedWeaponInstance=Player->FieldActions->EquippedWeaponInstance;Save->LastCombatWeaponInstance=Player->FieldActions->LastCombatWeaponInstance;
+  if(Player->EquipmentGrowth)Player->EquipmentGrowth->StoreInSave(Save);
+ }
  const bool Saved=UGameplayStatics::SaveGameToSlot(Save,SaveSlotName,0);
  if(Saved)bDirtyProgress=false;else SaveAt=GetWorld()->GetRealTimeSeconds()+3.;
  return Saved;
@@ -209,36 +221,52 @@ bool UBBSBHuntingComponent::SaveProgress()
 bool UBBSBHuntingComponent::LoadProgress()
 {
  if(SaveSlotName.IsEmpty() || !UGameplayStatics::DoesSaveGameExist(SaveSlotName,0))return false;
- auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));
- if(!Save || Save->Version<1 || Save->Version>3)return false;
- // Validate into a temporary grid; invalid/overfull profiles leave the current
- // inventory and the on-disk save intact rather than silently dropping items.
+ bSaveLoadFailed=true;auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));
+ if(!Save || Save->Version<1 || Save->Version>5)return false;
+ const int32 PreviousRows=Rows,OldWheel=CompanionWheelSlot;
+ if(Save->Version>=5)Rows=FMath::Clamp(Save->InventoryRows,8,24);
  TArray<FBBSBInventoryEntry> Previous=MoveTemp(Items);Items.Reset();TSet<FGuid> Seen;
+ auto Fail=[&]() { Items=MoveTemp(Previous);Rows=PreviousRows;CompanionWheelSlot=OldWheel;return false; };
  for(auto Entry:Save->Items)
  {
-  // The former starter item is now the implicit, permanent companion.
   if(Entry.Item && Entry.Item->IsBuiltInCompanion())continue;
-  Entry.bRotated=false;
-  if(!Entry.Item || Entry.Quantity<=0 || Entry.Quantity>Entry.Item->StackLimit() || !Entry.InstanceId.IsValid() || Seen.Contains(Entry.InstanceId))
-  { Items=MoveTemp(Previous);return false; }
-  if(!CanPlace(Entry.Item,Entry.GridX,Entry.GridY,Entry.bRotated,FGuid()))
-   if(!FindSpace(Entry.Item,Entry.GridX,Entry.GridY,Entry.bRotated)) { Items=MoveTemp(Previous);return false; }
-  Seen.Add(Entry.InstanceId);Items.Add(Entry);
+  if(!Entry.RegisterIdentity(Seen))return Fail();Entry.bRotated=false;Entry.NormalizeWeapon();
+  if(Entry.Quantity<=0 || Entry.Quantity>Entry.Item->StackLimit())return Fail();
+  if(!CanPlace(Entry.Item,Entry.GridX,Entry.GridY,false,FGuid()) && !FindSpace(Entry.Item,Entry.GridX,Entry.GridY,Entry.bRotated))return Fail();
+  Items.Add(Entry);
  }
- const int32 OldWheel=CompanionWheelSlot;CompanionWheelSlot=FMath::Clamp(Save->CompanionWheelSlot,0,9);
+ const int32 SavedCompanion=FMath::Clamp(Save->CompanionWheelSlot,0,9);CompanionWheelSlot=SavedCompanion<6 ? SavedCompanion:0;
  TArray<FBBSBInventoryEntry> NewEquipment;TSet<int32> Slots;
  if(Save->Version>=2)for(auto Entry:Save->EquippedItems)
  {
   if(Entry.Item && Entry.Item->IsBuiltInCompanion())continue;
-  if(!Entry.Item || Entry.Quantity!=1 || !Entry.InstanceId.IsValid() || Seen.Contains(Entry.InstanceId) || Slots.Contains(Entry.GridY) || !FitsEquipment(Entry.Item,Entry.GridY))
-  { Items=MoveTemp(Previous);CompanionWheelSlot=OldWheel;return false; }
-  Entry.GridX=-1;Entry.bRotated=false;Seen.Add(Entry.InstanceId);Slots.Add(Entry.GridY);NewEquipment.Add(Entry);
+  const bool LegacyWheel=Save->Version<5 && Entry.GridY>=0 && Entry.GridY<10 && Entry.GridY!=SavedCompanion && Entry.Item && Entry.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon;
+  if(!Entry.Item || Entry.Quantity!=1 || !Entry.RegisterIdentity(Seen) || Slots.Contains(Entry.GridY) || (!LegacyWheel && !FitsEquipment(Entry.Item,Entry.GridY)))return Fail();
+  Entry.GridX=-1;Entry.bRotated=false;Entry.NormalizeWeapon();Slots.Add(Entry.GridY);NewEquipment.Add(Entry);
  }
- EquippedItems=MoveTemp(NewEquipment);bEquipmentInitialized=Save->Version>=2;
- if(!bEquipmentInitialized)InitializeEquipment();
- bEquipmentLayoutPending=true;
+ // Preserve the selected legacy weapon first; excess wheel items return to the
+ // bag. A legacy full bag gains only the rows needed to retain every item.
+ if(Save->Version<5)
+ {
+  const int32 Selected=NewEquipment.IndexOfByPredicate([&](const auto& E){return E.InstanceId==Save->SelectedWeaponInstance;});if(Selected>0)NewEquipment.Swap(0,Selected);
+  TSet<int32> Used;Used.Add(CompanionWheelSlot);
+  for(auto& E:NewEquipment)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY<10)
+  {
+   int32 Slot=E.GridY;if(Slot>=6 || Used.Contains(Slot)) { Slot=INDEX_NONE;for(int32 I=0;I<6;++I)if(!Used.Contains(I)) { Slot=I;break; } }
+   if(Slot!=INDEX_NONE) { E.GridY=Slot;Used.Add(Slot);continue; }
+   while(!FindSpace(E.Item,E.GridX,E.GridY,E.bRotated)) { if(Rows>=24)return Fail();++Rows; }
+   Items.Add(E);E.Item=nullptr;
+  }
+  NewEquipment.RemoveAll([](const auto& E){return !E.Item;});
+ }
+ EquippedItems=MoveTemp(NewEquipment);bEquipmentInitialized=Save->Version>=2;if(!bEquipmentInitialized)InitializeEquipment();bEquipmentLayoutPending=true;
  Level=FMath::Clamp(Save->Level,1,FMath::Max(2,MaximumLevel));int64 XP=FMath::Max(0,Save->Experience);
  while(Level<MaximumLevel && XP>=ExperienceToNextLevel()) { XP-=ExperienceToNextLevel();++Level; }
- Experience=Level>=MaximumLevel ? 0:int32(XP);bDirtyProgress=false;
+ Experience=Level>=MaximumLevel ? 0:int32(XP);bDirtyProgress=false;bSaveLoadFailed=false;
+ if(Player)
+ {
+  if(Save->Version>=4) { Player->FieldActions->EquippedWeaponInstance=Save->SelectedWeaponInstance;Player->FieldActions->LastCombatWeaponInstance=Save->LastCombatWeaponInstance;if(Save->bBunniarSelected)Player->FieldActions->RequestEquipment(0); }
+  if(Player->EquipmentGrowth) { Player->EquipmentGrowth->LoadFromSave(Save);Player->EquipmentGrowth->InitializeProfile(Save->Version<4); }
+ }
  return true;
 }

@@ -1,3 +1,5 @@
+#include "Hunting/BBSBEquipmentGrowth.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Character/BBSBTraversal.h"
 #include "Animation/BlendSpace.h"
 #include "BBSBCharacter.h"
@@ -91,8 +93,9 @@ bool UBBSBTraversalComponent::TryJump()
 }
 bool UBBSBTraversalComponent::BeginGlide(bool bApplyLift)
 {
+ if(Character && Character->EquipmentGrowth && !Character->EquipmentGrowth->HasModuleAction(EBBSBModuleAction::Glide))return false;
  if (!Character || !Character->FieldActions || IsParkourActive()) return false;
- if(!Character->FieldActions->bBunniarAvailable)return false;
+ if(!Character->FieldActions->bBunniarAvailable || (Character->Hunting && Character->Hunting->bCollectionHeld))return false;
  auto* Buddy=Cast<ABBSBBunniarCompanion>(Character->FieldActions->BunniarEquipment);
  if (!IsValid(Buddy)) return false;
  RestoreWallJumpMovement();EndAirWeaponHang();WallJumpAge=-1;
@@ -129,11 +132,11 @@ bool UBBSBTraversalComponent::TryGlideDash()
  // Kept for old Blueprint references. The dedicated air drill has been retired.
  return false;
 }
-bool UBBSBTraversalComponent::PrepareSurfaceAttachment()
+bool UBBSBTraversalComponent::PrepareSurfaceAttachment(bool bQuickInteraction)
 {
  if (!bGliding || !Character || !Character->FieldActions || !Character->FieldActions->CanStartJump()) return false;
  auto* Buddy=Glider.Get();
- if (!IsValid(Buddy) || Character->FieldActions->FieldEquipment!=Buddy) return false;
+ if (!IsValid(Buddy) || (!bQuickInteraction && Character->FieldActions->InteractionEquipment()!=Buddy)) return false;
  ReleaseForFall();Character->FieldActions->ResetActionState();
  // A short unpowered toss buys time to choose an anchor; it does not reset the airborne jump.
  Character->LaunchCharacter(FVector(0,0,DispatchLiftSpeed),false,true);return true;
@@ -346,7 +349,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
  if(!IsWireTraversalActive() && !bGlideDashing && !bAirLiftPending && !bAirWeaponHanging) TryAutoLedge();
  if(bAirWeaponHanging)
  {
-  const bool Attacking=Character->FieldActions && Character->FieldActions->ActiveState==EBBSBActionState::Attack && !Character->FieldActions->IsDodging();
+  const bool Attacking=(Character->EquipmentGrowth && Character->EquipmentGrowth->bConcertoActive) || (Character->FieldActions && Character->FieldActions->ActiveState==EBBSBActionState::Attack && !Character->FieldActions->IsDodging());
   const auto* LocalPC=Cast<APlayerController>(Character->GetController());
   if(!LocalPC || !LocalPC->IsLocalController() || !Move->IsFalling() || !Attacking || IsBunniarTraversalActive() || GetWorld()->GetTimeSeconds()>=AirWeaponHangUntil || (Character->Combat && (Character->Combat->bDead || Character->Combat->BlocksMovement()))) EndAirWeaponHang();
   else

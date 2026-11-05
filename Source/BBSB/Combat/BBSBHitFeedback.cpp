@@ -23,13 +23,13 @@ namespace
  }
 }
 
-void UBBSBCombatComponent::ShowEnemyDamage(float Damage,const FVector& Point)
+void UBBSBCombatComponent::ShowEnemyDamage(float Damage,const FVector& Point,bool bCritical)
 {
  const auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
  if(Damage<=0.f || !PC || !PC->IsLocalController() || DamageNumberLifetime<=0.f) return;
  if(DamagePopups.Num()>=24) DamagePopups.RemoveAt(0);
  auto& Popup=DamagePopups.AddDefaulted_GetRef();
- Popup.Amount=Damage;Popup.WorldPoint=Point+FVector(0,0,18);Popup.StartedAt=GetWorld()->GetTimeSeconds();
+ Popup.bCritical=bCritical;Popup.Amount=Damage;Popup.WorldPoint=Point+FVector(0,0,18);Popup.StartedAt=GetWorld()->GetTimeSeconds();
  const int32 Serial=DamagePopupSerial++;
  Popup.Drift=(Serial%2==0 ? 1.f:-1.f)*(32.f+float(Serial%3)*9.f);
  Popup.ScreenOffset=FVector2D::ZeroVector;Popup.Opacity=1.f;Popup.SizeScale=1.f;
@@ -76,10 +76,13 @@ void UBBSBCombatComponent::TickDamageFeedback()
   const float PopSeconds=FMath::Min(.06f,Lifetime*.2f);
   Popup.SizeScale=T<PopSeconds ? FMath::InterpEaseOut(1.f,1.6f,T/PopSeconds,3.f)
    : FMath::Lerp(1.6f,.55f,FMath::SmoothStep(PopSeconds,Lifetime,T));
+  if(Popup.bCritical)Popup.SizeScale*=1.55f;
  }
 }
 
 void UBBSBCombatComponent::DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const
+{ DrawDamageVignette(HUD,Canvas);DrawDamageNumbers(HUD,Canvas); }
+void UBBSBCombatComponent::DrawDamageVignette(AHUD* HUD,UCanvas* Canvas) const
 {
  if(!HUD || !Canvas || !Canvas->Canvas) return;
  const auto* PC=HUD->GetOwningPlayerController();if(!PC) return;
@@ -106,6 +109,12 @@ void UBBSBCombatComponent::DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const
   }
   FCanvasTriangleItem Item(Tris,GWhiteTexture);Item.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Item);
  }
+}
+void UBBSBCombatComponent::DrawDamageNumbers(AHUD* HUD,UCanvas* Canvas) const
+{
+ if(!HUD || !Canvas || !Canvas->Canvas)return;
+ const auto* PC=HUD->GetOwningPlayerController();if(!PC)return;
+ const float W=Canvas->SizeX,H=Canvas->SizeY;
  const float ScreenScale=FMath::Clamp(W/1280.f,.7f,1.4f);
  FNumberFormattingOptions Format;Format.SetMaximumFractionalDigits(1);Format.SetMinimumFractionalDigits(0);
  for(const auto& Popup:DamagePopups)
@@ -113,8 +122,8 @@ void UBBSBCombatComponent::DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const
   FVector2D At;if(Popup.Opacity<=0.f || !PC->ProjectWorldLocationToScreen(Popup.WorldPoint,At,true)) continue;
   At+=Popup.ScreenOffset*ScreenScale;
   if(At.X<-80 || At.X>W+80 || At.Y<-80 || At.Y>H+80) continue;
-  FLinearColor Tint=DamageNumberColor;Tint.A*=Popup.Opacity;
-  FCanvasTextItem Text(At,FText::AsNumber(Popup.Amount,&Format),GEngine->GetMediumFont(),Tint);
+  FLinearColor Tint=Popup.bCritical ? FLinearColor(1.f,.75f,.22f):DamageNumberColor;Tint.A*=Popup.Opacity;
+  FCanvasTextItem Text(At,Popup.bCritical ? FText::FromString(FText::AsNumber(Popup.Amount,&Format).ToString()+TEXT(" !")):FText::AsNumber(Popup.Amount,&Format),GEngine->GetMediumFont(),Tint);
   Text.Scale=FVector2D(ScreenScale*DamageNumberScale*Popup.SizeScale);
   Text.bCentreX=Text.bCentreY=true;Text.bOutlined=true;Text.OutlineColor=FLinearColor(.09f,.035f,.065f,Popup.Opacity);
   Text.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Text);

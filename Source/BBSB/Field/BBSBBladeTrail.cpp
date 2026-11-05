@@ -12,8 +12,8 @@ namespace
  class FBladeTrailProxy final : public FPrimitiveSceneProxy
  {
  public:
-  FBladeTrailProxy(const UPrimitiveComponent* Component,UMaterialInterface* InMaterial,TArray<FTrailPoint>&& InPoints)
-   : FPrimitiveSceneProxy(Component),Material(InMaterial),Relevance(InMaterial->GetRelevance_Concurrent(GetScene().GetShaderPlatform())),Points(MoveTemp(InPoints)) {}
+  FBladeTrailProxy(const UPrimitiveComponent* Component,UMaterialInterface* InMaterial,TArray<FTrailPoint>&& InPoints,bool Soft)
+   : FPrimitiveSceneProxy(Component),Material(InMaterial),Relevance(InMaterial->GetRelevance_Concurrent(GetScene().GetShaderPlatform())),Points(MoveTemp(InPoints)),bSoft(Soft) {}
   virtual SIZE_T GetTypeHash() const override { static size_t Type;return reinterpret_cast<size_t>(&Type); }
   virtual uint32 GetMemoryFootprint() const override { return sizeof(*this)+Points.GetAllocatedSize(); }
   virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override
@@ -29,6 +29,15 @@ namespace
     for(int32 I=0;I<Points.Num();++I)
     {
      const auto& P=Points[I];const float U=float(I)/FMath::Max(1,Points.Num()-1);
+     if(bSoft)
+     {
+      FColor Edge=P.Color;Edge.A=0;
+      Mesh.AddVertex(P.Root,FVector2f(U,0),FVector3f(1,0,0),FVector3f(0,1,0),FVector3f(0,0,1),Edge);
+      Mesh.AddVertex((P.Root+P.Tip)*.5f,FVector2f(U,.5f),FVector3f(1,0,0),FVector3f(0,1,0),FVector3f(0,0,1),P.Color);
+      Mesh.AddVertex(P.Tip,FVector2f(U,1),FVector3f(1,0,0),FVector3f(0,1,0),FVector3f(0,0,1),Edge);
+      if(I>0)for(int32 J=0;J<2;++J) { const int32 A=(I-1)*3+J,B=I*3+J;Mesh.AddTriangle(A,A+1,B);Mesh.AddTriangle(A+1,B+1,B); }
+      continue;
+     }
      Mesh.AddVertex(P.Root,FVector2f(U,0),FVector3f(1,0,0),FVector3f(0,1,0),FVector3f(0,0,1),P.Color);
      Mesh.AddVertex(P.Tip,FVector2f(U,1),FVector3f(1,0,0),FVector3f(0,1,0),FVector3f(0,0,1),P.Color);
      if(I>0) { const int32 A=(I-1)*2,B=I*2;Mesh.AddTriangle(A,A+1,B);Mesh.AddTriangle(A+1,B+1,B); }
@@ -40,6 +49,7 @@ namespace
   UMaterialInterface* Material;
   FMaterialRelevance Relevance;
   TArray<FTrailPoint> Points;
+  bool bSoft=false;
  };
 }
 
@@ -57,6 +67,24 @@ void UBBSBBladeTrailComponent::AddBladeSample(const FVector& Root,const FVector&
  UpdateBounds();MarkRenderTransformDirty();MarkRenderStateDirty();
 }
 void UBBSBBladeTrailComponent::Finish() { bFinished=true; }
+void UBBSBBladeTrailComponent::UpdateWindSheet(const FVector& Centre,const FQuat& Frame,float Radius,float Angle,int32 Layer,float Width,float Opacity)
+{
+ Samples.Reset();if(Opacity<=0 || !GetWorld()) { MarkRenderStateDirty();return; }
+ const double Now=GetWorld()->GetTimeSeconds();constexpr int32 Segments=96;
+ for(int32 I=0;I<=Segments;++I)
+ {
+  const float U=float(I)/Segments,A=Angle-(1-U)*PI*2.6f+Layer*PI*2/3;
+  const float R=FMath::Lerp(FMath::Max(40.f,Radius*.18f),Radius,U);
+  const FVector Radial(FMath::Cos(A),FMath::Sin(A),0);
+  const FVector P=Radial*R+FVector::UpVector*(35+Layer*65+(1-U)*140+FMath::Sin(U*PI*3+Angle)*24);
+  const FVector Across=Radial*.55f+FVector::UpVector*.84f;
+  const float W=Width*FMath::Sin(U*PI)*(.65f+Layer*.15f);
+  const float Alpha=FMath::Clamp(Opacity*FMath::Sin(U*PI),0.f,1.f);
+  // Existing vertex-colour material consumes this alpha; no particle material substitution.
+  Samples.Add({Centre+Frame.RotateVector(P-Across*W),Centre+Frame.RotateVector(P+Across*W),Now-Lifetime*(1-FMath::Sqrt(Alpha))});
+ }
+ UpdateBounds();MarkRenderTransformDirty();MarkRenderStateDirty();
+}
 void UBBSBBladeTrailComponent::TickComponent(float DT,ELevelTick TickType,FActorComponentTickFunction* TickFunction)
 {
  Super::TickComponent(DT,TickType,TickFunction);
@@ -79,5 +107,5 @@ FPrimitiveSceneProxy* UBBSBBladeTrailComponent::CreateSceneProxy()
   FLinearColor C=Color;const float Fade=FMath::Clamp(1.f-float((Now-P.Born)/FMath::Max(.03f,Lifetime)),0.f,1.f);C.A*=Fade*Fade;
   Points.Add({FVector3f(WorldToLocal.TransformPosition(P.Root)),FVector3f(WorldToLocal.TransformPosition(P.Tip)),C.ToFColor(false)});
  }
- return new FBladeTrailProxy(this,TrailMaterial,MoveTemp(Points));
+ return new FBladeTrailProxy(this,TrailMaterial,MoveTemp(Points),bSoftEdges);
 }

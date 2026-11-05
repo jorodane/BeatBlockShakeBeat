@@ -112,7 +112,7 @@ void ABBSBInkEnemy::MoveInField(float DT,APawn* Target)
   Goal=Home+(Goal-Home).GetClampedToMaxSize2D(FMath::Max(100.f,FieldHomeRadius));
  }
  const FVector Delta=Goal-Position;
- if(!Target && bFieldIdleWander) Movement->MaxWalkSpeed=FMath::Max(20.f,FieldWanderSpeed);
+ if(!Target && bFieldIdleWander) Movement->MaxWalkSpeed=FMath::Max(20.f,FieldWanderSpeed)*GrowthSlowMultiplier;
  if(Delta.Size2D()<=24.f && !Target) { ConsumeMovementInputVector();Movement->StopMovementImmediately(); }
  if(Delta.Size2D()>24.f)
  {

@@ -1,4 +1,8 @@
+#include "Hunting/BBSBEquipmentGrowth.h"
+#include "BBSBCharacter.h"
 #include "BBSBCombat.h"
+#include "Combat/BBSBDamageEvents.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCombatVisuals.h"
@@ -272,6 +276,7 @@ void UBBSBCombatComponent::LeaveStage(bool bVictory)
 void UBBSBCombatComponent::TakeCombatDamage(float Damage,AActor* Causer,bool bInterrupt)
 {
 	if (bDead || Damage<=0 || !Character) return;
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth && P->EquipmentGrowth->IsConcertoInvulnerable())return;
  const auto* FieldShot=Cast<ABBSBInkProjectile>(Causer);
  if(FieldShot && FieldShot->bFieldProjectile && GetWorld()->GetTimeSeconds()<FieldDamageGraceUntil) return;
 	UBBSBFieldActionComponent* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>();
@@ -480,10 +485,13 @@ void ABBSBInkEnemy::BeginPlay()
  Super::BeginPlay(); Home=GetActorLocation(); ResetFieldWander(); FormationTarget=Home; Health=MaximumHealth; ResetHealthFeedback();Label->SetHiddenInGame(true); AuthoredPattern=MainPattern; RebuildFieldAppearance();BBSBCombatVisuals::Tint(Body,this->Tint); UpdateLabel();
 	TArray<UStaticMeshComponent*> Parts; GetComponents(Parts);
 	for (UStaticMeshComponent* Part:Parts) if (Part->ComponentHasTag(TEXT("InkEye"))) BBSBCombatVisuals::Tint(Part,FLinearColor(0.02f,0.015f,0.035f));
+ if(auto* Pawn=UGameplayStatics::GetPlayerPawn(this,0))if(auto* Growth=Pawn->FindComponentByClass<UBBSBEquipmentGrowthComponent>();Growth && Growth->bConcertoActive)Growth->SuspendConcertoEnemy(this);
 }
 void ABBSBInkEnemy::Tick(float DT)
 {
-	Super::Tick(DT);TickHealthFeedback();
+	Super::Tick(DT);RestoreHitVibration();TickHealthFeedback();
+ if(bConcertoSuspended && !ConcertoPauseOwner.IsValid())SetConcertoSuspended(false,nullptr);
+ if(bConcertoSuspended) { TickHitVibration();return; }
 	if (bDefeated) return;
 	GetCharacterMovement()->MaxWalkSpeed=MoveSpeed;
  if(bFieldBulletHell) TickFieldBulletHell(DT);
@@ -504,10 +512,16 @@ void ABBSBInkEnemy::Tick(float DT)
  const bool Counter=Stage && Stage->IsCounterWindow();
  BBSBCombatVisuals::Tint(Body,GetWorld()->GetTimeSeconds()<HitFlashUntil ? FLinearColor(0.9f,0.65f,0.7f) : Counter || bFieldRecovering ? FLinearColor(.94f,.73f,.34f):bFieldWindingUp ? (bFieldSecondaryWindingUp ? FLinearColor(.7f,.35f,1.f):FLinearColor(1.f,.48f,.12f)):this->Tint);
 	if (APlayerCameraManager* Camera=UGameplayStatics::GetPlayerCameraManager(this,0)) Label->SetWorldRotation((Camera->GetCameraLocation()-Label->GetComponentLocation()).Rotation());
+ TickHitVibration();
 }
 float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AController* InstigatorController,AActor* Causer)
 {
-	if (bDefeated || Amount<=0) return 0;
+	if (bDefeated || !FMath::IsFinite(Amount) || Amount<=0) return 0;
+ AActor* Attacker=InstigatorController ? InstigatorController->GetPawn():Causer;
+ auto* PlayerCombat=Attacker ? Attacker->FindComponentByClass<UBBSBCombatComponent>():nullptr;
+ bLastHitCritical=PlayerCombat && !Event.IsOfType(FBBSBStatusDamageEvent::ClassID) && FMath::FRand()<FMath::Clamp(PlayerCombat->CriticalChance,0.f,1.f);
+ if(bLastHitCritical) { Amount*=FMath::Max(1.f,PlayerCombat->CriticalDamageMultiplier);++CriticalHitsReceived; }
+ RestoreHitVibration();BeginHitVibration(bLastHitCritical);
  if(Stage && Stage->IsCounterWindow()) Amount*=Stage->CounterDamageMultiplier;
 	const float HealthBefore=Health;
 	LastDamageTaken=FMath::Min(Amount,Health); Health=FMath::Max(0.f,Health-Amount);RecordHealthDamage(HealthBefore);
@@ -526,24 +540,24 @@ float ABBSBInkEnemy::TakeDamage(float Amount,const FDamageEvent& Event,AControll
    if(auto* LocalCombat=Player->FindComponentByClass<UBBSBCombatComponent>()) LocalCombat->NotifyLockedTargetDefeated(this);
 	}
 	// Deal damage first. Entering a stage and granting Ecstatic happens strictly afterwards.
-	AActor* Attacker=InstigatorController ? InstigatorController->GetPawn() : Causer;
 	if (UBBSBCombatComponent* Combat=Attacker ? Attacker->FindComponentByClass<UBBSBCombatComponent>() : nullptr)
  {
   const FVector Point=Event.IsOfType(FPointDamageEvent::ClassID) ? FVector(static_cast<const FPointDamageEvent&>(Event).HitInfo.ImpactPoint):GetAimPoint();
-  Combat->ShowEnemyDamage(LastDamageTaken,Point);Combat->EnemyStruck(this);
+  Combat->ShowEnemyDamage(LastDamageTaken,Point,bLastHitCritical);Combat->EnemyStruck(this);
  }
 	UE_LOG(LogBBSB,Display,TEXT("Ink enemy hit %s damage=%.1f hp=%.1f defeated=%d"),*GetName(),LastDamageTaken,Health,bDefeated);
 	return LastDamageTaken;
 }
 void ABBSBInkEnemy::ApplyWeaponImpulse(FVector Impulse)
 {
-	if (bDefeated) return;
+	if (bDefeated || bConcertoSuspended) return;
 	WeaponImpulseUntil=GetWorld()->GetTimeSeconds()+0.45;
 	ConsumeMovementInputVector(); GetCharacterMovement()->StopMovementImmediately(); LaunchCharacter(Impulse,true,true);
 }
 void ABBSBInkEnemy::JoinStage(ABBSBCombatStage* NewStage,bool bIsFront) { Stage=NewStage; bFront=bIsFront; UpdateLabel(); }
 void ABBSBInkEnemy::ResetEnemy()
 {
+ RestoreHitVibration();HitVibrationAt=-100;bLastHitCritical=false;CriticalHitsReceived=0;
  if(bHuntingRewardsGranted)SetActorHiddenInGame(false);
 	ResetFieldWander();WeaponImpulseUntil=-100;FieldTarget.Reset();bFieldAggro=false;FieldVolleysFired=FieldShotsFired=0;NextFieldVolleyAt=0;FieldLastSeenAt=-100;
  bFieldWindingUp=bFieldRecovering=bFieldSecondaryWindingUp=false;FieldReleaseAt=FieldRecoveryUntil=-100;

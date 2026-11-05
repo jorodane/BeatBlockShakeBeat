@@ -137,7 +137,7 @@ bool ABBSBBunniarCompanion::CanMaintainSurfaceAttachment() const
    FVector::Distance(Player->GetActorLocation(),(SurfaceLocalFrame*SurfaceComponent->GetComponentTransform()).GetLocation());
   if(Distance<0.f || Distance>Player->FieldActions->WeaponReach) return false;
  }
- return bSurfaceAttached && IsValid(SurfaceComponent) && Player && Player->FieldActions->FieldEquipment==this &&
+ return bSurfaceAttached && IsValid(SurfaceComponent) && Player && Player->FieldActions->InteractionEquipment()==this &&
   (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) && !Player->Combat->bDead &&
   (!bSurfaceViewLocked || !Player->Combat->IsStageLocked()) &&
   (!FSlateApplication::IsInitialized() || FSlateApplication::Get().IsActive());
@@ -294,7 +294,7 @@ void ABBSBBunniarCompanion::ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& 
 bool ABBSBBunniarCompanion::HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool Initial)
 {
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
- if (!Player || Player->FieldActions->FieldEquipment!=this || Player->Combat->IsStageLocked() || Player->FieldActions->bEquipmentInputBlocked) return false;
+ if (!Player || Player->FieldActions->InteractionEquipment()!=this || Player->Combat->IsStageLocked() || Player->FieldActions->bEquipmentInputBlocked) return false;
  if(Player->Traversal && Player->Traversal->IsWireTraversalActive()) return true;
  auto* Object=bSurfaceAttached && IsValid(SurfaceComponent) ? Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner()):nullptr;
  if(Channel==1 && Object && Object->bCarried)
@@ -331,7 +331,7 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
  if (bGliding) return false;
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
- if (!PC || Player->FieldActions->FieldEquipment!=this || bSurfaceAttached || bAirHovering) return false;
+ if (!PC || Player->FieldActions->InteractionEquipment()!=this || bSurfaceAttached || bAirHovering) return false;
  FRotator View=PC->GetControlRotation();
  FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit)) return BeginAirHoverFromCursor(PC);
  UPrimitiveComponent* TargetComponent=Hit.GetComponent();
@@ -367,7 +367,7 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
 bool ABBSBBunniarCompanion::BeginAirHoverFromCursor(APlayerController* Controller)
 {
  auto* Player=Cast<ABBSBCharacter>(Controller ? Controller->GetPawn():nullptr);
- if(!Player || !Player->FieldActions || Player->FieldActions->FieldEquipment!=this) return false;
+ if(!Player || !Player->FieldActions || Player->FieldActions->InteractionEquipment()!=this) return false;
  FVector Eye,Ray,Point;FHitResult Hit;
  if(!Player->FieldActions->EquipmentAimRay(Eye,Ray)) return false;
  Player->FieldActions->ResolveEquipmentAim(Point,Hit);
@@ -401,7 +401,7 @@ bool ABBSBBunniarCompanion::CanMaintainAirHover() const
  const auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  const auto* Controller=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
  return bAirHovering && Player && Controller && Controller->IsLocalController() && Player->FieldActions &&
-  (Player->FieldActions->FieldEquipment==this || bWireAnchored) && (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) &&
+  (Player->FieldActions->InteractionEquipment()==this || bWireAnchored) && (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) &&
   !(Player->Combat && (Player->Combat->bDead || Player->Combat->IsStageLocked())) &&
   (!FSlateApplication::IsInitialized() || FSlateApplication::Get().IsActive());
 }

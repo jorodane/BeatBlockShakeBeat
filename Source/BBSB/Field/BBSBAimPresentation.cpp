@@ -25,7 +25,7 @@ FVector UBBSBFieldActionComponent::MovementDashDirection() const
 
 bool UBBSBFieldActionComponent::IsSurfaceAimLocked() const
 {
- const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);
+ const auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
  return Buddy && Buddy->IsSurfaceFocusActive();
 }
 
@@ -54,7 +54,7 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
   return;
  }
  AimPresentation=EBBSBAimPresentation::Surface;AimPresentationColor=SurfaceAimColor;
- const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment);
+ const auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
  if(!Buddy || Buddy->bSurfaceAttached || Buddy->bAirHovering || Buddy->bGliding) return;
  if(!SurfaceAimDecal)
  {

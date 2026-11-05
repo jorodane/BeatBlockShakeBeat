@@ -14,6 +14,7 @@
 #include "Engine/Engine.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/DamageEvents.h"
@@ -32,6 +33,8 @@ void UBBSBInteractionComponent::BeginPlay()
 {
  Super::BeginPlay();Player=Cast<ABBSBCharacter>(GetOwner());
  BindControls();
+ for(TActorIterator<AActor> It(GetWorld());It;++It)RegisterInteractionCandidate(*It);
+ SpawnedHandle=GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this,&UBBSBInteractionComponent::RegisterInteractionCandidate));
 }
 void UBBSBInteractionComponent::BindControls()
 {
@@ -48,6 +51,8 @@ void UBBSBInteractionComponent::BindControls()
 void UBBSBInteractionComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
  EndDialogue();
+ if(GetWorld() && SpawnedHandle.IsValid())GetWorld()->RemoveOnActorSpawnedHandler(SpawnedHandle);
+ InteractionCandidates.Reset();QuickFocusActor=nullptr;
  if(auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr) if(Controls) PC->PopInputComponent(Controls);
  Super::EndPlay(Reason);
 }
@@ -91,7 +96,7 @@ void UBBSBInteractionComponent::EndDialogue()
 void UBBSBInteractionComponent::TickComponent(float DT,ELevelTick Type,FActorComponentTickFunction* Function)
 {
  Super::TickComponent(DT,Type,Function);
- BindControls();
+ BindControls();UpdateQuickInteraction();
  if(!bDialogueActive) return;
  if(!IsValid(ActiveNPC) || !Player || Player->Combat->bDead || Player->Combat->IsStageLocked() || FVector::Dist(Player->GetActorLocation(),ActiveNPC->GetActorLocation())>1000) { EndDialogue();return; }
  UpdateCamera();
@@ -123,7 +128,8 @@ FString UBBSBInteractionComponent::DisplayedLine() const
 }
 void UBBSBInteractionComponent::DrawDialogue(AHUD* HUD,UCanvas* Canvas) const
 {
- if(!bDialogueActive || !ActiveNPC || !HUD || !Canvas) return;
+ if(!bDialogueActive) { DrawQuickInteraction(HUD,Canvas);return; }
+ if(!ActiveNPC || !HUD || !Canvas) return;
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.4f),Width=FMath::Min(1000*S,Canvas->ClipX-40*S),X=(Canvas->ClipX-Width)*.5f,Y=Canvas->ClipY-190*S;
  HUD->DrawRect(FLinearColor(.13f,.11f,.16f,.94f),X,Y,Width,146*S);
  HUD->DrawText(ActiveNPC->DisplayName.ToString(),FLinearColor(.98f,.8f,.85f),X+22*S,Y+14*S,GEngine->GetMediumFont(),S);
@@ -157,7 +163,11 @@ void ABBSBInteractionNPC::ResolveAttachment(UPrimitiveComponent*& Component,FVec
  // Selection spheres are deliberately generous; use the fitted mesh contact, not their outer skin.
  Point=Face ? FaceTarget->GetComponentLocation()+Normal*(FaceAttachmentForward-15):HeadTarget->GetComponentLocation()+Normal*HeadAttachmentHeight;
 }
-void ABBSBInteractionNPC::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal) { AttachedBuddy=Buddy; }
+void ABBSBInteractionNPC::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal)
+{
+ AttachedBuddy=Buddy;
+ if(auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));Player && Player->Interaction)Player->Interaction->BeginDialogue(this);
+}
 void ABBSBInteractionNPC::BunniarArrived_Implementation(ABBSBBunniarCompanion* Buddy)
 {
  if(AttachedBuddy.Get()!=Buddy || !Buddy || !Buddy->bSurfaceAttached) return;

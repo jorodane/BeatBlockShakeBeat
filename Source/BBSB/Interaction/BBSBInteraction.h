@@ -40,12 +40,27 @@ public:
  UFUNCTION(BlueprintCallable,Category="Dialogue") void EndDialogue();
  UFUNCTION(BlueprintPure,Category="Dialogue") FString DisplayedLine() const;
  void DrawDialogue(AHUD* HUD,UCanvas* Canvas) const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float QuickAimRadius=160;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float QuickAimDegrees=8;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float LockedFrontRange=600;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float LockedFrontDegrees=65;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") TObjectPtr<AActor> QuickFocusActor;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") FText QuickFocusText;
+ UFUNCTION(BlueprintPure,Category="Quick interaction") bool IsQuickInteractable(AActor* Actor) const;
+ UFUNCTION(BlueprintPure,Category="Quick interaction") FText QuickInteractionText(AActor* Actor) const;
+ UFUNCTION(BlueprintCallable,Category="Quick interaction") bool FindQuickInteraction(FHitResult& Hit) const;
+ void UpdateQuickInteraction();
+ void DrawQuickInteraction(AHUD* HUD,UCanvas* Canvas) const;
 private:
  UPROPERTY(Transient) TObjectPtr<ABBSBCharacter> Player;
  UPROPERTY(Transient) TObjectPtr<ACameraActor> DialogueCamera;
  UPROPERTY(Transient) TObjectPtr<UInputComponent> Controls;
  TWeakObjectPtr<AActor> PreviousViewTarget;
  bool bOwnMoveIgnore=false,bOwnLookIgnore=false;
+ TSet<TWeakObjectPtr<AActor>> InteractionCandidates;
+ FDelegateHandle SpawnedHandle;
+ double NextQuickScan=0;
+ void RegisterInteractionCandidate(AActor* Actor);
  void BindControls();
  void UpdateCamera();
 };

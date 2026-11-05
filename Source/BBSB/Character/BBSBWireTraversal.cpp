@@ -1,3 +1,4 @@
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Character/BBSBTraversal.h"
 #include "BBSBCharacter.h"
 #include "Caravan/BBSBCaravan.h"
@@ -178,7 +179,7 @@ void UBBSBTraversalComponent::TickWireMovement(float DT)
   }
   return;
  }
- if(!IsValid(WireBuddy) || !WireBuddy->bWireAnchored || (!bSkyWire && Character->FieldActions->FieldEquipment!=WireBuddy) ||
+ if(!IsValid(WireBuddy) || !WireBuddy->bWireAnchored || (!bSkyWire && Character->FieldActions->InteractionEquipment()!=WireBuddy) ||
   (WireArrival!=EBBSBWireArrival::Air && !WireSurface.IsValid())) { CancelWireRecall();return; }
  WireMotionAge=GetWorld()->GetTimeSeconds()-WireStartedAt;
  if(WireMotionAge>4.f) { CancelWireRecall();return; }

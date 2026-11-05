@@ -1,3 +1,4 @@
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCombat.h"
 #include "BBSBCombatVisuals.h"
 #include "BBSB.h"
@@ -122,6 +123,9 @@ void ABBSBCombatStage::Tick(float DT)
 	Super::Tick(DT);
 	if (!Player || !Player->GetOwner()) { if (IsActive()) Dissolve(false); return; }
 	const double Now=GetWorld()->GetTimeSeconds();
+ if(const auto* G=Player->GetOwner()->FindComponentByClass<UBBSBEquipmentGrowthComponent>();G && G->bConcertoActive)
+ { MusicEpoch+=DT;EnteredAt+=DT;NextJoinCheck+=DT;if(AggroLostAt>=0)AggroLostAt+=DT;ReplacementProgressAt+=DT;return; }
+
 	if (!IsActive())
 	{
 		if (Phase==EBBSBStagePhase::Dissolved)

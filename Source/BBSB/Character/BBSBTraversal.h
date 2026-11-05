@@ -89,7 +89,7 @@ public:
  virtual void TickComponent(float DT,ELevelTick Type,FActorComponentTickFunction* Function) override;
  UFUNCTION(BlueprintCallable,Category="BBSB|Traversal") bool TryJump();
  UFUNCTION(BlueprintCallable,Category="BBSB|Traversal") bool TryGlideDash();
- bool PrepareSurfaceAttachment();
+ bool PrepareSurfaceAttachment(bool bQuickInteraction=false);
  UFUNCTION(BlueprintPure,Category="BBSB|Parkour") bool IsParkourActive() const { return ParkourMode!=EBBSBParkourMode::None; }
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool TryLowVault();
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool TryLedgeClimb();

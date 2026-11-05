@@ -24,7 +24,7 @@ void UBBSBHuntingComponent::IgnoreLoot(FCollisionQueryParams& Query) const
 { for(const auto& Weak:LootActors)if(Weak.IsValid())Query.AddIgnoredActor(Weak.Get()); }
 bool UBBSBHuntingComponent::TryBeginCollection()
 {
- if(!Player || !Player->FieldActions || Player->FieldActions->FieldEquipment!=Player->FieldActions->BunniarEquipment)return false;
+ if(!Player || !Player->FieldActions || Player->FieldActions->InteractionEquipment()!=Player->FieldActions->BunniarEquipment)return false;
  FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit))return false;
  auto* Loot=Cast<ABBSBLootPickup>(Hit.GetActor());if(!Loot || !Loot->IsAvailable())return false;
  if(Player->Combat->bDead || Player->Combat->IsStageLocked() || Player->FieldActions->IsEquipmentActionBusy())return true;
@@ -39,7 +39,7 @@ void UBBSBHuntingComponent::StopCollection()
  if((bVacuuming || WasQuick) && Player)
   if(auto* Buddy=Cast<ABBSBBunniarCompanion>(Player->FieldActions->BunniarEquipment);IsValid(Buddy))
   { bBuddyLootReturning=true;BuddyLootReturnFrom=Buddy->GetActorTransform();BuddyLootReturnAt=GetWorld()->GetTimeSeconds(); }
- bCollectionHeld=bVacuuming=bQuickCollection=bQuickInputHeld=false;QuickPendingLoot.Reset();SetVacuumVisible(false);
+ bCollectionHeld=bVacuuming=bQuickCollection=bQuickInputHeld=bQuickSuctionPending=false;QuickPendingLoot.Reset();SetVacuumVisible(false);
  if(WasActive && !WasQuick && Player && Player->FieldActions)Player->FieldActions->CancelLootGesture();
 }
 bool UBBSBHuntingComponent::TraceCollectionHit(FHitResult& Hit) const
@@ -50,23 +50,49 @@ bool UBBSBHuntingComponent::TraceCollectionHit(FHitResult& Hit) const
  if(!GetWorld()->LineTraceSingleByChannel(Hit,Eye,Eye+Direction*FMath::Max(2500.f,A->WeaponReach+1000.f),ECC_Visibility,Q))return false;
  const auto* Loot=Cast<ABBSBLootPickup>(Hit.GetActor());return Loot && Loot->IsAvailable() && FVector::DistSquared(Player->GetActorLocation(),Loot->GetActorLocation())<=FMath::Square(A->WeaponReach);
 }
-void UBBSBHuntingComponent::QuickCollectDown()
+bool UBBSBHuntingComponent::IsBunniarBusyForCollection() const
 {
- auto* A=Player ? Player->FieldActions.Get():nullptr;auto* Buddy=A ? Cast<ABBSBBunniarCompanion>(A->BunniarEquipment):nullptr;
- if(!A || !Buddy || bCollectionHeld || Player->Combat->bDead || A->bEquipmentInputBlocked || A->bEquipmentWheelOpen || Buddy->bSurfaceAttached || Buddy->bAirHovering || Buddy->bGliding || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive() || (A->FieldEquipment==Buddy && A->IsGestureCaptured()))return;
- bQuickCollection=bQuickInputHeld=bCollectionHeld=true;bVacuuming=bBuddyLootReturning=false;
- CollectionStartedAt=NextVacuumScanAt=GetWorld()->GetTimeSeconds();QuickTravelFrom=Buddy->GetActorTransform();
- QuickTravelSeconds=Buddy->AnimationSet ? FMath::Max(.08f,Buddy->AnimationSet->AttachTravelSeconds):.24f;
- ResolveVacuumAim(VacuumPoint,VacuumNormal);FHitResult Hit;
- if(TraceCollectionHit(Hit)) { QuickPendingLoot=Cast<ABBSBLootPickup>(Hit.GetActor());VacuumPoint=QuickPendingLoot->GetActorLocation();VacuumNormal=FVector::UpVector; }
- else QuickTravelSeconds=0;
+ if(!Player || !Player->FieldActions || !Player->Traversal)return true;
+ const auto* A=Player->FieldActions.Get();const auto* Buddy=Cast<ABBSBBunniarCompanion>(A->BunniarEquipment);
+ return !Buddy || !A->bBunniarAvailable || bCollectionHeld || A->bBunniarZoomHeld || Buddy->bGliding || Buddy->bSurfaceAttached || Buddy->bAirHovering ||
+  Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsBunniarTraversalActive() ||
+  (A->IsBunniarControlActive() && (A->IsGestureChannelHeld(0) || A->IsGestureChannelHeld(1)));
 }
+bool UBBSBHuntingComponent::TryBeginQuickCollection(ABBSBLootPickup* Loot)
+{
+ if(Loot)return BeginQuickCollection(Loot);
+ if(!Player || Player->Combat->bDead || bQuickSuctionPending || (IsBunniarBusyForCollection() && !Player->Traversal->bGliding))return false;
+ // An empty tap is only input intent. It owns no Bunniar animation, return,
+ // equipment action or glide state until the actual hold threshold is reached.
+ bQuickSuctionPending=bQuickInputHeld=true;QuickInputStartedAt=GetWorld()->GetTimeSeconds();return true;
+}
+void UBBSBHuntingComponent::TickQuickCollectionIntent()
+{
+ if(!bQuickSuctionPending)return;
+ const auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
+ if(!PC || !bQuickInputHeld || !PC->IsInputKeyDown(EKeys::F)) { bQuickSuctionPending=bQuickInputHeld=false;return; }
+ if(GetWorld()->GetTimeSeconds()-QuickInputStartedAt<VacuumHoldSeconds)return;
+ bQuickSuctionPending=false;if(!BeginQuickCollection(nullptr,true))bQuickInputHeld=false;
+}
+bool UBBSBHuntingComponent::BeginQuickCollection(ABBSBLootPickup* Loot,bool FromHold)
+{
+ if(Player && Player->Traversal && Player->Traversal->bGliding)
+  if(!Player->Traversal->PrepareSurfaceAttachment(true))return false;
+ if(!Player || Player->Combat->bDead || IsBunniarBusyForCollection() || (Loot && (!IsValid(Loot) || !Loot->IsAvailable())))return false;
+ auto* Buddy=Player->FieldActions->BunniarEquipment.Get();
+ bCollectionHeld=bQuickCollection=bQuickInputHeld=true;bVacuuming=bBuddyLootReturning=false;
+ CollectionStartedAt=GetWorld()->GetTimeSeconds()-(FromHold ? VacuumHoldSeconds:0);NextVacuumScanAt=CollectionStartedAt;
+ VacuumPoint=Loot ? Loot->GetActorLocation():Buddy->GetActorLocation()-FVector::UpVector*55;VacuumNormal=FVector::UpVector;QuickTravelFrom=Buddy->GetActorTransform();
+ QuickPendingLoot=Loot;return true;
+}
+void UBBSBHuntingComponent::QuickCollectDown()
+{ if(Player && Player->FieldActions)Player->FieldActions->QuickBunniarDown(); }
 void UBBSBHuntingComponent::QuickCollectUp()
-{ if(!bQuickCollection)return;bQuickInputHeld=false;if(!QuickPendingLoot.IsValid())StopCollection(); }
+{ if(bQuickSuctionPending) { bQuickSuctionPending=bQuickInputHeld=false;return; }if(bQuickCollection)bQuickInputHeld=false;else if(Player && Player->FieldActions)Player->FieldActions->QuickBunniarUp(); }
 void UBBSBHuntingComponent::TickQuickCollection(float DT)
 {
  auto* Buddy=Cast<ABBSBBunniarCompanion>(Player->FieldActions->BunniarEquipment);
- if(!Buddy || Buddy->bGliding || Buddy->bSurfaceAttached || Buddy->bAirHovering || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive()) { StopCollection();return; }
+ if(!Buddy || Buddy->bGliding || Buddy->bSurfaceAttached || Buddy->bAirHovering || Player->Traversal->IsWireTraversalActive()) { StopCollection();return; }
  if(auto* Loot=QuickPendingLoot.Get())
  {
   VacuumPoint=Loot->GetActorLocation();
@@ -74,13 +100,13 @@ void UBBSBHuntingComponent::TickQuickCollection(float DT)
   if(FVector::DistSquared(Loot->GetActorLocation(),Player->GetActorLocation())<=FMath::Square(Player->FieldActions->WeaponReach) && LootVisible(Loot,Buddy->GetActorLocation()))Collect(Loot);
   QuickPendingLoot.Reset();
  }
- if(!bQuickInputHeld) { StopCollection();return; }
+ if(!bQuickInputHeld || !Cast<APlayerController>(Player->GetController())->IsInputKeyDown(EKeys::F)) { StopCollection();return; }
  UpdateVacuum(DT);
 }
 int32 UBBSBHuntingComponent::Collect(ABBSBLootPickup* Loot)
 {
  if(!IsValid(Loot) || !Loot->IsAvailable())return 0;
- const int32 Accepted=AddItem(Loot->Item,Loot->Quantity);
+ const int32 Accepted=Loot->Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon ? (AddWeaponEntry(Loot->WeaponPayload) ? 1:0):AddItem(Loot->Item,Loot->Quantity);
  if(Accepted>0)
  {
   Loot->TakeQuantity(Accepted);if(Loot->Quantity<=0)Loot->BeginCollectionFlight(this);
@@ -115,7 +141,16 @@ void UBBSBHuntingComponent::UpdateVacuum(float DT)
 {
  const double Now=GetWorld()->GetTimeSeconds();
  if(!bVacuuming && Now-CollectionStartedAt<VacuumHoldSeconds)return;
- bVacuuming=true;ResolveVacuumAim(VacuumPoint,VacuumNormal);UpdateVacuumVisual();
+ bVacuuming=true;
+ if(bQuickCollection && Player->Combat->HasTargetLock())
+ {
+  // Preserve the ordinary funnel-to-mouth relationship. The existing suction
+  // volume travels with Bunniar itself instead of becoming a player-centred area.
+  if(const auto* Buddy=Player->FieldActions->BunniarEquipment.Get())
+  { VacuumNormal=FVector::UpVector;VacuumPoint=Buddy->GetActorLocation()-VacuumNormal*78.f; }
+ }
+ else ResolveVacuumAim(VacuumPoint,VacuumNormal);
+ UpdateVacuumVisual();
  if(Now<NextVacuumScanAt)return;NextVacuumScanAt=Now+FMath::Max(.04f,VacuumScanSeconds);
  const float Radius=FMath::Clamp(VacuumRadius,50.f,600.f),Reach=FMath::Max(50.f,Player->FieldActions->WeaponReach);
  const FVector Origin=VacuumPoint+VacuumNormal*24.f;
@@ -193,7 +228,8 @@ bool UBBSBHuntingComponent::TickBuddyPresentation(float DT)
  }
  if(bVacuuming)
  {
-  const FVector Goal=VacuumPoint+VacuumNormal*78.f;
+  const float Phase=float((GetWorld()->GetTimeSeconds()-CollectionStartedAt)*2*PI/FMath::Max(.5f,BuddyVacuumOrbitSeconds));
+  const FVector Goal=(bQuickCollection && Player->Combat->HasTargetLock()) ? Player->GetActorLocation()+FVector(FMath::Cos(Phase)*BuddyVacuumOrbitRadius,FMath::Sin(Phase)*BuddyVacuumOrbitRadius,35.f):VacuumPoint+VacuumNormal*78.f;
   const FQuat Facing=FRotationMatrix::MakeFromXZ((Eye-Goal).GetSafeNormal(),FVector::UpVector).ToQuat();
   const FQuat Spin(FVector::ForwardVector,float(GetWorld()->GetTimeSeconds()*5.));
   Buddy->SetActorLocation(FMath::VInterpTo(Buddy->GetActorLocation(),Goal,DT,14.f));

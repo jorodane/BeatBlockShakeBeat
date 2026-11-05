@@ -2,6 +2,7 @@
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
 #include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBItemIcon.h"
 #include "Character/BBSBTraversal.h"
 #include "BBSB.h"
@@ -56,6 +57,7 @@ int32 UBBSBFieldActionComponent::WheelEquipmentId(int32 Index) const
 
 bool UBBSBFieldActionComponent::IsEquipmentActionBusy() const
 {
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth && P->EquipmentGrowth->bConcertoActive)return true;
  if (const auto* Player=Cast<ABBSBCharacter>(Character);Player && Player->Traversal && (Player->Traversal->bGlideDashing || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive())) return true;
  if (!Character || bDodging || IsGestureCaptured() || CurrentAction.IsSet() || OtherWeaponAction.IsSet() || IsWeaponReturning() || Arbiter.IsBusy(GetWorld()->GetTimeSeconds())) return true;
  const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();
@@ -69,10 +71,42 @@ bool UBBSBFieldActionComponent::RequestEquipment(int32 Id)
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  if (!Character || bEquipmentInputBlocked || (Combat && Combat->bDead)) return false;
  if (Id==0 ? (!IsValid(BunniarEquipment) || !bBunniarAvailable):Id<1 || Id>6 || !AvailableWeapons.Contains(EBBSBPrototypeWeapon(Id))) return false;
+ if(Id>0 && bInventoryLoadoutManaged)
+ {
+  const auto* H=Character->FindComponentByClass<UBBSBHuntingComponent>();
+  if(H)
+  {
+   const auto* Previous=H->FindOwnedEntry(LastCombatWeaponInstance);
+   if(Previous && Previous->Item && Previous->Item->WeaponId==Id && EquipmentWheelInstances.Contains(Previous->InstanceId))return RequestWeaponInstance(Previous->InstanceId);
+   for(int32 I=0;I<EquipmentWheelIds.Num();++I)if(EquipmentWheelIds[I]==Id)return RequestEquipmentSlot(I);
+  }
+ }
+ PendingWeaponInstance.Invalidate();
  // Choosing the equipped item cancels an earlier request. Requests never accumulate.
  PendingEquipmentId=Id==EquippedEquipmentId() ? INDEX_NONE:Id;
  UE_LOG(LogBBSB,Display,TEXT("Equipment request id=%d pending=%d busy=%d"),Id,PendingEquipmentId,IsEquipmentActionBusy());
  return true;
+}
+
+bool UBBSBFieldActionComponent::RequestWeaponInstance(FGuid Id)
+{
+ const auto* H=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;
+ const auto* E=H ? H->FindOwnedEntry(Id):nullptr;
+ const auto* P=Cast<ABBSBCharacter>(Character);
+ if(!E || !E->Item || E->Item->EquipmentKind!=EBBSBItemEquipmentKind::Weapon || !EquipmentWheelInstances.Contains(Id) || bEquipmentInputBlocked || (P && P->Combat->bDead))return false;
+ const bool Already=Id==EquippedWeaponInstance && Id==PresentedWeaponInstance && !FieldEquipment && int32(PrototypeWeapon)==E->Item->WeaponId;
+ PendingEquipmentId=Already ? INDEX_NONE:E->Item->WeaponId;PendingWeaponInstance=Already ? FGuid():Id;return true;
+}
+bool UBBSBFieldActionComponent::RequestEquipmentSlot(int32 Index)
+{
+ if(WheelEquipmentId(Index)==0)return RequestEquipment(0);
+ if(bInventoryLoadoutManaged)return EquipmentWheelInstances.IsValidIndex(Index) ? RequestWeaponInstance(EquipmentWheelInstances[Index]):false;
+ return WheelEquipmentId(Index)!=INDEX_NONE && RequestEquipment(WheelEquipmentId(Index));
+}
+bool UBBSBFieldActionComponent::IsWheelSlotEquipped(int32 Index) const
+{
+ if(WheelEquipmentId(Index)==0)return EquippedEquipmentId()==0;
+ return bInventoryLoadoutManaged ? !FieldEquipment && EquipmentWheelInstances.IsValidIndex(Index) && EquippedWeaponInstance.IsValid() && EquipmentWheelInstances[Index]==EquippedWeaponInstance:WheelEquipmentId(Index)==EquippedEquipmentId();
 }
 
 void UBBSBFieldActionComponent::EquipmentTabDown()
@@ -90,14 +124,14 @@ void UBBSBFieldActionComponent::EquipmentTabUp()
  const bool Long=bEquipmentWheelOpen || FPlatformTime::Seconds()-EquipmentTabPressedAt>=EquipmentHoldSeconds;
  if (Long)
  {
-  const int32 Choice=bEquipmentWheelOpen ? WheelEquipmentId(EquipmentWheelIndex):INDEX_NONE;
+  const int32 Choice=bEquipmentWheelOpen ? EquipmentWheelIndex:INDEX_NONE;
   CloseEquipmentWheel();
-  if (!bEquipmentTabCancelled && Choice!=INDEX_NONE) RequestEquipment(Choice);
+  if (!bEquipmentTabCancelled && Choice!=INDEX_NONE) RequestEquipmentSlot(Choice);
  }
  else if (!bEquipmentTabCancelled)
  {
   const int32 Intended=PendingEquipmentId!=INDEX_NONE ? PendingEquipmentId:EquippedEquipmentId();
-  if(Intended==0) { if(!AvailableWeapons.IsEmpty())RequestEquipment(AvailableWeapons.Contains(LastCombatWeapon) ? int32(LastCombatWeapon):int32(AvailableWeapons[0])); }
+  if(Intended==0) { if(LastCombatWeaponInstance.IsValid() && EquipmentWheelInstances.Contains(LastCombatWeaponInstance))RequestWeaponInstance(LastCombatWeaponInstance);else if(!AvailableWeapons.IsEmpty())RequestEquipment(int32(AvailableWeapons[0])); }
   else if(bBunniarAvailable)RequestEquipment(0);
   else if(!AvailableWeapons.IsEmpty()) { const int32 Current=AvailableWeapons.IndexOfByKey(EBBSBPrototypeWeapon(Intended));RequestEquipment(int32(AvailableWeapons[(Current+1)%AvailableWeapons.Num()])); }
  }
@@ -153,7 +187,7 @@ void UBBSBFieldActionComponent::CloseEquipmentWheel()
 
 void UBBSBFieldActionComponent::CancelEquipmentSelection()
 {
- bEquipmentTabCancelled=true; bEquipmentTabHeld=false; PendingEquipmentId=INDEX_NONE; CloseEquipmentWheel();
+ bEquipmentTabCancelled=true; bEquipmentTabHeld=false; PendingEquipmentId=INDEX_NONE;PendingWeaponInstance.Invalidate(); CloseEquipmentWheel();
 }
 
 int32 UBBSBFieldActionComponent::ReadEquipmentWheelIndex(bool RestrictToRing) const
@@ -169,14 +203,14 @@ int32 UBBSBFieldActionComponent::ReadEquipmentWheelIndex(bool RestrictToRing) co
 bool UBBSBFieldActionComponent::ConfirmEquipmentWheelClick()
 {
  if(!bEquipmentWheelOpen)return false;
- const int32 Choice=WheelEquipmentId(ReadEquipmentWheelIndex(true));if(Choice==INDEX_NONE)return false;
+ const int32 Choice=ReadEquipmentWheelIndex(true);if(WheelEquipmentId(Choice)==INDEX_NONE)return false;
  // The later physical Q release must not submit a second choice or toggle.
- bEquipmentTabCancelled=true;bEquipmentTabHeld=false;CloseEquipmentWheel();return RequestEquipment(Choice);
+ bEquipmentTabCancelled=true;bEquipmentTabHeld=false;CloseEquipmentWheel();return RequestEquipmentSlot(Choice);
 }
 
 void UBBSBFieldActionComponent::TickEquipmentSelection()
 {
- if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) { CancelEquipmentSelection();return; }
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) { bEquipmentTabHeld=false;bEquipmentTabCancelled=true;CloseEquipmentWheel();return; }
  EnsureBunniarEquipment();
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  if (!Character || bEquipmentInputBlocked || (Combat && Combat->bDead) || (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()))
@@ -188,9 +222,12 @@ void UBBSBFieldActionComponent::TickEquipmentSelection()
   return;
  }
  if (bEquipmentTabHeld || PendingEquipmentId==INDEX_NONE || IsEquipmentActionBusy()) return;
- const int32 Choice=PendingEquipmentId;
+ if(PendingWeaponInstance.IsValid() && !EquipmentWheelInstances.Contains(PendingWeaponInstance)) { PendingWeaponInstance.Invalidate();PendingEquipmentId=INDEX_NONE;return; }
+ const int32 Choice=PendingEquipmentId;const FGuid Previous=EquippedWeaponInstance;
+ if(PendingWeaponInstance.IsValid())EquippedWeaponInstance=PendingWeaponInstance;
  const bool Applied=Choice==0 ? EquipFieldEquipment(BunniarEquipment,FName(TEXT("Bunniar"))):SelectPrototypeWeapon(EBBSBPrototypeWeapon(Choice));
- if (Applied) { PendingEquipmentId=INDEX_NONE; UE_LOG(LogBBSB,Display,TEXT("Equipment applied id=%d"),Choice); }
+ if(!Applied)EquippedWeaponInstance=Previous;
+ if (Applied) { if(Choice>0)LastCombatWeaponInstance=EquippedWeaponInstance;PendingWeaponInstance.Invalidate();PendingEquipmentId=INDEX_NONE;if(auto* H=Character->FindComponentByClass<UBBSBHuntingComponent>())H->NotifyGrowthChanged(); UE_LOG(LogBBSB,Display,TEXT("Equipment applied id=%d"),Choice); }
 }
 
 void UBBSBFieldActionComponent::DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) const
@@ -234,7 +271,7 @@ void UBBSBFieldActionComponent::DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) co
    continue;
   }
   Text(EquipmentLabel(WheelEquipmentId(Index)),P+FVector2D(0,12*S),1.2f*S,Paper);
-  if (WheelEquipmentId(Index)==EquippedEquipmentId()) Text(TEXT("●"),Point(Middle,182*S),.65f*S,Paper);
+  if (IsWheelSlotEquipped(Index)) Text(TEXT("●"),Point(Middle,182*S),.65f*S,Paper);
   const auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;
   auto* Definition=Hunting ? Hunting->EquippedItemAt(Index==Hunting->CompanionWheelSlot ? 10:Index):nullptr;
   const FName Kind=WheelEquipmentId(Index)==0 ? FName(TEXT("Bunniar")):Definition ? Definition->IconGlyph:FName(TEXT("Sword"));
@@ -243,7 +280,7 @@ void UBBSBFieldActionComponent::DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) co
  Text(TEXT("장비 선택"),Center-FVector2D(0,Outer+34*S),1.65f*S,Paper);
  const int32 Choice=WheelEquipmentId(EquipmentWheelIndex);
  Text(EquipmentWheelIndex==INDEX_NONE ? TEXT("중앙: 취소"):Choice==INDEX_NONE ? TEXT("빈 슬롯"):EquipmentLabel(Choice),Center-FVector2D(0,5*S),1.35f*S,Paper);
- Text(TEXT("Q 놓기"),Center+FVector2D(0,20*S),1.0f*S,FLinearColor(.75f,.67f,.71f));
- Text(TEXT("클릭 또는 Q 놓아 장착"),Center+FVector2D(0,Outer+26*S),1.25f*S,Paper);
+ Text(TEXT("E 놓기"),Center+FVector2D(0,20*S),1.0f*S,FLinearColor(.75f,.67f,.71f));
+ Text(TEXT("클릭 또는 E 놓아 장착"),Center+FVector2D(0,Outer+26*S),1.25f*S,Paper);
  if (IsEquipmentActionBusy()) Text(TEXT("행동이 끝난 뒤 장착됩니다"),Center+FVector2D(0,Outer+52*S),1.15f*S,FLinearColor(.97f,.76f,.58f));
 }

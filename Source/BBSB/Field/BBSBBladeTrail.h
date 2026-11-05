@@ -14,7 +14,9 @@ public:
  UPROPERTY(Transient) TObjectPtr<UMaterialInterface> TrailMaterial;
  float Lifetime=.28f;
  FLinearColor Color=FLinearColor(1.f,.7f,.82f,.65f);
+ bool bSoftEdges=false;
  void AddBladeSample(const FVector& Root,const FVector& Tip);
+ void UpdateWindSheet(const FVector& Centre,const FQuat& Frame,float Radius,float Angle,int32 Layer,float Width,float Opacity);
  void Finish();
  UFUNCTION(BlueprintPure,Category="Blade trail") int32 GetSampleCount() const { return Samples.Num(); }
  UFUNCTION(BlueprintPure,Category="Blade trail") FVector GetOldestRoot() const { return Samples.IsEmpty() ? FVector::ZeroVector:Samples[0].Root; }

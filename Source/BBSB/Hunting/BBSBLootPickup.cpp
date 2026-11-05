@@ -38,6 +38,12 @@ void ABBSBLootPickup::BeginPlay()
  Super::BeginPlay();
  if(Item)
  {
+  if(Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon)
+  {
+   Quantity=1;WeaponPayload.InstanceId=FGuid::NewGuid();WeaponPayload.Item=Item;WeaponPayload.Quantity=1;
+   WeaponPayload.WeaponLevel=FMath::RandRange(FMath::Max(1,Item->MinimumDropLevel),FMath::Max(Item->MinimumDropLevel,Item->MaximumDropLevel));
+   WeaponPayload.SocketCount=FMath::RandRange(FMath::Max(0,Item->MinimumDropSockets),FMath::Max(Item->MinimumDropSockets,Item->MaximumDropSockets));WeaponPayload.NormalizeWeapon();
+  }
   if(Item->WorldMesh)Visual->SetStaticMesh(Item->WorldMesh);
   BBSBCombatVisuals::Tint(Visual,Item->Color);
   MeshScale=Item->IconGlyph==TEXT("Core") ? FVector(.23f):Item->IconGlyph==TEXT("Shard") ? FVector(.14f,.14f,.3f):FVector(.2f);

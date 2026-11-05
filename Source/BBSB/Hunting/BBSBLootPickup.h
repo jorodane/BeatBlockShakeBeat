@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Caravan/BBSBBunniarSurface.h"
+#include "Hunting/BBSBItem.h"
 #include "BBSBLootPickup.generated.h"
 
 class UBBSBItemDefinition;
@@ -35,6 +36,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Item") TObjectPtr<UBBSBItemDefinition> Item;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Item",meta=(ClampMin="1")) int32 Quantity=1;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Item") bool bClaimed=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Item") FBBSBInventoryEntry WeaponPayload;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Item") bool bDropping=false;
  UFUNCTION(BlueprintCallable,Category="Item") void BeginDrop(FVector RestPoint);
  int32 TakeQuantity(int32 Requested);

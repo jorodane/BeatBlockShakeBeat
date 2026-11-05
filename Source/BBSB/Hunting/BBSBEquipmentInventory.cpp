@@ -17,7 +17,7 @@ const FBBSBInventoryEntry* UBBSBHuntingComponent::FindOwnedEntry(FGuid Id) const
 bool UBBSBHuntingComponent::FitsEquipment(UBBSBItemDefinition* Item,int32 Slot) const
 {
  if(!Item || Item->IsBuiltInCompanion())return false;
- if(Slot>=0 && Slot<10)return Slot!=CompanionWheelSlot && Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && Item->WeaponId>=1 && Item->WeaponId<=6;
+ if(Slot>=0 && Slot<6)return Slot!=CompanionWheelSlot && Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && Item->WeaponId>=1 && Item->WeaponId<=6;
  return (Slot==10 && Item->EquipmentKind==EBBSBItemEquipmentKind::Companion) || (Slot==11 && Item->EquipmentKind==EBBSBItemEquipmentKind::Armor) || (Slot==12 && Item->EquipmentKind==EBBSBItemEquipmentKind::Accessory);
 }
 void UBBSBHuntingComponent::InitializeEquipment()
@@ -25,7 +25,7 @@ void UBBSBHuntingComponent::InitializeEquipment()
  bEquipmentInitialized=true;CompanionWheelSlot=0;
  for(const auto& Pair:{TPair<const TCHAR*,int32>(TEXT("/Game/BBSB/Hunting/Equipment/DA_Equipment_Sword.DA_Equipment_Sword"),1)})
   if(auto* Item=LoadObject<UBBSBItemDefinition>(nullptr,Pair.Key))
-  { FBBSBInventoryEntry E;E.InstanceId=FGuid::NewGuid();E.Item=Item;E.Quantity=1;E.GridX=-1;E.GridY=Pair.Value;EquippedItems.Add(E); }
+  { FBBSBInventoryEntry E;E.InstanceId=FGuid::NewGuid();E.Item=Item;E.Quantity=1;E.GridX=-1;E.GridY=Pair.Value;E.WeaponLevel=Item->DefaultWeaponLevel;E.NormalizeWeapon();EquippedItems.Add(E); }
  bEquipmentLayoutPending=true;
 }
 bool UBBSBHuntingComponent::CanPlaceOwnedItem(FGuid Id,int32 Destination) const
@@ -103,7 +103,7 @@ bool UBBSBHuntingComponent::PlaceOwnedItem(FGuid Id,int32 Destination)
 }
 bool UBBSBHuntingComponent::MoveCompanionWheelSlot(int32 Destination)
 {
- if(Destination<0 || Destination>=10)return false;
+ if(Destination<0 || Destination>=6)return false;
  if(Destination==CompanionWheelSlot)return true;
  for(auto& E:EquippedItems)if(E.GridY==Destination)E.GridY=CompanionWheelSlot;
  CompanionWheelSlot=Destination;bEquipmentLayoutPending=true;ProgressChanged();return true;
@@ -111,26 +111,27 @@ bool UBBSBHuntingComponent::MoveCompanionWheelSlot(int32 Destination)
 void UBBSBHuntingComponent::TickEquipmentLoadout()
 {
  if(!bEquipmentLayoutPending || !Player || !Player->FieldActions || !bEquipmentInitialized || Player->Combat->bDead)return;
- auto* A=Player->FieldActions.Get();
- if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())return;
+ auto* A=Player->FieldActions.Get();if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())return;
  auto* Buddy=Cast<ABBSBBunniarCompanion>(A->BunniarEquipment);if(!Buddy)return;
- const int32 Selected=A->EquippedEquipmentId();
- A->bInventoryLoadoutManaged=true;A->AvailableWeapons.Reset();A->EquipmentWheelIds.Init(INDEX_NONE,10);
- for(const auto& E:EquippedItems)if(E.Item && E.GridY>=0 && E.GridY<10)
- { A->AvailableWeapons.AddUnique(EBBSBPrototypeWeapon(E.Item->WeaponId));A->EquipmentWheelIds[E.GridY]=E.Item->WeaponId; }
+ A->bInventoryLoadoutManaged=true;A->AvailableWeapons.Reset();A->EquipmentWheelIds.Init(INDEX_NONE,6);A->EquipmentWheelInstances.Init(FGuid(),6);
+ for(const auto& E:EquippedItems)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY>=0 && E.GridY<6)
+ { A->AvailableWeapons.AddUnique(EBBSBPrototypeWeapon(E.Item->WeaponId));A->EquipmentWheelIds[E.GridY]=E.Item->WeaponId;A->EquipmentWheelInstances[E.GridY]=E.InstanceId; }
  A->EquipmentWheelIds[CompanionWheelSlot]=0;
- if(A->PendingEquipmentId>0 && !A->AvailableWeapons.Contains(EBBSBPrototypeWeapon(A->PendingEquipmentId)))A->PendingEquipmentId=INDEX_NONE;
+ if(A->PendingWeaponInstance.IsValid() && !A->EquipmentWheelInstances.Contains(A->PendingWeaponInstance)) { A->PendingWeaponInstance.Invalidate();A->PendingEquipmentId=INDEX_NONE; }
  if(A->IsEquipmentActionBusy() || Player->Traversal->IsBunniarTraversalActive())return;
  auto* Companion=EquippedItemAt(10);A->bBunniarAvailable=true;
  if(!OriginalCompanionMesh)OriginalCompanionMesh=Buddy->Visual->GetSkeletalMeshAsset();
  auto* Mesh=Companion && !Companion->CompanionMesh.IsNull() ? Companion->CompanionMesh.LoadSynchronous():OriginalCompanionMesh.Get();
  if(Mesh && Buddy->Visual->GetSkeletalMeshAsset()!=Mesh)Buddy->Visual->SetSkeletalMesh(Mesh);
  Buddy->bFollowing=true;Buddy->SetActorHiddenInGame(false);
- int32 Desired=Selected;
- if(Selected==0 && !A->bBunniarAvailable)Desired=A->AvailableWeapons.IsEmpty() ? INDEX_NONE:int32(A->AvailableWeapons[0]);
- else if(Selected!=0 && !A->AvailableWeapons.Contains(EBBSBPrototypeWeapon(Selected)))Desired=A->bBunniarAvailable ? 0:A->AvailableWeapons.IsEmpty() ? INDEX_NONE:int32(A->AvailableWeapons[0]);
- bool Applied=true;
- if(Desired==INDEX_NONE)Applied=A->SelectPrototypeWeapon(EBBSBPrototypeWeapon::Legacy);
- else if(Desired!=Selected)Applied=Desired==0 ? A->EquipFieldEquipment(Buddy,Companion ? Companion->ItemId:FName(TEXT("Bunniar"))):A->SelectPrototypeWeapon(EBBSBPrototypeWeapon(Desired));
- if(Applied)bEquipmentLayoutPending=false;
+ if(A->PendingEquipmentId==INDEX_NONE && A->EquippedEquipmentId()!=0)
+ {
+  if(A->EquippedWeaponInstance.IsValid() && A->EquipmentWheelInstances.Contains(A->EquippedWeaponInstance))A->RequestWeaponInstance(A->EquippedWeaponInstance);
+  else
+  {
+   bool Chosen=false;for(int32 I=0;I<6;++I)if(A->EquipmentWheelIds[I]>0 && A->EquipmentWheelIds[I]==A->EquippedEquipmentId()) { A->RequestEquipmentSlot(I);Chosen=true;break; }
+   if(!Chosen)A->RequestEquipment(0);
+  }
+ }
+ bEquipmentLayoutPending=false;
 }

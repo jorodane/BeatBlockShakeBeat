@@ -26,7 +26,7 @@ bool UBBSBFieldActionComponent::EquipFieldEquipment(AActor* Equipment,FName Name
 void UBBSBFieldActionComponent::ClearFieldEquipment()
 {
  if (!FieldEquipment) return;
- if (auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment)) Buddy->ReleaseSurface();
+ if (auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment())) Buddy->ReleaseSurface();
  FieldEquipment=nullptr; FieldEquipmentName=NAME_None;
  for (AActor* Visual:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get()}) if (Visual) Visual->SetActorHiddenInGame(false);
 }
@@ -49,7 +49,7 @@ FVector UBBSBFieldActionComponent::VisualAimPoint() const
 {
  const APlayerController* PC=IsValid(Character) ? Cast<APlayerController>(Character->GetController()):nullptr;
  if (!IsValid(PC) || !PC->IsLocalController()) return FindPrototypeCursorPoint();
- if (const auto* Buddy=Cast<ABBSBBunniarCompanion>(FieldEquipment))
+ if (const auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment()))
  {
   if(Buddy->bSurfaceAttached) return Buddy->SurfacePoint;
   FVector Point;FHitResult Hit;ResolveEquipmentAim(Point,Hit);return Point;
@@ -194,7 +194,7 @@ void UBBSBFieldActionComponent::IgnoreInkProjectiles(FCollisionQueryParams& Quer
 {
  if(!GetWorld()) return;
  for(TActorIterator<ABBSBInkProjectile> It(GetWorld());It;++It) Query.AddIgnoredActor(*It);
- if(FieldEquipment!=BunniarEquipment)
+ if(InteractionEquipment()!=BunniarEquipment)
   if(const auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr)Hunting->IgnoreLoot(Query);
 }
 
@@ -202,10 +202,10 @@ bool UBBSBFieldActionComponent::IsEquipmentTarget(AActor* Actor) const
 {
  if(!IsValid(Actor) || Actor->IsA<ABBSBInkProjectile>() || Actor->ActorHasTag(TEXT("BBSBIgnoreAim"))) return false;
  if(const auto* Object=Cast<ABBSBCarryObject>(Actor);Object && Object->bBroken) return false;
- if(FieldEquipment)
+ if(InteractionEquipment())
  {
   const auto* Enemy=Cast<ABBSBInkEnemy>(Actor);
-  return FieldEquipment==BunniarEquipment && (Actor->Implements<UBBSBBunniarSurface>() || (Enemy && !Enemy->bDefeated));
+  return InteractionEquipment()==BunniarEquipment && (Actor->Implements<UBBSBBunniarSurface>() || (Enemy && !Enemy->bDefeated));
  }
  if(const auto* Enemy=Cast<ABBSBInkEnemy>(Actor)) return !Enemy->bDefeated;
  if(const auto* Prop=Cast<ABBSBBreakableProp>(Actor)) return !Prop->bBroken;
@@ -224,18 +224,17 @@ bool UBBSBFieldActionComponent::CursorAimRay(FVector& Origin,FVector& Direction)
 bool UBBSBFieldActionComponent::EquipmentAimRay(FVector& Origin,FVector& Direction) const
 {
  if(!CursorAimRay(Origin,Direction))return false;
- const auto* PC=Cast<APlayerController>(Character->GetController());
- if(PC->bShowMouseCursor)return true;
- if(FieldEquipment==BunniarEquipment && IsValid(FieldEquipment))
-  if(const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock())
-  {
-   Direction=(Combat->FieldLockedTarget->GetAimPoint()-Origin).GetSafeNormal();return !Direction.IsNearlyZero();
-  }
  return true;
+
 }
 bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const
 {
  Hit=FHitResult();Point=Character ? Character->GetActorLocation():FVector::ZeroVector;
+ if(bBunniarShortcutActive)
+ {
+  if(!QuickInteractionHit.GetActor() || !QuickInteractionHit.GetComponent())return false;
+  Hit=QuickInteractionHit;Point=Hit.GetComponent()->GetComponentTransform().TransformPosition(QuickInteractionLocalPoint);Hit.Location=Hit.ImpactPoint=Point;return true;
+ }
  FVector Origin,Direction;
  if(!EquipmentAimRay(Origin,Direction)) return false;
  const float Reach=FMath::Max(50.f,WeaponReach);
@@ -260,27 +259,10 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
 }
 bool UBBSBFieldActionComponent::TraceEquipmentAim(FHitResult& Hit) const
 {
- const auto* AimPC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
- // Combat framing deliberately looks below the target. Bunniar follows the
- // selected enemy, just as a weapon does, rather than hitting that lower ray's floor.
- if(AimPC && !AimPC->bShowMouseCursor && IsValid(FieldEquipment) && FieldEquipment==BunniarEquipment)
-  if(const auto* Combat=Character->FindComponentByClass<UBBSBCombatComponent>();Combat && Combat->HasTargetLock())
-  {
-   // An unreachable enemy requests an air anchor along its bearing. Never
-   // substitute the floor under the deliberately lowered combat-camera ray.
-   if(!Combat->IsLockedTargetInAttackRange()) { Hit=FHitResult();return false; }
-   auto* Enemy=Combat->FieldLockedTarget.Get();auto* PC=Cast<APlayerController>(Character->GetController());
-   if(!PC) return false;
-   FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);
-   FCollisionQueryParams Q(SCENE_QUERY_STAT(BunniarLockedEnemyAim),true,Character);Q.AddIgnoredActor(Enemy);
-   for(AActor* Ignored:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get(),BunniarEquipment.Get()}) Q.AddIgnoredActor(Ignored);
-   IgnoreInkProjectiles(Q);if(const auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>())Hunting->IgnoreLoot(Q);FHitResult Cover;
-   if(GetWorld()->LineTraceSingleByChannel(Cover,Eye,Enemy->GetAimPoint(),ECC_Visibility,Q)) return false;
-   Hit=FHitResult(Enemy,Enemy->GetCapsuleComponent(),Enemy->GetAimPoint(),FVector::UpVector);Hit.bBlockingHit=true;return true;
-  }
+
  FVector Point;
  if(!ResolveEquipmentAim(Point,Hit)) return false;
- if(IsValid(FieldEquipment) && FieldEquipment==BunniarEquipment) return true;
+ if(IsValid(InteractionEquipment()) && InteractionEquipment()==BunniarEquipment) return true;
  // Keep the existing character cover check for combat weapons.
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBWeaponCover),true,Character);Q.AddIgnoredActor(FloatingWeapon);Q.AddIgnoredActor(OtherFloatingWeapon);Q.AddIgnoredActor(BunniarEquipment);
  IgnoreInkProjectiles(Q);

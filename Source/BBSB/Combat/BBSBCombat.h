@@ -13,6 +13,8 @@ class ABBSBCombatStage;
 class ABBSBInkProjectile;
 class ABBSBCombatPracticeArea;
 class UStaticMeshComponent;
+class USkeletalMeshComponent;
+class USceneComponent;
 class UInstancedStaticMeshComponent;
 class USplineMeshComponent;
 class UCameraShakeBase;
@@ -40,6 +42,7 @@ struct FBBSBDamagePopup
 {
  GENERATED_BODY()
  UPROPERTY(BlueprintReadOnly) float Amount=0.f;
+ UPROPERTY(BlueprintReadOnly) bool bCritical=false;
  UPROPERTY(BlueprintReadOnly) FVector WorldPoint=FVector::ZeroVector;
  UPROPERTY(BlueprintReadOnly) double StartedAt=0;
  UPROPERTY(BlueprintReadOnly) float Drift=0.f;
@@ -159,7 +162,11 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") float DamageShakeAlpha=0.f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") double LastPlayerDamageAt=-100;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") int32 PlayerDamageFeedbackSerial=0;
- void ShowEnemyDamage(float Damage,const FVector& Point);
+ void ShowEnemyDamage(float Damage,const FVector& Point,bool bCritical=false);
+ void DrawDamageVignette(AHUD* HUD,UCanvas* Canvas) const;
+ void DrawDamageNumbers(AHUD* HUD,UCanvas* Canvas) const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Critical",meta=(ClampMin="0",ClampMax="1")) float CriticalChance=.15f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Critical",meta=(ClampMin="1",ClampMax="10")) float CriticalDamageMultiplier=2.f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") TObjectPtr<UCameraShakeBase> DamageCameraShake;
  void DrawDamageFeedback(AHUD* HUD,UCanvas* Canvas) const;
  void DrawEnemyHealthBars(AHUD* HUD,UCanvas* Canvas) const;
@@ -282,6 +289,16 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") TObjectPtr<ABBSBCombatStage> Stage;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") FVector FormationTarget=FVector::ZeroVector;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Enemy") float LastDamageTaken=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") bool bLastHitCritical=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") int32 CriticalHitsReceived=0;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback") float HitVibrationDistance=4.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Hit feedback") float CriticalVibrationDistance=10.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Hit feedback") FVector HitVibrationOffset=FVector::ZeroVector;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Concerto") bool bConcertoSuspended=false;
+ void SetConcertoSuspended(bool bSuspend,UObject* PauseSource);
+ void RestoreHitVibration();
+ void TickHitVibration();
+ void BeginHitVibration(bool bCritical);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Enemy|Health bar") bool bShowHealthBar=true;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Enemy|Health bar",meta=(ClampMin="0",Units="s")) float HealthTrailHoldSeconds=.75f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Enemy|Health bar",meta=(ClampMin=".05",Units="s")) float HealthTrailFadeSeconds=.35f;
@@ -338,6 +355,7 @@ public:
  UFUNCTION(BlueprintPure,Category="BBSB|Field bullets") bool IsAwareOfPlayer(const APawn* Target) const { return !bDefeated && bFieldAggro && FieldTarget.Get()==Target; }
 	void JoinStage(ABBSBCombatStage* NewStage, bool bIsFront);
 	void ApplyWeaponImpulse(FVector Impulse);
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Orb effects") float GrowthSlowMultiplier=1;
 	void ResetEnemy();
 	FVector GetAimPoint() const;
 	void SetSelected(bool bSelected);
@@ -346,6 +364,13 @@ public:
 	EBBSBInkPattern AuthoredPattern=EBBSBInkPattern::Tap;
 private:
  TWeakObjectPtr<APawn> FieldTarget;
+ TWeakObjectPtr<UObject> ConcertoPauseOwner;
+ bool bMovementTickBeforeConcerto=true,bBrainPausedByConcerto=false;
+ double ConcertoPausedAt=-100,HitVibrationAt=-100;
+ float HitVibrationAmplitude=0,HitVibrationSeconds=.16f;
+ FVector VelocityBeforeConcerto=FVector::ZeroVector;
+ TArray<TWeakObjectPtr<USceneComponent>> HitVisualRoots;
+ TArray<TWeakObjectPtr<USkeletalMeshComponent>> ConcertoPausedMeshes;
  double NextFieldVolleyAt=0,FieldLastSeenAt=-100;
  double FieldReleaseAt=-100,FieldRecoveryUntil=-100;
  FVector FieldRestScale=FVector(.75f,.65f,1.25f);

@@ -61,6 +61,15 @@ public:
  const FBBSBInventoryEntry* EquipmentEntryAt(int32 Slot) const;
  const FBBSBInventoryEntry* FindOwnedEntry(FGuid Id) const;
  UFUNCTION(BlueprintCallable,Category="Inventory") bool SortInventory();
+ UFUNCTION(BlueprintCallable,Category="Inventory") bool ConsumeItem(UBBSBItemDefinition* Item,int32 Quantity);
+ UFUNCTION(BlueprintCallable,Category="Weapons") FGuid AddWeaponInstance(UBBSBItemDefinition* Item,int32 WeaponLevel,int32 SocketCount);
+ bool AddWeaponEntry(const FBBSBInventoryEntry& Entry);
+ UFUNCTION(BlueprintCallable,Category="Weapons") bool SocketOrb(FGuid WeaponId,int32 Socket,FGuid OrbId);
+ UFUNCTION(BlueprintCallable,Category="Weapons") bool RemoveOrb(FGuid WeaponId,int32 Socket);
+ UFUNCTION(BlueprintCallable,Category="Weapons") bool EquipOwnedWeapon(FGuid Id);
+ UFUNCTION(BlueprintPure,Category="Weapons") FBBSBInventoryEntry WeaponInstance(FGuid Id) const;
+ UFUNCTION(BlueprintCallable,Category="Growth") void NotifyGrowthChanged() { ProgressChanged(); }
+ FBBSBInventoryEntry* MutableOwnedEntry(FGuid Id);
  UFUNCTION(BlueprintCallable,Category="Inventory") int32 AddItem(UBBSBItemDefinition* Item,int32 Quantity);
  UFUNCTION(BlueprintPure,Category="Inventory") int32 ItemCount(UBBSBItemDefinition* Item) const;
  UFUNCTION(BlueprintPure,Category="Inventory") bool CanPlace(UBBSBItemDefinition* Item,int32 X,int32 Y,bool Rotated,FGuid Ignore) const;
@@ -81,6 +90,8 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") bool bCollectionHeld=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") bool bVacuuming=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") bool bQuickCollection=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Collection",meta=(ClampMin="40",ClampMax="180",Units="cm")) float BuddyVacuumOrbitRadius=100.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Collection",meta=(ClampMin=".5",Units="s")) float BuddyVacuumOrbitSeconds=1.2f;
  UFUNCTION(BlueprintCallable,Category="Collection") void QuickCollectDown();
  UFUNCTION(BlueprintCallable,Category="Collection") void QuickCollectUp();
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") FVector VacuumPoint=FVector::ZeroVector;
@@ -91,6 +102,10 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Collection") TSoftObjectPtr<UMaterialInterface> VacuumMaterial;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Collection") TArray<TObjectPtr<USplineMeshComponent>> VacuumRibbons;
  bool TryBeginCollection();
+ bool TryBeginQuickCollection(ABBSBLootPickup* Loot);
+ bool HasQuickCollectionInput() const { return bQuickCollection || bQuickSuctionPending; }
+ UFUNCTION(BlueprintPure,Category="Collection") bool IsQuickSuctionPending() const { return bQuickSuctionPending; }
+ UFUNCTION(BlueprintPure,Category="Collection") bool IsBunniarBusyForCollection() const;
  UFUNCTION(BlueprintCallable,Category="Collection") void StopCollection();
  void RegisterLoot(ABBSBLootPickup* Loot);
  void UnregisterLoot(ABBSBLootPickup* Loot);
@@ -117,9 +132,12 @@ private:
  int32 LastExperienceGain=0;
  FString StatusNotice;
  double StatusUntil=-100;
- bool bDirtyProgress=false,bMenuOriginalCursor=false,bMenuOwnLook=false;
+ bool bDirtyProgress=false,bMenuOriginalCursor=false,bMenuOwnLook=false,bSaveLoadFailed=false;
  bool bBuddyLootReturning=false;
- bool bQuickInputHeld=false;
+ bool bQuickInputHeld=false,bQuickSuctionPending=false;
+ double QuickInputStartedAt=-100;
+ bool BeginQuickCollection(ABBSBLootPickup* Loot,bool FromHold=false);
+ void TickQuickCollectionIntent();
  TWeakObjectPtr<ABBSBLootPickup> QuickPendingLoot;
  FTransform QuickTravelFrom;
  float QuickTravelSeconds=.24f;

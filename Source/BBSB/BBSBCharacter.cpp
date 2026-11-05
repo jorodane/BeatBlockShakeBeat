@@ -19,6 +19,7 @@
 #include "Caravan/BBSBCaravan.h"
 #include "Combat/BBSBCombat.h"
 #include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Combat/BBSBCombatVerification.h"
 #include "Combat/BBSBFormationVerification.h"
 #include "Field/BBSBWeaponVerification.h"
@@ -35,6 +36,7 @@ ABBSBCharacter::ABBSBCharacter()
  Interaction=CreateDefaultSubobject<UBBSBInteractionComponent>(TEXT("Interaction"));
  ViewOcclusion=CreateDefaultSubobject<UBBSBViewOcclusionComponent>(TEXT("ViewOcclusion"));
  Hunting=CreateDefaultSubobject<UBBSBHuntingComponent>(TEXT("Hunting"));
+ EquipmentGrowth=CreateDefaultSubobject<UBBSBEquipmentGrowthComponent>(TEXT("EquipmentGrowth"));
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
 		
@@ -128,7 +130,7 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 		// find out which way is forward
 		const FRotator Rotation = GetController()->GetControlRotation();
 		FRotator MoveView=Rotation;
-		const auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->FieldEquipment):nullptr;
+		const auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->InteractionEquipment()):nullptr;
 		if((Combat && Combat->HasTargetLock()) || (Buddy && Buddy->bSurfaceViewLocked))
 			if(const auto* PC=Cast<APlayerController>(GetController())) { FVector Eye;PC->GetPlayerViewPoint(Eye,MoveView); }
 		const FRotator YawRotation(0, MoveView.Yaw, 0);
@@ -194,7 +196,7 @@ void ABBSBCharacter::Landed(const FHitResult& Hit)
 
 float ABBSBCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AController* InstigatorController, AActor* Causer)
 {
-	if (FieldActions && FieldActions->IsDodgeInvulnerable()) return 0.f;
+	if ((FieldActions && FieldActions->IsDodgeInvulnerable()) || (EquipmentGrowth && EquipmentGrowth->IsConcertoInvulnerable())) return 0.f;
 	if (Combat) { const float Before=Combat->Health; Combat->TakeCombatDamage(Amount,Causer); return Before-Combat->Health; }
 	return Super::TakeDamage(Amount,Event,InstigatorController,Causer);
 }
@@ -206,6 +208,7 @@ void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
 	// A release blend also finishes when Tab switches away from Bunniar.
 	if(auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->BunniarEquipment):nullptr) Buddy->ApplySurfaceFocus(DeltaTime,OutResult);
  if(Combat) Combat->ApplyTargetLockCamera(OutResult);
+ if(EquipmentGrowth)EquipmentGrowth->ApplyConcertoCamera(DeltaTime,OutResult);
 }
 
 void ABBSBCharacter::FieldPress(int32 Channel) { if (FieldActions) FieldActions->FieldGesturePress(Channel); }

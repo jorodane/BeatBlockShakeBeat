@@ -13,6 +13,8 @@ class BBSB_API IBBSBBunniarSurface
 {
  GENERATED_BODY()
 public:
+ UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") FText BunniarInteractionText() const;
+ virtual FText BunniarInteractionText_Implementation() const { return FText(); }
  UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") void BunniarAttached(ABBSBBunniarCompanion* Bunniar,FVector WorldPoint,FVector WorldNormal);
  /** Actual visible arrival; logical attachment retains the existing puzzle press timing. */
  UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") void BunniarArrived(ABBSBBunniarCompanion* Bunniar);

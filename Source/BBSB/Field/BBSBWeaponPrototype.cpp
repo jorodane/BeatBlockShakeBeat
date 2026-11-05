@@ -1,4 +1,6 @@
 #include "BBSBFieldActions.h"
+#include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBEquipmentGrowth.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSB.h"
 #include "BBSBCharacter.h"
@@ -78,6 +80,8 @@ bool UBBSBFieldActionComponent::SelectPrototypeWeapon(EBBSBPrototypeWeapon Type)
  if (Type!=EBBSBPrototypeWeapon::Legacy) LastCombatWeapon=Type;
  ActiveWeaponAnimationSet=nullptr;
  if (const auto* Set=WeaponAnimationSets.Find(Type)) ActiveWeaponAnimationSet=Set->LoadSynchronous();
+ if(const auto* H=Character->FindComponentByClass<UBBSBHuntingComponent>())if(const auto* E=H->FindOwnedEntry(EquippedWeaponInstance);E && E->Item && !E->Item->WeaponAnimation.IsNull())ActiveWeaponAnimationSet=E->Item->WeaponAnimation.LoadSynchronous();
+ PresentedWeaponInstance=EquippedWeaponInstance;
  if (IsValid(FloatingWeapon)) FloatingWeapon->Destroy();
  if (IsValid(OtherFloatingWeapon)) OtherFloatingWeapon->Destroy();
  if (IsValid(ConductorWeapon)) ConductorWeapon->Destroy();
@@ -168,7 +172,7 @@ double UBBSBFieldActionComponent::WeaponBeatPosition() const
 
 void UBBSBFieldActionComponent::TickPrototypeState()
 {
- if (FieldEquipment) return;
+ if (InteractionEquipment()) return;
  UpdateWeaponAim();
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Legacy) return;
  const double Now=GetWorld()->GetTimeSeconds();
@@ -301,30 +305,39 @@ bool UBBSBFieldActionComponent::PrototypeGesture(EBBSBFieldGesture G,int32 Chann
 bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 Channel,float Damage,float Duration,FVector Impulse)
 {
  if(IsWeaponReturning()) { ++RejectedActions;return false; }
- const double Now=GetWorld()->GetTimeSeconds(); const bool Independent=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent;
+ const double Now=GetWorld()->GetTimeSeconds();
+ const auto* GrowthPlayer=Cast<ABBSBCharacter>(Character);auto* Growth=GrowthPlayer ? GrowthPlayer->EquipmentGrowth.Get():nullptr;
+ const auto Snapshot=Growth ? Growth->WeaponSnapshot(EquippedWeaponInstance):FBBSBWeaponSnapshot();
+ const float BeatCooldown=Snapshot.Definition ? Snapshot.Definition->NormalBeatCooldown*Snapshot.CooldownMultiplier:0;
+ if(G==EBBSBFieldGesture::Beat && Snapshot.InstanceId.IsValid())if(const auto* Last=LastInstanceBeat.Find(Snapshot.InstanceId);Last && Now-*Last<BeatCooldown)return false;
+ const bool Independent=PrototypeWeapon==EBBSBPrototypeWeapon::Crescent;
  const auto* Player=Cast<ABBSBCharacter>(Character);auto* Traversal=Player ? Player->Traversal.Get():nullptr;
  const bool GlideAttack=Traversal && Traversal->bGliding;
  const bool SwordThrow=PrototypeWeapon==EBBSBPrototypeWeapon::Sword && Channel==0 && G==EBBSBFieldGesture::Beat;
  const bool SwordContinuation=SwordThrow && CanContinueSwordCombo();
+ const bool SwordRecast=SwordThrow && Snapshot.InstanceId.IsValid() && CurrentAction.IsSet() && Now-CurrentAction->StartedAt>=BeatCooldown && Now-CurrentAction->StartedAt>=CurrentAction->Duration*CurrentAction->Motion.ActiveEnd;
  const int32 Combo=SwordContinuation ? 2:1;
  const FBBSBWeaponAnimationClip* Clip=ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->FindClip(G,Channel,Combo,GlideAttack) : nullptr;
  if (Clip) Duration=FMath::Max(Clip->Duration,0.05f);
+ // Keep authored wind-up/contact/embedding proportions while making the
+ // data-defined normal cadence attainable by the next accepted Beat.
+ if(SwordThrow && Clip && BeatCooldown>0)Duration=FMath::Min(Duration,BeatCooldown/FMath::Max(.1f,Clip->ActiveEnd));
  auto& Slot=Independent && Channel==1 ? OtherWeaponAction : CurrentAction;
  const float Recovery=Clip ? FMath::Max(0.f,Clip->RecoverySeconds):0.f;
  FBBSBWeaponActionRule Rule; Rule.Duration=Duration+Recovery; Rule.ChainCancelOpen=PrototypeWeapon==EBBSBPrototypeWeapon::Spear ? 0.4f : 0.65f;
  Rule.bAllowGestureChain=!SwordThrow && Recovery<=0;
  Rule.bLockMovement=!SwordThrow && !GlideAttack && PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger; Rule.bOccupyConductor=PrototypeWeapon!=EBBSBPrototypeWeapon::Dagger;
- if ((Independent && Slot.IsSet() && Now<Slot->StartedAt+Slot->Duration) || (!Independent && !SwordContinuation && !Arbiter.CanAttack(Rule,Channel,Now,true))) { ++RejectedActions; return false; }
+ if ((Independent && Slot.IsSet() && Now<Slot->StartedAt+Slot->Duration) || (!Independent && !SwordContinuation && !SwordRecast && !Arbiter.CanAttack(Rule,Channel,Now,true))) { ++RejectedActions; return false; }
  AActor* Visual=Independent && Channel==1 ? OtherFloatingWeapon.Get() : FloatingWeapon.Get();
  const FTransform StartPose=Visual->GetActorTransform();
- if (!Independent) { CancelCurrentAction(false,!SwordContinuation); Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,Now); }
+ if (!Independent) { CancelCurrentAction(false,!SwordContinuation && !SwordRecast); Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,Now); }
  else if (!Arbiter.IsBusy(Now)) Arbiter.Start(EBBSBActionState::Attack,Rule,-1,Now);
  else Arbiter.Rule.Duration=FMath::Max(Arbiter.Rule.Duration,float(Now-Arbiter.StartedAt)+Duration);
  UBBSBCombatComponent* C=Character->FindComponentByClass<UBBSBCombatComponent>();
  if (C) C->OnAttackStarted();
  if (Rule.bLockMovement) { Character->ConsumeMovementInputVector(); Character->GetCharacterMovement()->StopMovementImmediately(); }
  FWeaponAction A; A.bPrototype=true; A.Gesture=G; A.Channel=Channel; A.StartedAt=Now; A.Duration=Duration; A.Revision=Arbiter.Revision;
- A.bGlideAttack=GlideAttack;A.bSwordThrow=SwordThrow;
+ A.bGlideAttack=GlideAttack;A.bSwordThrow=SwordThrow;A.GrowthSnapshot=Snapshot;
  if (Clip) { A.Motion=*Clip; A.bAuthoredMotion=true; }
  A.Target=bWeaponAimLocked ? LockedAimPoint : PrototypeWeapon==EBBSBPrototypeWeapon::Dagger ? FindPrototypeCursorPoint() : FindAimPoint();
  const auto* AimPC=Cast<APlayerController>(Character->GetController());const bool CursorCapture=AimPC && !bWeaponAimLocked && (AimPC->bShowMouseCursor || !C || (!C->HasTargetLock() && !C->IsStageLocked()));
@@ -340,7 +353,8 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  bHasFollowThrough[Independent && Channel==1 ? 1:0]=false;
  A.Direction=(A.Target-Character->GetActorLocation()).GetSafeNormal2D(); if (A.Direction.IsNearlyZero()) A.Direction=Character->GetActorForwardVector();
  if(SwordThrow) A.Direction=A.SwordThrowFrame.GetAxisX();
- A.ExactDamage=Damage*(C ? BBSBCombatRules::EcstaticDamageMultiplier(C->Ecstatic) : 1.f); A.Impulse=Impulse;
+ A.ExactDamage=(Damage*Snapshot.DamageMultiplier+Snapshot.FlatDamage)*(Growth ? Growth->ConditionalDamageMultiplier(Snapshot):1.f)*(C ? BBSBCombatRules::EcstaticDamageMultiplier(C->Ecstatic) : 1.f);
+ if(G==EBBSBFieldGesture::Beat && Snapshot.InstanceId.IsValid())LastInstanceBeat.Add(Snapshot.InstanceId,Now); A.Impulse=Impulse;
  Slot.Emplace(A);if(SwordThrow) SwordComboStep=Combo; ActiveState=EBBSBActionState::Attack; LastGesture=G; ++GestureCounts[int32(G)]; GestureTimes[int32(G)]=Now; ++HandAttacks[Channel];
  LastWeaponDamage=A.ExactDamage; LastAimPoint=A.Target; LastWeaponImpulse=Impulse; FormUntil=Now+1;
  OnGesture.Broadcast(G,Channel,WeaponChargeSeconds/FMath::Max(ChargeMaximumSeconds,0.01f));
@@ -360,7 +374,7 @@ bool UBBSBFieldActionComponent::StartPrototypeAttack(EBBSBFieldGesture G,int32 C
  if (PrototypeWeapon==EBBSBPrototypeWeapon::Dagger)
  {
   ABBSBPlayerWeaponProjectile* P=GetWorld()->SpawnActor<ABBSBPlayerWeaponProjectile>(FloatingWeapon->GetActorLocation(),FloatingWeapon->GetActorRotation());
-  if (P) P->Launch(Character,A.Target,A.ExactDamage,Blade->GetStaticMesh(),ActiveWeaponAnimationSet);
+  if (P) { P->GrowthSnapshot=A.GrowthSnapshot;P->Launch(Character,A.Target,A.ExactDamage,Blade->GetStaticMesh(),ActiveWeaponAnimationSet); }
   DaggerAwayUntil[0]=Now+FVector::Dist(FloatingWeapon->GetActorLocation(),A.Target)/FMath::Max(100.f,ActiveWeaponAnimationSet ? ActiveWeaponAnimationSet->ProjectileSpeed:1900.f)+0.08;
  }
  else
@@ -823,7 +837,8 @@ void ABBSBPlayerWeaponProjectile::Tick(float DT)
   if (Cast<ABBSBInkEnemy>(Hit.GetActor()) || Prop)
   {
    const bool WasBroken=Prop && Prop->bBroken;
-   UGameplayStatics::ApplyPointDamage(Hit.GetActor(),Damage,FlightVelocity.GetSafeNormal(),Hit,SourceCharacter->GetController(),SourceCharacter.Get(),nullptr);
+   const float Actual=UGameplayStatics::ApplyPointDamage(Hit.GetActor(),Damage,FlightVelocity.GetSafeNormal(),Hit,SourceCharacter->GetController(),SourceCharacter.Get(),nullptr);
+   if(auto* Player=Cast<ABBSBCharacter>(SourceCharacter.Get());Player && Player->EquipmentGrowth && Cast<ABBSBInkEnemy>(Hit.GetActor()))Player->EquipmentGrowth->NotifyWeaponHit(GrowthSnapshot,Hit.GetActor(),Actual,Hit.ImpactPoint);
    if (UBBSBFieldActionComponent* A=SourceCharacter->FindComponentByClass<UBBSBFieldActionComponent>())
    {
     A->LastHitAt=GetWorld()->GetTimeSeconds(); A->LastHitLabel=FString::Printf(TEXT("Dagger %.0f"),Damage);

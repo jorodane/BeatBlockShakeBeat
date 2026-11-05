@@ -7,6 +7,7 @@
 #include "BBSBFieldGesture.h"
 #include "BBSBWeaponAnimation.h"
 #include "Combat/BBSBCombatRules.h"
+#include "Hunting/BBSBGrowthData.h"
 #include "BBSBFieldActions.generated.h"
 
 class ACharacter;
@@ -103,12 +104,24 @@ public:
  bool EquipmentAimRay(FVector& Origin,FVector& Direction) const;
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool CursorAimRay(FVector& Origin,FVector& Direction) const;
  bool EquipmentWheelSavedCursor() const { return bWheelOriginalCursor; }
+ UFUNCTION(BlueprintCallable,Category="BBSB|Interaction") void QuickBunniarDown();
+ UFUNCTION(BlueprintCallable,Category="BBSB|Interaction") void QuickBunniarUp();
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") AActor* InteractionEquipment() const { return bBunniarShortcutActive ? BunniarEquipment.Get():FieldEquipment.Get(); }
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsBunniarControlActive() const { return BunniarEquipment && InteractionEquipment()==BunniarEquipment; }
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Interaction") bool bBunniarShortcutActive=false;
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsEquipmentTarget(AActor* Actor) const;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") TObjectPtr<AActor> BunniarEquipment;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") TArray<EBBSBPrototypeWeapon> AvailableWeapons={EBBSBPrototypeWeapon::Sword};
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") bool bInventoryLoadoutManaged=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") bool bBunniarAvailable=true;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") TArray<int32> EquipmentWheelIds;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") TArray<FGuid> EquipmentWheelInstances;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") FGuid EquippedWeaponInstance;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") FGuid PendingWeaponInstance;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment") FGuid LastCombatWeaponInstance;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool RequestWeaponInstance(FGuid Id);
+ UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool RequestEquipmentSlot(int32 Index);
+ UFUNCTION(BlueprintPure,Category="BBSB|Equipment") bool IsWheelSlotEquipped(int32 Index) const;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") float EquipmentHoldSeconds=.25f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment", meta=(ClampMin="0.001",ClampMax="1")) float EquipmentWheelTimeScale=.025f;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentWheelOpen=false;
@@ -126,7 +139,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") bool IsEquipmentActionBusy() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") FString EquipmentLabel(int32 EquipmentId) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") int32 EquippedEquipmentId() const;
-	static constexpr int32 EquipmentWheelSlotCount=10;
+	static constexpr int32 EquipmentWheelSlotCount=6;
 	void DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) const;
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool ConfirmEquipmentWheelClick();
 	double WeaponBeatPosition() const;
@@ -240,6 +253,14 @@ private:
 	void EquipmentTabDown(); void EquipmentTabUp(); void ToggleInventory();
 	void TickEquipmentSelection(); void EnsureBunniarEquipment();
 	void OpenEquipmentWheel(); void CloseEquipmentWheel();
+ FGuid PresentedWeaponInstance;
+ TMap<FGuid,double> LastInstanceBeat;
+ FHitResult QuickInteractionHit;FVector QuickInteractionLocalPoint=FVector::ZeroVector;
+ uint8 BunniarPrimarySources=0;
+ FVector2D LastVisiblePointer=FVector2D::ZeroVector;bool bVisiblePointerTracked=false;
+ bool BeginBunniarPrimary(uint8 Source);
+ void EndBunniarPrimary(uint8 Source);
+ void UltimateDown();
  int32 ReadEquipmentWheelIndex(bool RestrictToRing) const;
 	int32 WheelEquipmentId(int32 Index) const;
 	struct FWeaponAction
@@ -262,6 +283,7 @@ private:
   bool bGlideAttack=false;
   bool bSwordThrow=false;
   bool bCursorTargetCaptured=false;
+  FBBSBWeaponSnapshot GrowthSnapshot;
   bool bSwordTargetLocked=false;
   FQuat SwordThrowFrame=FQuat::Identity;
 		float ExactDamage=0;
@@ -444,6 +466,7 @@ class BBSB_API ABBSBFieldPracticeHUD : public AHUD
 	GENERATED_BODY()
 public:
 	virtual void DrawHUD() override;
+ virtual void PostRender() override;
 };
 
 UCLASS()
@@ -458,6 +481,7 @@ public:
 	UPROPERTY(VisibleAnywhere) FVector FrozenTarget;
 	UPROPERTY(VisibleAnywhere) FVector FlightVelocity;
 	UPROPERTY(VisibleAnywhere) float Damage=18;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly) FBBSBWeaponSnapshot GrowthSnapshot;
 	void Launch(ACharacter* Shooter,FVector Target,float Amount,UStaticMesh* Mesh,UBBSBWeaponAnimationSet* AnimationSet=nullptr);
 private:
 	TWeakObjectPtr<ACharacter> SourceCharacter;
