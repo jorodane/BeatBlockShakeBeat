@@ -7,7 +7,7 @@ bool UBBSBHuntingComponent::EquipOwnedWeapon(FGuid Id)
  const auto* E=FindOwnedEntry(Id);if(!Player || !E || !E->Item || E->Item->EquipmentKind!=EBBSBItemEquipmentKind::Weapon)return false;
  if(FindEntry(Id))
  {
-  int32 Slot=INDEX_NONE;for(int32 I=0;I<6;++I)if(I!=CompanionWheelSlot && !EquipmentEntryAt(I)) { Slot=I;break; }
+  int32 Slot=INDEX_NONE;for(int32 I=0;I<UBBSBFieldActionComponent::EquipmentWheelSlotCount;++I)if(!EquipmentEntryAt(I)) { Slot=I;break; }
   if(Slot==INDEX_NONE || !PlaceOwnedItem(Id,Columns*Rows+Slot))return false;
  }
  TickEquipmentLoadout();return Player->FieldActions->RequestWeaponInstance(Id);

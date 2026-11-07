@@ -211,6 +211,7 @@ void UBBSBHuntingComponent::ProgressChanged()
 { bDirtyProgress=true;SaveAt=GetWorld() ? GetWorld()->GetRealTimeSeconds()+.65:0; }
 void UBBSBHuntingComponent::ShowPickup(UBBSBItemDefinition* Item,int32 Quantity)
 {
+ if(!Item || Item->IsFieldResource())return;
  const double Now=GetWorld()->GetTimeSeconds();
  for(auto& Notice:Notices)if(Notice.Item==Item && Now-Notice.At<1.) { Notice.Quantity+=Quantity;Notice.At=Now;return; }
  FBBSBPickupNotice Notice;Notice.Item=Item;Notice.Quantity=Quantity;Notice.At=Now;Notices.Add(Notice);
@@ -220,7 +221,7 @@ bool UBBSBHuntingComponent::SaveProgress()
 {
  if(!bPersistProgress || bSaveLoadFailed || SaveSlotName.IsEmpty())return false;
  auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::CreateSaveGameObject(UBBSBHuntingSave::StaticClass()));
- Save->Version=7;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
+ Save->Version=8;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
  Save->Notes=Notes;Save->TotalEcstaticCollected=TotalEcstaticCollected;
  if(Player)
  {
@@ -237,7 +238,7 @@ bool UBBSBHuntingComponent::LoadProgress()
 {
  if(SaveSlotName.IsEmpty() || !UGameplayStatics::DoesSaveGameExist(SaveSlotName,0))return false;
  bSaveLoadFailed=true;auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));
- if(!Save || Save->Version<1 || Save->Version>7 || Save->Notes<0 || Save->TotalEcstaticCollected<0)return false;
+ if(!Save || Save->Version<1 || Save->Version>8 || Save->Notes<0 || Save->TotalEcstaticCollected<0)return false;
  const int32 PreviousRows=Rows,OldWheel=CompanionWheelSlot;
  if(Save->Version>=5)Rows=FMath::Clamp(Save->InventoryRows,8,24);
  TArray<FBBSBInventoryEntry> Previous=MoveTemp(Items);Items.Reset();TSet<FGuid> Seen;
@@ -250,24 +251,24 @@ bool UBBSBHuntingComponent::LoadProgress()
   if(!CanPlace(Entry.Item,Entry.GridX,Entry.GridY,false,FGuid()) && !FindSpace(Entry.Item,Entry.GridX,Entry.GridY,Entry.bRotated))return Fail();
   Items.Add(Entry);
  }
- const int32 SavedCompanion=FMath::Clamp(Save->CompanionWheelSlot,0,9);CompanionWheelSlot=SavedCompanion<6 ? SavedCompanion:0;
+ const int32 SavedCompanion=FMath::Clamp(Save->CompanionWheelSlot,0,9);CompanionWheelSlot=INDEX_NONE;
  TArray<FBBSBInventoryEntry> NewEquipment;TSet<int32> Slots;
  if(Save->Version>=2)for(auto Entry:Save->EquippedItems)
  {
   if(Entry.Item && Entry.Item->IsBuiltInCompanion())continue;
-  const bool LegacyWheel=Save->Version<5 && Entry.GridY>=0 && Entry.GridY<10 && Entry.GridY!=SavedCompanion && Entry.Item && Entry.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon;
+  const bool LegacyWheel=Save->Version<8 && Entry.GridY>=0 && Entry.GridY<(Save->Version<5 ? 10:6) && Entry.GridY!=SavedCompanion && Entry.Item && Entry.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon;
   if(!Entry.Item || Entry.Quantity!=1 || !Entry.RegisterIdentity(Seen) || Slots.Contains(Entry.GridY) || (!LegacyWheel && !FitsEquipment(Entry.Item,Entry.GridY)))return Fail();
   Entry.GridX=-1;Entry.bRotated=false;Entry.NormalizeWeapon();Slots.Add(Entry.GridY);NewEquipment.Add(Entry);
  }
  // Preserve the selected legacy weapon first; excess wheel items return to the
  // bag. A legacy full bag gains only the rows needed to retain every item.
- if(Save->Version<5)
+ if(Save->Version<8)
  {
   const int32 Selected=NewEquipment.IndexOfByPredicate([&](const auto& E){return E.InstanceId==Save->SelectedWeaponInstance;});if(Selected>0)NewEquipment.Swap(0,Selected);
-  TSet<int32> Used;Used.Add(CompanionWheelSlot);
+  TSet<int32> Used;
   for(auto& E:NewEquipment)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY<10)
   {
-   int32 Slot=E.GridY;if(Slot>=6 || Used.Contains(Slot)) { Slot=INDEX_NONE;for(int32 I=0;I<6;++I)if(!Used.Contains(I)) { Slot=I;break; } }
+   int32 Slot=E.GridY-(E.GridY>SavedCompanion ? 1:0);if(Slot>=5 || Used.Contains(Slot)) { Slot=INDEX_NONE;for(int32 I=0;I<5;++I)if(!Used.Contains(I)) { Slot=I;break; } }
    if(Slot!=INDEX_NONE) { E.GridY=Slot;Used.Add(Slot);continue; }
    while(!FindSpace(E.Item,E.GridX,E.GridY,E.bRotated)) { if(Rows>=24)return Fail();++Rows; }
    Items.Add(E);E.Item=nullptr;
@@ -279,6 +280,7 @@ bool UBBSBHuntingComponent::LoadProgress()
  while(Level<MaximumLevel && XP>=ExperienceToNextLevel()) { XP-=ExperienceToNextLevel();++Level; }
  Experience=Level>=MaximumLevel ? 0:int32(XP);bDirtyProgress=false;bSaveLoadFailed=false;
  Notes=Save->Notes;TotalEcstaticCollected=Save->TotalEcstaticCollected;
+ ExperienceGains.Reset();RecentNotesGain=0;LastNotesGainAt=-100;
  if(Player)
  {
   if(Save->Version>=4) { Player->FieldActions->EquippedWeaponInstance=Save->SelectedWeaponInstance;Player->FieldActions->LastCombatWeaponInstance=Save->LastCombatWeaponInstance;if(Save->bBunniarSelected)Player->FieldActions->RequestEquipment(0); }

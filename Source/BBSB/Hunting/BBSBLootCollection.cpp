@@ -113,7 +113,7 @@ int32 UBBSBHuntingComponent::Collect(ABBSBLootPickup* Loot)
  {
   const int64 Amount=int64(Loot->Quantity)*FMath::Max(1,Loot->Item->ResourceValue);
   const bool Granted=Loot->Item->RewardResource==EBBSBRewardResource::Ecstatic ? CollectEcstatic(Amount,!Loot->bConcertoReward):AddNotes(Amount);
-  if(Granted) { Accepted=Loot->Quantity;ShowPickup(Loot->Item,Accepted); }
+  if(Granted)Accepted=Loot->Quantity;
  }
  else Accepted=Loot->Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon ? (AddWeaponEntry(Loot->WeaponPayload) ? 1:0):AddItem(Loot->Item,Loot->Quantity);
  if(Accepted>0)

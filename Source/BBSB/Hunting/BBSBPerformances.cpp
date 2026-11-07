@@ -1,5 +1,10 @@
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBItemIcon.h"
+#include "Hunting/BBSBHUDTypography.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Rendering/SlateRenderer.h"
+#include "Fonts/FontMeasure.h"
 #include "BBSBCharacter.h"
 #include "Field/BBSBFieldActions.h"
 #include "Field/BBSBWeaponAnimation.h"
@@ -25,7 +30,13 @@
 #include "Kismet/GameplayStatics.h"
 
 void UBBSBEquipmentGrowthComponent::AddConcertoCharge(float Amount)
-{ if(FMath::IsFinite(Amount) && Amount>0 && !bConcertoActive) { const float Before=ConcertoCharge;ConcertoCharge=FMath::Clamp(ConcertoCharge+Amount,0.f,100.f);if(ConcertoCharge!=Before)Changed(); } }
+{
+ if(!FMath::IsFinite(Amount) || Amount<=0 || bConcertoActive)return;
+ const float Before=ConcertoCharge;ConcertoCharge=FMath::Clamp(ConcertoCharge+Amount,0.f,100.f);
+ if(ConcertoCharge!=Before) { ConcertoGain.Gain(Before,ConcertoCharge,GetWorld()->GetTimeSeconds());Changed(); }
+}
+float UBBSBEquipmentGrowthComponent::DisplayedConcertoCharge() const
+{ return ConcertoGain.Initialized ? FMath::Clamp(float(ConcertoGain.Value(GetWorld()->GetTimeSeconds())),0.f,ConcertoCharge):ConcertoCharge; }
 
 void UBBSBEquipmentGrowthComponent::NotifyWeaponHit(const FBBSBWeaponSnapshot& S,AActor* Target,float Damage,const FVector& Point,bool Support)
 {
@@ -49,7 +60,7 @@ void UBBSBEquipmentGrowthComponent::NotifyWeaponHit(const FBBSBWeaponSnapshot& S
   if(!Condition)continue;
   const int64 Beat=FMath::CeilToDouble(MusicBeat()+.001);
   int32 Seat=0;
-  for(const auto& E:Player->Hunting->EquippedItems)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY<6 && E.InstanceId!=S.InstanceId)
+  for(const auto& E:Player->Hunting->EquippedItems)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY<UBBSBFieldActionComponent::EquipmentWheelSlotCount && E.InstanceId!=S.InstanceId)
   {
    const auto Other=WeaponSnapshot(E.InstanceId);
    if(Effect.bPartnerNeedsEnsembleOrb && !Other.Effects.ContainsByPredicate([](const auto& O){return O.Effect==EBBSBOrbEffect::Ensemble;}))continue;
@@ -82,9 +93,9 @@ bool UBBSBEquipmentGrowthComponent::TryConcerto()
  if(!Player->FieldActions->EquipmentWheelInstances.Contains(Main))Main=Player->FieldActions->LastCombatWeaponInstance;
  auto MainSnapshot=WeaponSnapshot(Main);if(!MainSnapshot.InstanceId.IsValid()) { Feedback=TEXT("협주곡을 연주할 무기를 장착해 주세요");return false; }
  ConcertoWeapons.Reset();ConcertoWeapons.Add(MainSnapshot);
- for(const auto& E:Player->Hunting->EquippedItems)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY>=0 && E.GridY<6 && E.InstanceId!=Main)ConcertoWeapons.Add(WeaponSnapshot(E.InstanceId));
+ for(const auto& E:Player->Hunting->EquippedItems)if(E.Item && E.Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon && E.GridY>=0 && E.GridY<UBBSBFieldActionComponent::EquipmentWheelSlotCount && E.InstanceId!=Main)ConcertoWeapons.Add(WeaponSnapshot(E.InstanceId));
  Player->FieldActions->ResetActionState();Player->Traversal->EndGlide();
- ConcertoMusicStart=MusicBeat();ConcertoCharge=0;bConcertoActive=true;ConcertoMainWeapon=Main;ConcertoStartedAt=GetWorld()->GetTimeSeconds();NextConcertoMainAt=ConcertoStartedAt;NextConcertoSupportBeat=FMath::CeilToDouble(MusicBeat()+.001);++ConcertoActivations;Changed();
+ ConcertoMusicStart=MusicBeat();ConcertoCharge=0;ConcertoGain.Reset(0);bConcertoActive=true;ConcertoMainWeapon=Main;ConcertoStartedAt=GetWorld()->GetTimeSeconds();NextConcertoMainAt=ConcertoStartedAt;NextConcertoSupportBeat=FMath::CeilToDouble(MusicBeat()+.001);++ConcertoActivations;Changed();
  ConcertoDuration=MainSnapshot.Main.Pattern==EBBSBPerformancePattern::Spiral ? FMath::Max(1.f,MainSnapshot.Main.Duration):Settings->Duration;
  ConcertoElapsed=FaceSlowElapsed=0;ConcertoPlayRate=1;ConcertoClearStart=BulletsCleared;
  for(TActorIterator<ABBSBInkEnemy> It(GetWorld());It;++It)SuspendConcertoEnemy(*It);
@@ -253,8 +264,8 @@ void UBBSBEquipmentGrowthComponent::TickPerformances(float DT)
 void UBBSBEquipmentGrowthComponent::DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) const
 {
  if(!HUD || !Canvas || !Player || Player->Hunting->bInventoryOpen || Player->Interaction->bDialogueActive)return;
- const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.5f),R=32*S;
- const FVector2D Centre(Canvas->SizeX*.5f,Canvas->SizeY-64*S);
+ const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.5f),R=40*S;
+ const FVector2D Centre(Canvas->SizeX*.5f,Canvas->SizeY-R-32*S);
  const FLinearColor Ink(.10f,.075f,.13f,.94f),Paper(.97f,.92f,.86f),Gold(1.f,.76f,.30f),Track(.38f,.33f,.42f,.95f);
  const float Value=FMath::Clamp(bConcertoActive ? 1-ConcertoProgress():ConcertoCharge/100.f,0.f,1.f);
  const bool Ready=ConcertoCharge>=100.f && !bConcertoActive;
@@ -272,9 +283,35 @@ void UBBSBEquipmentGrowthComponent::DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) con
   if(!Triangles.IsEmpty()){FCanvasTriangleItem Item(Triangles,GWhiteTexture);Item.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Item);}
  };
  Ring(0,R+3*S,1,Ink);Ring(R-7*S,R+2*S,1,FLinearColor(.68f,.62f,.73f,.8f));Ring(R-5.5f*S,R+.5f*S,1,Track);
- Ring(R-5.5f*S,R+.5f*S,Value,Ready || bConcertoActive ? Gold:Paper);
- FCanvasTextItem Percent(Centre,FText::FromString(FString::Printf(TEXT("%d%%"),(bConcertoActive ? FMath::CeilToInt(Value*100):FMath::FloorToInt(Value*100)))),GEngine->GetMediumFont(),Ready ? Gold:Paper);
- Percent.Scale=FVector2D(1.35f*S);Percent.bCentreX=Percent.bCentreY=true;Percent.bOutlined=true;Percent.OutlineColor=Ink;Canvas->DrawItem(Percent);
- const FString Label=bConcertoActive ? FString::Printf(TEXT("탄막 소거 %d"),BulletsCleared-ConcertoClearStart):TEXT("Q  협주곡");float W,H;HUD->GetTextSize(Label,W,H,GEngine->GetSmallFont(),S);
- HUD->DrawText(Label,Ready || bConcertoActive ? Gold:Paper,Centre.X-W*.5f,Centre.Y+R+6*S,GEngine->GetSmallFont(),S);
+ // Cyan marks the immediately available gain. The original colour catches up after a pause.
+ Ring(R-5.5f*S,R+.5f*S,Value,bConcertoActive ? Gold:FLinearColor(.37f,.84f,1.f));
+ Ring(R-5.5f*S,R+.5f*S,bConcertoActive ? Value:DisplayedConcertoCharge()/100.f,Ready || bConcertoActive ? Gold:Paper);
+ auto Text=[&](FString Value,FVector2D At,float Scale,FLinearColor Color)
+ {
+  FCanvasTextItem Item(At,FText::FromString(Value),GEngine->GetMediumFont(),Color);
+  Item.Scale=FVector2D(Scale*S);Item.bCentreX=Item.bCentreY=true;Item.bOutlined=true;Item.OutlineColor=Ink;Canvas->DrawItem(Item);
+ };
+ if(Ready)
+ {
+  BBSBItemIcon::DrawCanvas(HUD,Canvas,nullptr,TEXT("Concerto"),Centre,19*S,1,S*1.3f,Gold);
+  const FVector2D KeyAt=Centre-FVector2D(0,R);
+  HUD->DrawRect(Ink,KeyAt.X-17*S,KeyAt.Y-9*S,34*S,18*S);
+  Text(TEXT("[Q]"),KeyAt,.85f,Gold);
+ }
+ else Text(FString::Printf(TEXT("%d%%"),bConcertoActive ? FMath::CeilToInt(Value*100):FMath::FloorToInt(Value*100)),Centre,1.65f,Paper);
+ if(bConcertoActive)Text(FString::Printf(TEXT("탄막 소거 %d"),BulletsCleared-ConcertoClearStart),Centre+FVector2D(0,R+14*S),.72f,Gold);
+ // Currency is anchored above the concerto HUD, independent of equipment rotation.
+ const auto* Hunting=Player->Hunting.Get();const double Age=GetWorld()->GetTimeSeconds()-Hunting->LastNotesGainAt;
+ const float Pulse=1.f+.18f*FMath::Square(1.f-FMath::Clamp(float(Age/.34),0.f,1.f));
+ const FString Notes=FText::AsNumber(Hunting->Notes).ToString();const auto NotesFont=BBSBHUDTypography::NumberFont(14*S*Pulse);
+ const float NoteWidth=FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Notes,NotesFont).X;
+ const FVector2D NotesAt=Centre-FVector2D(0,R+47*S);const float GroupWidth=NoteWidth+29*S;
+ BBSBItemIcon::DrawCanvas(HUD,Canvas,nullptr,TEXT("Note"),NotesAt-FVector2D(GroupWidth*.5f-9*S,0),9*S,1,S,Paper);
+ FCanvasTextItem NotesText(NotesAt+FVector2D(14.5f*S,0),FText::FromString(Notes),NotesFont,Paper);
+ NotesText.bCentreX=NotesText.bCentreY=true;NotesText.bOutlined=true;NotesText.OutlineColor=Ink;Canvas->DrawItem(NotesText);
+ if(Hunting->RecentNotesGain>0 && Age<2.6)
+ {
+  FCanvasTextItem Gain(NotesAt+FVector2D(0,23*S),FText::FromString(FString::Printf(TEXT("+%s"),*FText::AsNumber(Hunting->RecentNotesGain).ToString())),BBSBHUDTypography::NumberFont(11*S),FLinearColor(.37f,.84f,1.f,FMath::Clamp(float((2.6-Age)/.4),0.f,1.f)));
+  Gain.bCentreX=Gain.bCentreY=true;Gain.bOutlined=true;Gain.OutlineColor=Ink;Canvas->DrawItem(Gain);
+ }
 }

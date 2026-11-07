@@ -3,6 +3,7 @@
 #include "Camera/CameraTypes.h"
 #include "Components/ActorComponent.h"
 #include "Hunting/BBSBGrowthData.h"
+#include "Hunting/BBSBResourceGain.h"
 #include "BBSBEquipmentGrowth.generated.h"
 
 class ABBSBCharacter;
@@ -60,6 +61,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Growth") FString Feedback;
  UFUNCTION(BlueprintCallable,Category="Concerto") bool TryConcerto();
  UFUNCTION(BlueprintCallable,Category="Concerto") void AddConcertoCharge(float Amount);
+ UFUNCTION(BlueprintPure,Category="Concerto|Presentation") float DisplayedConcertoCharge() const;
  UFUNCTION(BlueprintPure,Category="Concerto") bool IsConcertoInvulnerable() const { return bConcertoActive; }
  void EnsureInitialized();
  void InitializeProfile(bool NewOrLegacy);
@@ -84,6 +86,7 @@ private:
  UPROPERTY(Transient) TObjectPtr<ABBSBCharacter> Player;
  UPROPERTY(Transient) TObjectPtr<UAnimMontage> ConcertoMontage;
  bool bInitialized=false,bProfileReady=false,bStatsPending=false;
+ FBBSBResourceGain ConcertoGain;
  bool bPendingAerial=false,bPendingDirectional=false;
  float BaseGlideSpeed=550,BaseGlideFall=140,BaseWireSpeed=1800,BaseSkyWireDistance=700,BaseWireRecharge=2;
  double ConcertoStartedAt=-100,NextConcertoMainAt=0,NextEnsembleAt=-100;

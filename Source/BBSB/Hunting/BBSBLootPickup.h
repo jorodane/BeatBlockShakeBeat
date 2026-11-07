@@ -12,6 +12,7 @@ class USphereComponent;
 class UStaticMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class UTexture2D;
 class UBBSBBladeTrailComponent;
 
 UCLASS(Blueprintable)
@@ -37,6 +38,10 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation") TSoftObjectPtr<UMaterialInterface> TrailMaterial;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation") TSoftObjectPtr<UMaterialInterface> ResourceGlowMaterial;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation",meta=(ClampMin="1",ClampMax="8")) float ResourceGlowStrength=2.2f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation|Resources") TSoftObjectPtr<UTexture2D> EcstaticImage;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation|Resources") TSoftObjectPtr<UTexture2D> NoteImage;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation|Resources",meta=(ClampMin="30",ClampMax="160",Units="cm")) float ResourceHoverHeight=90.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation|Resources",meta=(ClampMin="20",ClampMax="80",Units="cm")) float ResourceSpriteSize=48.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation",meta=(ClampMin=".2",ClampMax="2")) float DropSeconds=.82f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Presentation",meta=(ClampMin="20",ClampMax="400",Units="cm")) float DropArcHeight=155.f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Presentation") FVector DropVelocity=FVector::ZeroVector;
@@ -69,4 +74,5 @@ private:
  void FinishDrop(const FVector& Point);
  void AddTrailSample();
  void UpdateNameVisibility();
+ void UpdateResourceFacing();
 };

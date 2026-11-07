@@ -37,7 +37,7 @@ FGuid UBBSBHuntingComponent::RewardWeaponInstance() const
  if(A->EquippedEquipmentId()!=0 && IsWeapon(A->EquippedWeaponInstance))return A->EquippedWeaponInstance;
  if(IsWeapon(A->LastCombatWeaponInstance))return A->LastCombatWeaponInstance;
  if(IsWeapon(A->EquippedWeaponInstance))return A->EquippedWeaponInstance;
- for(const auto& E:EquippedItems)if(E.GridY>=0 && E.GridY<6 && IsWeapon(E.InstanceId))return E.InstanceId;
+ for(const auto& E:EquippedItems)if(E.GridY>=0 && E.GridY<UBBSBFieldActionComponent::EquipmentWheelSlotCount && IsWeapon(E.InstanceId))return E.InstanceId;
  return FGuid();
 }
 bool UBBSBHuntingComponent::IsEcstasyWeapon(FGuid Id) const
@@ -62,10 +62,17 @@ int64 UBBSBHuntingComponent::AddWeaponEcstatic(FGuid Id,int64 Amount)
  E->NormalizeWeapon();const int32 Before=E->WeaponLevel;
  const int64 Accepted=FMath::Min(Amount,E->Item->WeaponExperienceForLevel(E->Item->MaximumWeaponLevel)-E->WeaponEcstatic);
  if(Accepted<=0)return 0;
+ ExperienceGains.FindOrAdd(Id).Gain(double(E->WeaponEcstatic),double(E->WeaponEcstatic+Accepted),GetWorld()->GetTimeSeconds());
  E->WeaponEcstatic+=Accepted;E->InvestedEcstatic+=Accepted;E->NormalizeWeapon();LastExperienceWeapon=Id;
  LastExperienceGain=int32(FMath::Min<int64>(Accepted,MAX_int32));LastExperienceAt=GetWorld()->GetTimeSeconds();
  if(E->WeaponLevel>Before)LastLevelUpAt=LastExperienceAt;
  ProgressChanged();return Accepted;
+}
+double UBBSBHuntingComponent::DisplayedWeaponEcstatic(FGuid Id) const
+{
+ const auto* Entry=FindOwnedEntry(Id);if(!Entry)return 0;
+ const auto* Gain=ExperienceGains.Find(Id);
+ return Gain ? FMath::Clamp(Gain->Value(GetWorld()->GetTimeSeconds()),0.,double(Entry->WeaponEcstatic)):double(Entry->WeaponEcstatic);
 }
 bool UBBSBHuntingComponent::CollectEcstatic(int64 Amount,bool ChargeConcerto)
 {
@@ -79,6 +86,9 @@ bool UBBSBHuntingComponent::CollectEcstatic(int64 Amount,bool ChargeConcerto)
 bool UBBSBHuntingComponent::AddNotes(int64 Amount)
 {
  if(Amount<=0 || Notes>MAX_int64-Amount)return false;
+ const double Now=GetWorld() ? GetWorld()->GetTimeSeconds():0;
+ if(Now-LastNotesGainAt>2.6)RecentNotesGain=0;
+ RecentNotesGain+=FMath::Min(Amount,MAX_int64-RecentNotesGain);LastNotesGainAt=Now;
  Notes+=Amount;ProgressChanged();return true;
 }
 bool UBBSBHuntingComponent::SpendNotes(int64 Amount)

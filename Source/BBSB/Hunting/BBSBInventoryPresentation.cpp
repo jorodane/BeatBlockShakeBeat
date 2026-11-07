@@ -44,15 +44,15 @@ void UBBSBInventoryWidget::PaintEquipment(const FGeometry& G,FSlateWindowElement
  if(GrowthPage==2)return;
  const int32 Count=Hunting->Columns*Hunting->Rows,Equipped=EquippedWheelSlot();
  auto Ring=[&](float A,float R){return L.Wheel+FVector2D(FMath::Sin(A),-FMath::Cos(A))*R;};
- for(int32 I=0;I<6;++I)
+ for(int32 I=0;I<5;++I)
  {
-  const float A=I*2*PI/6,Half=PI/6-.045f;TArray<FVector2D> Arc,Outline;
+  const float A=I*2*PI/5,Half=PI/5-.045f;TArray<FVector2D> Arc,Outline;
   for(int32 J=0;J<=16;++J) { const float T=A-Half+J*2*Half/16;Arc.Add(Ring(T,(L.Outer+L.Inner)*.5));Outline.Add(Ring(T,L.Outer)); }
   for(int32 J=16;J>=0;--J)Outline.Add(Ring(A-Half+J*2*Half/16,L.Inner));const FVector2D FirstPoint=Outline[0];Outline.Add(FirstPoint);
   const bool Hover=GrowthPage==0 && FocusedSlot()==Count+I;const bool Selected=I==Equipped;
   D.Lines(Arc,Selected ? FLinearColor(.27f,.18f,.23f):D.CellGround(),(L.Outer-L.Inner-2*S)/S,3);D.Lines(Outline,Hover || Selected ? D.Paper():D.Faint(),Hover || Selected ? 2.f:1.f,5);
-  const auto* Item=EntryForSlot(Count+I);const bool Buddy=I==Hunting->CompanionWheelSlot;const FVector2D Centre=Ring(A,(L.Inner+L.Outer)*.5);
-  D.Icon(Buddy ? Hunting->EquippedItemAt(10):Item ? Item->Item.Get():nullptr,Buddy ? FName(TEXT("Bunniar")):Item && Item->Item ? Item->Item->IconGlyph:NAME_None,Centre,18*S,(Buddy && bHoldingCompanionPosition) || (Item && Item->InstanceId==HeldId) ? .3f:1.f);
+  const auto* Item=EntryForSlot(Count+I);const FVector2D Centre=Ring(A,(L.Inner+L.Outer)*.5);
+  D.Icon(Item ? Item->Item.Get():nullptr,Item && Item->Item ? Item->Item->IconGlyph:NAME_None,Centre,18*S,Item && Item->InstanceId==HeldId ? .3f:1.f);
   D.Text(FString::FromInt(I+1),Ring(A,L.Outer-7*S)-FVector2D(3,4)*S,7,D.Faint(),8);
   if(Selected) { const auto Mark=Ring(A,L.Outer+4*S);D.Box(Mark-FVector2D(2*S),FVector2D(4*S),D.Accent(),8); }
   if(GrowthPage==1) { FGrowthControl C;C.Key=*FString::Printf(TEXT("Wheel_%d"),I);C.Position=Centre-FVector2D(24*S);C.Size=FVector2D(48*S);C.Action=30;C.Index=Count+I;GrowthControls.Add(C); }

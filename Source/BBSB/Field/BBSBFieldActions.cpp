@@ -7,6 +7,7 @@
 #include "Character/BBSBRespawn.h"
 #include "Character/BBSBWorldMap.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Hunting/BBSBHUDTypography.h"
 #include "Character/BBSBTraversal.h"
 #include "Character/BBSBMovementAuthoring.h"
 
@@ -286,8 +287,8 @@ void UBBSBFieldActionComponent::UltimateDown()
 { if(auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth)P->EquipmentGrowth->TryConcerto(); }
 void UBBSBFieldActionComponent::SecondaryDown() { BeginGesture(1); }
 void UBBSBFieldActionComponent::SecondaryUp() { EndGesture(1);if(!BunniarPrimarySources)bBunniarShortcutActive=false; }
-void UBBSBFieldActionComponent::EquipmentScrollUp() { CycleEquipmentWheel(-1); }
-void UBBSBFieldActionComponent::EquipmentScrollDown() { CycleEquipmentWheel(1); }
+void UBBSBFieldActionComponent::EquipmentScrollUp() { ScrollEquipmentWheel(-1); }
+void UBBSBFieldActionComponent::EquipmentScrollDown() { ScrollEquipmentWheel(1); }
 void UBBSBFieldActionComponent::ToggleHelp() { bHelpVisible = !bHelpVisible; }
 void UBBSBFieldActionComponent::ToggleWorldMap()
 { if(auto* P=Cast<ABBSBCharacter>(Character);P && P->WorldMap)P->WorldMap->ToggleMap(); }
@@ -1304,7 +1305,6 @@ void ABBSBFieldPracticeHUD::DrawHUD()
  if(const auto* Hunting=Pawn->FindComponentByClass<UBBSBHuntingComponent>()) { Hunting->DrawFeedback(this,Canvas);if(Hunting->bInventoryOpen)Hunting->DrawLootNames(this,Canvas); }
  if(const auto* Dialogue=Pawn->FindComponentByClass<UBBSBInteractionComponent>();Dialogue && Dialogue->bDialogueActive) { Dialogue->DrawDialogue(this,Canvas);return; }
  if(const auto* I=Pawn->FindComponentByClass<UBBSBInteractionComponent>())I->DrawQuickInteraction(this,Canvas);
-	if (Actions->bEquipmentWheelOpen) { Actions->DrawEquipmentWheel(this,Canvas); return; }
 	const float Scale=FMath::Clamp(Canvas->SizeX/1280.f,0.7f,1.35f);
 	const float W=Canvas->SizeX, H=Canvas->SizeY;
 	const float CX=W*0.5f, CY=H*0.5f;
@@ -1425,21 +1425,6 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	if (Now-Actions->LastHitAt<1.2)
 		DrawText(Actions->LastHitLabel,FLinearColor(0.98f,0.7f,0.8f),CX-80*Scale,CY+28*Scale,GEngine->GetMediumFont(),Scale);
 	const float Charge=Actions->GetCharge();
-	if (Actions->FieldEquipment || Actions->PrototypeWeapon!=EBBSBPrototypeWeapon::Legacy)
-	{
-		const float X=Canvas->ClipX-260*Scale;
-		DrawText(Actions->EquipmentLabel(Actions->EquippedEquipmentId())+TEXT("  |  E 전환 · 길게 선택   Tab 소지품"),FLinearColor(0.94f,0.82f,0.9f),X,18*Scale,GEngine->GetSmallFont(),Scale);
-		if (Actions->PendingEquipmentId!=INDEX_NONE) DrawText(TEXT("행동 종료 후 → ")+Actions->EquipmentLabel(Actions->PendingEquipmentId),FLinearColor(.98f,.80f,.58f),X,58*Scale,GEngine->GetSmallFont(),1.15f*Scale);
-
-		if (!Actions->FieldEquipment)
-		{
-			if (Charge>0) DrawText(FString::Printf(TEXT("Charge %.2f / 2 s"),Actions->WeaponChargeSeconds),FLinearColor(0.94f,0.8f,0.87f),X,38*Scale,GEngine->GetSmallFont(),Scale);
-			else if (Actions->bLastWeaponOnBeat && GetWorld()->GetTimeSeconds()-Actions->GestureTimes[int32(Actions->LastGesture)]<0.7) DrawText(TEXT("ON BEAT  x1.5"),FLinearColor(0.98f,0.78f,0.86f),X,38*Scale,GEngine->GetSmallFont(),Scale);
-		}
-		const double Beat=Actions->WeaponBeatPosition();
-		const float Pulse=1.f-FMath::Clamp(float(FMath::Frac(Beat)*5),0.f,1.f);
-		DrawRect(FLinearColor(0.6f+0.3f*Pulse,0.5f+0.3f*Pulse,0.65f+0.3f*Pulse),Canvas->ClipX-22*Scale,20*Scale,6*Scale,6*Scale);
-	}
 	if (Charge>0.f && !Actions->FieldEquipment)
 	{
 		DrawRect(FLinearColor(0.2f,0.16f,0.23f,0.8f),CX-70*Scale,CY+55*Scale,140*Scale,5*Scale);
@@ -1449,12 +1434,14 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	if (Combat)
 	{
 		Combat->DrawDefenseFeedback(this,Canvas);Combat->DrawEnemyHealthBars(this,Canvas);
-		const float BarW=260*Scale;
-		DrawRect(FLinearColor(0.13f,0.1f,0.16f,0.8f),14*Scale,14*Scale,BarW+16*Scale,70*Scale);
-		DrawRect(FLinearColor(0.28f,0.2f,0.27f),22*Scale,23*Scale,BarW,10*Scale);
-		DrawRect(FLinearColor(0.88f,0.58f,0.65f),22*Scale,23*Scale,BarW*FMath::Clamp(Combat->Health/Combat->MaximumHealth,0.f,1.f),10*Scale);
-		DrawRect(FLinearColor(0.64f,0.57f,0.84f),22*Scale,40*Scale,BarW*FMath::Clamp(Combat->Ecstatic/Combat->MaximumEcstatic,0.f,1.f),6*Scale);
-		DrawText(Combat->IsStageLocked() ? FString::Printf(TEXT("HP %.0f  |  Rhythm %d  |  %s"),Combat->Health,FMath::FloorToInt(Combat->Ecstatic/100.f),Combat->bCombatStance ? TEXT("STANCE"):TEXT("FREE")):FString::Printf(TEXT("HP %.0f  |  FIELD"),Combat->Health),FLinearColor(0.95f,0.87f,0.94f),22*Scale,56*Scale,GEngine->GetSmallFont(),Scale);
+		const float BarW=260*Scale,BarH=24*Scale,BarX=22*Scale,BarY=H-60*Scale;
+		DrawRect(FLinearColor(.10f,.075f,.13f,.94f),BarX-3*Scale,BarY-3*Scale,BarW+6*Scale,BarH+6*Scale);
+		DrawRect(FLinearColor(.97f,.92f,.86f,.9f),BarX-Scale,BarY-Scale,BarW+2*Scale,BarH+2*Scale);
+		DrawRect(FLinearColor(.25f,.20f,.25f),BarX,BarY,BarW,BarH);
+		DrawRect(FLinearColor(.88f,.58f,.65f),BarX,BarY,BarW*FMath::Clamp(Combat->Health/FMath::Max(1.f,Combat->MaximumHealth),0.f,1.f),BarH);
+		const auto HealthFont=BBSBHUDTypography::NumberFont(14*Scale);
+		FCanvasTextItem HealthText(FVector2D(BarX+BarW*.5f,BarY+BarH*.5f),FText::FromString(FString::Printf(TEXT("%.0f/%.0f"),Combat->Health,Combat->MaximumHealth)),HealthFont,FLinearColor(.97f,.92f,.86f));
+		HealthText.bCentreX=HealthText.bCentreY=true;HealthText.bOutlined=true;HealthText.OutlineColor=FLinearColor(.10f,.075f,.13f);Canvas->DrawItem(HealthText);
 		if (Combat->FeedbackExperiment==2)
 		{
 			const float X=22*Scale,Y=100*Scale,MeterW=306*Scale;

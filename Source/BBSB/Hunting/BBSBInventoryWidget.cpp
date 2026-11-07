@@ -53,11 +53,11 @@ FVector2D UBBSBInventoryWidget::CellTopLeft(const FLayout& L,int32 I) const
  const int32 Count=Hunting ? Hunting->Columns*Hunting->Rows:40;
  if(I==Count+6)return L.Equipment+FVector2D(88,53)*L.Scale;
  if(I<Count)return L.Grid+FVector2D(I%5,I/5-GridScrollRow)*L.Cell;
- I-=Count;if(I<6) { const float A=I*2*PI/6;return L.Wheel+FVector2D(FMath::Sin(A),-FMath::Cos(A))*((L.Outer+L.Inner)*.5f)-FVector2D(L.Cell*.5f); }
+ I-=Count;if(I<5) { const float A=I*2*PI/5;return L.Wheel+FVector2D(FMath::Sin(A),-FMath::Cos(A))*((L.Outer+L.Inner)*.5f)-FVector2D(L.Cell*.5f); }
  return L.Passive+FVector2D((I-7)*1.45f,0)*L.Cell;
 }
 int32 UBBSBInventoryWidget::InventoryDestination(int32 I) const
-{ const int32 Count=Hunting ? Hunting->Columns*Hunting->Rows:40;return I<Count+6 ? I:I+4; }
+{ const int32 Count=Hunting ? Hunting->Columns*Hunting->Rows:40;return I<Count+5 ? I:I+4; }
 FVector2D UBBSBInventoryWidget::SlotCenter(int32 I) const { return CellTopLeft(PaintedLayout,I)+FVector2D(PaintedLayout.Cell*.5f); }
 FVector2D UBBSBInventoryWidget::CloseButtonCenter() const { return PaintedLayout.Close+PaintedLayout.CloseSize*.5; }
 FVector2D UBBSBInventoryWidget::SortButtonCenter() const { return PaintedLayout.Sort+PaintedLayout.SortSize*.5; }
@@ -67,15 +67,15 @@ int32 UBBSBInventoryWidget::PointerSlot(const FLayout& L,FVector2D P) const
 {
  const int32 Count=Hunting ? Hunting->Columns*Hunting->Rows:40;
  const FVector2D D=P-L.Wheel;const float R=D.Size();
- if(R>=L.Inner && R<=L.Outer) { const float A=FMath::Fmod(FMath::Atan2(D.X,-D.Y)+2*PI,2*PI);return Count+FMath::RoundToInt(A/(2*PI/6))%6; }
- for(int32 I=0;I<Count+9;++I) { if(I==Count+6 || (I>=Count && I<Count+6) || (I<Count && (I/5<GridScrollRow || I/5>=GridScrollRow+L.VisibleRows)))continue;const auto A=CellTopLeft(L,I);if(P.X>=A.X && P.Y>=A.Y && P.X<A.X+L.Cell && P.Y<A.Y+L.Cell)return I; }
+ if(R>=L.Inner && R<=L.Outer) { const float A=FMath::Fmod(FMath::Atan2(D.X,-D.Y)+2*PI,2*PI);return Count+FMath::RoundToInt(A/(2*PI/5))%5; }
+ for(int32 I=0;I<Count+9;++I) { if(I==Count+5 || I==Count+6 || (I>=Count && I<Count+5) || (I<Count && (I/5<GridScrollRow || I/5>=GridScrollRow+L.VisibleRows)))continue;const auto A=CellTopLeft(L,I);if(P.X>=A.X && P.Y>=A.Y && P.X<A.X+L.Cell && P.Y<A.Y+L.Cell)return I; }
  return INDEX_NONE;
 }
 const FBBSBInventoryEntry* UBBSBInventoryWidget::EntryForSlot(int32 I) const
 {
  if(!Hunting || I<0)return nullptr;const int32 Count=Hunting->Columns*Hunting->Rows;
  if(I<Count) { const int32 E=Hunting->EntryAt(I%5,I/5);return Hunting->Items.IsValidIndex(E) ? &Hunting->Items[E]:nullptr; }
- const int32 EquipmentSlot=I-Count<6 ? I-Count:I-Count+4;return Hunting->EquipmentEntryAt(EquipmentSlot==Hunting->CompanionWheelSlot ? 10:EquipmentSlot);
+ if(I==Count+5)return nullptr;const int32 EquipmentSlot=I-Count<5 ? I-Count:I-Count+4;return Hunting->EquipmentEntryAt(EquipmentSlot);
 }
 void UBBSBInventoryWidget::ResetInteraction()
 {
@@ -102,13 +102,12 @@ int32 UBBSBInventoryWidget::EquippedWheelSlot() const
 {
  const auto* A=GetOwningPlayerPawn() ? GetOwningPlayerPawn()->FindComponentByClass<UBBSBFieldActionComponent>():nullptr;
  if(!Hunting || !A)return INDEX_NONE;const int32 Id=A->EquippedEquipmentId();
- for(int32 I=0;I<6;++I) { const auto* E=Hunting->EquipmentEntryAt(I);if(A->IsWheelSlotEquipped(I))return I; }
+ for(int32 I=0;I<5;++I) { if(A->IsWheelSlotEquipped(I))return I; }
  return INDEX_NONE;
 }
 FText UBBSBInventoryWidget::SlotTooltip(int32 I) const
 {
  if(!Hunting || I<0)return FText::GetEmpty();const int32 Count=Hunting->Columns*Hunting->Rows;
- if(I==Count+Hunting->CompanionWheelSlot)return FText::FromString(TEXT("버니아\n기본 동행 · 항상 사용 가능\n휠 안에서 선택 위치를 옮길 수 있어요."));
  if(const auto* E=EntryForSlot(I);E && E->Item)
   return FText::FromString(E->Item->DisplayName.ToString()+TEXT("\n")+E->Item->RarityLabel().ToString()+(E->Item->Description.IsEmpty() ? FString():TEXT("\n")+E->Item->Description.ToString()));
  if(I==Count+6)return FText::FromString(TEXT("버니아 추가 장비\n빈 상태가 기본 버니아예요.\n추가 장비를 이곳에 장착할 수 있어요."));
@@ -119,14 +118,12 @@ FText UBBSBInventoryWidget::SlotTooltip(int32 I) const
 void UBBSBInventoryWidget::ActivateSlot(int32 I)
 {
  if(!Hunting || I<0)return;const int32 Count=Hunting->Columns*Hunting->Rows;
- if(bHoldingCompanionPosition) { if(I>=Count && I<Count+6 && Hunting->MoveCompanionWheelSlot(I-Count))bHoldingCompanionPosition=false; }
- else if(!HeldModule.IsNone())return;
+ if(!HeldModule.IsNone())return;
  else if(HeldId.IsValid())
  {
   const auto* Before=Hunting->FindOwnedEntry(HeldId);const int32 Quantity=Before ? Before->Quantity:0;
   if(Hunting->PlaceOwnedItem(HeldId,InventoryDestination(I))) { const auto* After=Hunting->FindOwnedEntry(HeldId);if(!After || After->Quantity==Quantity)HeldId.Invalidate(); }
  }
- else if(I==Count+Hunting->CompanionWheelSlot)bHoldingCompanionPosition=true;
  else if(const auto* E=EntryForSlot(I))HeldId=E->InstanceId;
  UpdatePointerSurface();InvalidateLayoutAndVolatility();
 }
@@ -138,7 +135,7 @@ void UBBSBInventoryWidget::Navigate(int32 DX,int32 DY)
  const FVector2D From=SlotCenter(FocusIndex),Direction(DX,DY);double Best=MAX_dbl;int32 Next=FocusIndex;
  for(int32 I=0;I<Count+9;++I)
  {
-  if(I==Count+6)continue;
+  if(I==Count+5 || I==Count+6)continue;
   const FVector2D Delta=SlotCenter(I)-From;const double Along=FVector2D::DotProduct(Delta,Direction);if(Along<1)continue;
   const double Side=FMath::Abs(Delta.X*Direction.Y-Delta.Y*Direction.X),Score=Delta.Size()+Side*2;
   if(Score<Best) { Best=Score;Next=I; }

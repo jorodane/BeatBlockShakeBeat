@@ -28,7 +28,7 @@ public class BBSB : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "RenderCore", "RHI", "Landscape", "AnimationCore", "Niagara" });
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AnimGraph", "BlueprintGraph", "PoseSearchEditor", "PythonScriptPlugin" });
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AnimGraph", "BlueprintGraph", "PoseSearchEditor", "PythonScriptPlugin", "AssetRegistry" });
 		}
 
 		PublicIncludePaths.AddRange(new string[] {

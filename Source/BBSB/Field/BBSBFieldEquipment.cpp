@@ -1,5 +1,6 @@
 #include "BBSBFieldActions.h"
 #include "Hunting/BBSBHunting.h"
+#include "Hunting/BBSBLootPickup.h"
 #include "Combat/BBSBCombat.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Interaction/BBSBInteraction.h"
@@ -227,6 +228,25 @@ bool UBBSBFieldActionComponent::EquipmentAimRay(FVector& Origin,FVector& Directi
  return true;
 
 }
+bool UBBSBFieldActionComponent::TargetingAimRay(FVector& Origin,FVector& Direction) const
+{
+ if(!CursorAimRay(Origin,Direction))return false;
+ const auto* PC=Cast<APlayerController>(Character->GetController());
+ FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);const FVector Forward=View.Vector();
+ const double Along=FVector::DotProduct(Direction,Forward);
+ if(Along<=UE_SMALL_NUMBER)return false;
+ const double Depth=FVector::DotProduct(Origin-Character->GetActorLocation(),Forward);
+ // Move along the original rendered ray: the reticle and cursor do not move.
+ Origin+=Direction*FMath::Max(0.,(-FMath::Max(0.f,AimCameraSideAllowance)-Depth)/Along);
+ return true;
+}
+bool UBBSBFieldActionComponent::IsAimPointDepthAllowed(FVector Point) const
+{
+ const auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
+ if(!PC || !PC->IsLocalController() || Point.ContainsNaN())return false;
+ FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);
+ return FVector::DotProduct(Point-Character->GetActorLocation(),View.Vector())>=-FMath::Max(0.f,AimCameraSideAllowance)-UE_KINDA_SMALL_NUMBER;
+}
 bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const
 {
  Hit=FHitResult();Point=Character ? Character->GetActorLocation():FVector::ZeroVector;
@@ -239,7 +259,7 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
   Hit=QuickInteractionHit;Point=Hit.GetComponent()->GetComponentTransform().TransformPosition(QuickInteractionLocalPoint);Hit.Location=Hit.ImpactPoint=Point;return true;
  }
  FVector Origin,Direction;
- if(!EquipmentAimRay(Origin,Direction)) return false;
+ if(!TargetingAimRay(Origin,Direction)) return false;
  const float Reach=FMath::Max(50.f,WeaponReach);
  const FVector Offset=Origin-Character->GetActorLocation();const float B=FVector::DotProduct(Offset,Direction);
  const float Discriminant=B*B-Offset.SizeSquared()+FMath::Square(Reach);
@@ -249,8 +269,18 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBEquipmentAim),true,Character);
  for(AActor* Ignored:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get(),BunniarEquipment.Get()}) Q.AddIgnoredActor(Ignored);
  IgnoreInkProjectiles(Q);
- FHitResult CameraHit;
- if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent()) return false;
+ FHitResult CameraHit;bool Found=false;
+ for(int32 Attempt=0;Attempt<32;++Attempt)
+ {
+  if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent())return false;
+  auto* Target=CameraHit.GetActor();
+  const bool HasTargetOrigin=Target && (Target->Implements<UBBSBBunniarSurface>() || Target->IsA<APawn>() || Target->IsA<ABBSBLootPickup>() || Target->IsA<ABBSBBreakableProp>() || Target->ActorHasTag(TEXT("BBSBAttackable")));
+  // A near-camera target can overlap the clipped ray start with a large capsule.
+  // Ignore the whole target in that case so it cannot hide a valid target ahead.
+  if(HasTargetOrigin && !IsAimPointDepthAllowed(Target->GetActorLocation())) { Q.AddIgnoredActor(Target);continue; }
+  Found=true;break;
+ }
+ if(!Found)return false;
  if(FVector::DistSquared(Character->GetActorLocation(),CameraHit.ImpactPoint)<=FMath::Square(Reach))
  {
   Hit=CameraHit;Point=Hit.ImpactPoint;return true;

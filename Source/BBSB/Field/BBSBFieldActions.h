@@ -103,6 +103,10 @@ public:
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool ResolveEquipmentAim(FVector& Point,FHitResult& Hit) const;
  bool EquipmentAimRay(FVector& Origin,FVector& Direction) const;
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool CursorAimRay(FVector& Origin,FVector& Direction) const;
+ /** New target acquisition starts at this distance behind the player in camera depth. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Interaction",meta=(ClampMin="0",Units="cm")) float AimCameraSideAllowance=100.f;
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool TargetingAimRay(FVector& Origin,FVector& Direction) const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsAimPointDepthAllowed(FVector Point) const;
  bool EquipmentWheelSavedCursor() const { return bWheelOriginalCursor; }
  UFUNCTION(BlueprintCallable,Category="BBSB|Interaction") void QuickBunniarDown();
  UFUNCTION(BlueprintCallable,Category="BBSB|Interaction") void QuickBunniarUp();
@@ -122,7 +126,19 @@ public:
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool RequestWeaponInstance(FGuid Id);
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool RequestEquipmentSlot(int32 Index);
  UFUNCTION(BlueprintPure,Category="BBSB|Equipment") bool IsWheelSlotEquipped(int32 Index) const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Equipment") int32 WheelEquipmentId(int32 Index) const;
+ /** HUD preview follows queued wheel input; applied equipment remains action-gated. */
+ UFUNCTION(BlueprintPure,Category="BBSB|Equipment|Presentation") int32 EquipmentPreviewSlot() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Equipment|Presentation") int64 EquipmentPreviewTravel() const { return EquipmentWheelTravel+QueuedWheelTravel; }
+ UFUNCTION(BlueprintPure,Category="BBSB|Equipment|Presentation") bool HasQueuedWheelPreview() const { return QueuedWheelTravel!=0; }
+ int32 EquipmentPreviewDirection() const { return QueuedWheelTravel!=0 ? QueuedWheelDirection:EquipmentWheelTravelDirection; }
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool CycleEquipmentWheel(int32 Direction);
+ /** Raw wheel input: the first notch responds immediately, then two notches per step. */
+ UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool ScrollEquipmentWheel(int32 Direction);
+ /** Applied wheel travel in physical slot steps, deliberately not reduced modulo six. */
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment|Presentation") int64 EquipmentWheelTravel=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment|Presentation") int64 EquipmentWheelTravelRevision=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Equipment|Presentation") int32 EquipmentWheelTravelDirection=0;
  void FreezeDeathEquipment(TArray<AActor*>& Out);
  void RestoreDeathEquipment();
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="BBSB|Equipment") float EquipmentHoldSeconds=.25f;
@@ -142,8 +158,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") bool IsEquipmentActionBusy() const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") FString EquipmentLabel(int32 EquipmentId) const;
 	UFUNCTION(BlueprintPure, Category="BBSB|Equipment") int32 EquippedEquipmentId() const;
-	static constexpr int32 EquipmentWheelSlotCount=6;
-	void DrawEquipmentWheel(AHUD* HUD,UCanvas* Canvas) const;
+	static constexpr int32 EquipmentWheelSlotCount=5;
  UFUNCTION(BlueprintCallable,Category="BBSB|Equipment") bool ConfirmEquipmentWheelClick();
 	double WeaponBeatPosition() const;
 	/** Fallback viewport position when the player cannot be projected; normally mirror the player across the crosshair. */
@@ -243,6 +258,16 @@ protected:
 	virtual void RegisterComponentTickFunctions(bool bRegister) override;
 
 private:
+ double LastEquipmentScrollAt=-1;
+ int32 EquipmentScrollDirection=0;
+ bool bEquipmentScrollHalf=false;
+ bool CanCycleEquipmentWheel() const;
+ void ResetEquipmentScrollBurst();
+ int64 QueuedWheelTravel=0;
+ int32 QueuedWheelTarget=INDEX_NONE,QueuedWheelDirection=0;
+ FGuid QueuedWheelInstance;
+ void ResetQueuedWheelTravel();
+ void CommitQueuedWheelTravel();
  bool CanMoveWithInputBlock(bool bIgnoreEquipmentInputBlock) const;
 	friend class ABBSBWeaponVerification;
  friend class ABBSBPlayerWeaponProjectile;
@@ -257,7 +282,7 @@ private:
 	EBBSBPrototypeWeapon LastCombatWeapon=EBBSBPrototypeWeapon::Sword;
 	void EquipmentTabDown(); void EquipmentTabUp(); void ToggleInventory(); void ToggleWorldMap();
 	void TickEquipmentSelection(); void EnsureBunniarEquipment();
-	void OpenEquipmentWheel(); void CloseEquipmentWheel();
+	void CloseEquipmentWheel();
  FGuid PresentedWeaponInstance;
  TMap<FGuid,double> LastInstanceBeat;
  FHitResult QuickInteractionHit;FVector QuickInteractionLocalPoint=FVector::ZeroVector;
@@ -266,8 +291,6 @@ private:
  bool BeginBunniarPrimary(uint8 Source);
  void EndBunniarPrimary(uint8 Source);
  void UltimateDown();
- int32 ReadEquipmentWheelIndex(bool RestrictToRing) const;
-	int32 WheelEquipmentId(int32 Index) const;
 	struct FWeaponAction
 	{
 		EBBSBFieldGesture Gesture = EBBSBFieldGesture::Beat;

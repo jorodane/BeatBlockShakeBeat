@@ -8,6 +8,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
+#include "Engine/Texture2D.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -31,7 +32,9 @@ ABBSBLootPickup::ABBSBLootPickup()
  RarityBeam->SetCanEverAffectNavigation(false);RarityBeam->SetReceivesDecals(false);RarityBeam->SetVisibility(false);
  BeamMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/Hunting/Materials/MI_LootBeam.MI_LootBeam")));
  TrailMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/VFX/Weapons/M_SwordBladeTrail.M_SwordBladeTrail")));
- ResourceGlowMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/Hunting/Rewards/MI_ResourceGlow.MI_ResourceGlow")));
+ ResourceGlowMaterial=TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/BBSB/Hunting/Rewards/MI_ResourceSprite.MI_ResourceSprite")));
+ EcstaticImage=TSoftObjectPtr<UTexture2D>(FSoftObjectPath(TEXT("/Game/BBSB/Hunting/Rewards/T_Resource_Ecstatic.T_Resource_Ecstatic")));
+ NoteImage=TSoftObjectPtr<UTexture2D>(FSoftObjectPath(TEXT("/Game/BBSB/Hunting/Rewards/T_Resource_Note.T_Resource_Note")));
  Tags.Add(TEXT("BBSBLoot"));
 }
 void ABBSBLootPickup::BeginPlay()
@@ -59,12 +62,18 @@ void ABBSBLootPickup::BeginPlay()
  if(Item && Item->IsFieldResource())
  {
   bLargeResource=Quantity>1;
-  MeshScale=(Item->RewardResource==EBBSBRewardResource::Note ? FVector(.14f,.14f,.035f):FVector(.11f,.11f,.16f))*(bLargeResource ? 1.55f:1.f);Visual->SetRelativeScale3D(MeshScale);
+  Visual->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Plane.Plane")));
+  const float Size=ResourceSpriteSize/100.f*(bLargeResource ? 1.4f:1.f);MeshScale=FVector(Size,Size,1);
+  Visual->SetRelativeScale3D(MeshScale);Visual->SetRelativeRotation(FRotator::ZeroRotator);
+  PickupQuery->SetCollisionEnabled(ECollisionEnabled::NoCollision);Tags.AddUnique(TEXT("BBSBIgnoreQuickInteraction"));
   Visual->SetReceivesDecals(false);RarityBeam->SetVisibility(false);bNameVisible=false;
   if(auto* Material=ResourceGlowMaterial.LoadSynchronous())
   {
    ResourceGlowMID=UMaterialInstanceDynamic::Create(Material,this);Visual->SetMaterial(0,ResourceGlowMID);
-   FLinearColor Glow=Item->Color*ResourceGlowStrength;Glow.A=1;ResourceGlowMID->SetVectorParameterValue(TEXT("Color"),Glow);
+   auto* Image=(Item->RewardResource==EBBSBRewardResource::Note ? NoteImage:EcstaticImage).LoadSynchronous();
+   if(Image)ResourceGlowMID->SetTextureParameterValue(TEXT("Icon"),Image);
+   ResourceGlowMID->SetScalarParameterValue(TEXT("GlowStrength"),ResourceGlowStrength);
+   ResourceGlowMID->SetScalarParameterValue(TEXT("Opacity"),1);
   }
   // More individual resources need no name queries, light components or full-rate idle ticks.
   SetActorTickInterval(1.f/30.f);
@@ -79,11 +88,12 @@ void ABBSBLootPickup::EndPlay(const EEndPlayReason::Type Reason)
 }
 void ABBSBLootPickup::BeginDrop(FVector RestPoint)
 {
+ if(Item && Item->IsFieldResource())RestPoint.Z+=ResourceHoverHeight-16.f;
  FlightFrom=GetActorLocation();Rest=RestPoint;FlightStartedAt=GetWorld()->GetTimeSeconds();bDropping=true;bDropDeflected=false;
  DropSeconds=FMath::Clamp(DropSeconds*FMath::FRandRange(.87f,1.13f),.2f,2.f);
  DropGravity=8.f*FMath::Max(20.f,DropArcHeight)*FMath::FRandRange(.88f,1.12f)/FMath::Square(DropSeconds);
  DropVelocity=(Rest-FlightFrom)/DropSeconds+FVector::UpVector*(DropGravity*DropSeconds*.5f);
- if(auto* Material=(Item && Item->IsFieldResource() && Quantity==1) ? nullptr:TrailMaterial.LoadSynchronous())
+ if(auto* Material=(Item && Item->IsFieldResource()) ? nullptr:TrailMaterial.LoadSynchronous())
  {
   DropTrail=NewObject<UBBSBBladeTrailComponent>(this,TEXT("LootDropTrail"));AddInstanceComponent(DropTrail);
   DropTrail->SetupAttachment(PickupQuery);DropTrail->SetAbsolute(true,true,true);DropTrail->SetWorldLocation(FlightFrom);
@@ -118,7 +128,7 @@ void ABBSBLootPickup::TickDrop(float DT)
   if(GetWorld()->SweepSingleByObjectType(Hit,Start,End,FQuat::Identity,BBSBCombatVisuals::GeometryTypes(),FCollisionShape::MakeSphere(6.f),Query))
   {
    SetActorLocation(Hit.Location+Hit.ImpactNormal*1.f);
-   if(Hit.ImpactNormal.Z>.45f && DropVelocity.Z<0)FinishDrop(Hit.ImpactPoint+Hit.ImpactNormal*14.f);
+   if(Hit.ImpactNormal.Z>.45f && DropVelocity.Z<0)FinishDrop(Hit.ImpactPoint+Hit.ImpactNormal*14.f+FVector::UpVector*(Item && Item->IsFieldResource() ? ResourceHoverHeight-14.f:0.f));
    else
    {
     bDropDeflected=true;DropVelocity=FMath::GetReflectionVector(DropVelocity,Hit.ImpactNormal)*.32f;
@@ -133,7 +143,7 @@ void ABBSBLootPickup::TickDrop(float DT)
  else if(bDropping && Age>3.f)
  {
   FHitResult Floor;FVector Goal=Rest;
-  if(GetWorld()->LineTraceSingleByObjectType(Floor,GetActorLocation()+FVector::UpVector*40,GetActorLocation()-FVector::UpVector*2000,BBSBCombatVisuals::GeometryTypes(),Query))Goal=Floor.ImpactPoint+Floor.ImpactNormal*14.f;
+  if(GetWorld()->LineTraceSingleByObjectType(Floor,GetActorLocation()+FVector::UpVector*40,GetActorLocation()-FVector::UpVector*2000,BBSBCombatVisuals::GeometryTypes(),Query))Goal=Floor.ImpactPoint+Floor.ImpactNormal*14.f+FVector::UpVector*(Item && Item->IsFieldResource() ? ResourceHoverHeight-14.f:0.f);
   FinishDrop(Goal);
  }
 }
@@ -150,9 +160,8 @@ void ABBSBLootPickup::BeginCollectionFlight(UBBSBHuntingComponent* Collector)
  PickupQuery->SetCollisionEnabled(ECollisionEnabled::NoCollision);RarityBeam->SetVisibility(false);
  if(IsValid(DropTrail))DropTrail->Finish();
  CollectionColor=BeamColor();CollectionDestination=Collector->CollectionMouth();
- if(ResourceGlowMID) { auto Glow=CollectionColor*ResourceGlowStrength;Glow.A=1;ResourceGlowMID->SetVectorParameterValue(TEXT("Color"),Glow); }
- else BBSBCombatVisuals::Tint(Visual,CollectionColor);
- if(auto* Material=TrailMaterial.LoadSynchronous())
+ if(!ResourceGlowMID)BBSBCombatVisuals::Tint(Visual,CollectionColor);
+ if(auto* Material=Item && Item->IsFieldResource() ? nullptr:TrailMaterial.LoadSynchronous())
  {
   CollectionTrail=NewObject<UBBSBBladeTrailComponent>(this,TEXT("LootCollectionTrail"));AddInstanceComponent(CollectionTrail);
   CollectionTrail->SetupAttachment(PickupQuery);CollectionTrail->SetAbsolute(true,true,true);CollectionTrail->SetWorldLocation(FlightFrom);
@@ -189,25 +198,30 @@ void ABBSBLootPickup::UpdateNameVisibility()
 void ABBSBLootPickup::Tick(float DT)
 {
  Super::Tick(DT);const double Now=GetWorld()->GetTimeSeconds();
+ const bool Resource=Item && Item->IsFieldResource();if(Resource)UpdateResourceFacing();
  if(bClaimed)
  {
   if(!CollectingWith.IsValid()) { Destroy();return; }
   if(bCollectionArrived)return;
-  const float T=FMath::Clamp(float((Now-FlightStartedAt)/FMath::Clamp(CollectionFlightSeconds,.15f,1.f)),0.f,1.f);
+  const float T=FMath::Clamp(float((Now-FlightStartedAt)/(Resource ? .22f:FMath::Clamp(CollectionFlightSeconds,.15f,1.f))),0.f,1.f);
   const FVector Before=GetActorLocation();CollectionDestination=CollectingWith->CollectionMouth();const FVector Axis=(CollectionDestination-FlightFrom).GetSafeNormal();FVector Right,Up;Axis.FindBestAxisVectors(Right,Up);
   const float Angle=T*3*PI,Radius=FMath::Sin(PI*T)*(1-T)*24;
-  SetActorLocation(FMath::Lerp(FlightFrom,CollectionDestination,T*T)+(Right*FMath::Cos(Angle)+Up*FMath::Sin(Angle))*Radius+FVector::UpVector*FMath::Sin(PI*T)*25);
+  SetActorLocation(Resource ? FMath::Lerp(FlightFrom,CollectionDestination,T*T*(3.f-2.f*T)):
+   FMath::Lerp(FlightFrom,CollectionDestination,T*T)+(Right*FMath::Cos(Angle)+Up*FMath::Sin(Angle))*Radius+FVector::UpVector*FMath::Sin(PI*T)*25);
   DropVelocity=(GetActorLocation()-Before)/FMath::Max(.0001f,DT);AddTrailSample();
-  Visual->SetRelativeScale3D(MeshScale*FMath::Max(.01f,1-T*.98f));Visual->AddLocalRotation(FRotator(0,DT*600,DT*220));
+  Visual->SetRelativeScale3D(MeshScale*FMath::Max(.01f,1-T*.98f));
+  if(ResourceGlowMID)ResourceGlowMID->SetScalarParameterValue(TEXT("Opacity"),1-T);
+  if(!Resource)Visual->AddLocalRotation(FRotator(0,DT*600,DT*220));
   if(T>=1.f) { bCollectionArrived=true;Visual->SetVisibility(false);if(IsValid(CollectionTrail))CollectionTrail->Finish();SetLifeSpan(.28f); }return;
  }
  if(bDropping)TickDrop(DT);
- Visual->SetRelativeLocation(FVector(0,0,FMath::Sin(Now*2.8+GetUniqueID())*3.f));Visual->AddLocalRotation(FRotator(0,DT*48,0));
+ Visual->SetRelativeLocation(FVector(0,0,FMath::Sin(Now*2.8+GetUniqueID())*3.f));
+ if(!Resource)Visual->AddLocalRotation(FRotator(0,DT*48,0));
  if(Item && Item->IsFieldResource())
  {
   RarityBeam->SetVisibility(false);bNameVisible=false;
   if(ResourceGlowMID)
-  { auto Glow=Item->Color*(ResourceGlowStrength*(bLargeResource ? 1.25f:1.f)*(.9f+.1f*FMath::Sin(Now*3.8+GetUniqueID())));Glow.A=1;ResourceGlowMID->SetVectorParameterValue(TEXT("Color"),Glow); }
+  { ResourceGlowMID->SetScalarParameterValue(TEXT("GlowStrength"),ResourceGlowStrength*(bLargeResource ? 1.15f:1.f)*(.95f+.05f*FMath::Sin(Now*3.8+GetUniqueID()))); }
   return;
  }
  RarityBeam->SetVisibility(Item && BeamMID && !bDropping && IsAvailable());
@@ -222,4 +236,14 @@ void ABBSBLootPickup::Tick(float DT)
   BeamMID->SetScalarParameterValue(TEXT("Opacity"),.52f+.1f*FMath::Sin(Now*2.2f+Grade));
  }
  UpdateNameVisibility();
+}
+
+void ABBSBLootPickup::UpdateResourceFacing()
+{
+ if(const auto* Camera=UGameplayStatics::GetPlayerCameraManager(this,0))
+ {
+  const FQuat View=Camera->GetCameraRotation().Quaternion();
+  // The engine plane's V axis points down the image. Face the camera with an upright glyph.
+  Visual->SetWorldRotation(FRotationMatrix::MakeFromXY(View.GetRightVector(),-View.GetUpVector()).ToQuat());
+ }
 }

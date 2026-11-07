@@ -23,7 +23,7 @@ void UBBSBInteractionComponent::RegisterInteractionCandidate(AActor* Actor)
 bool UBBSBInteractionComponent::IsQuickInteractable(AActor* A) const
 {
  if(!IsValid(A) || A==GetOwner() || A->IsHidden() || A->ActorHasTag(TEXT("BBSBIgnoreQuickInteraction")))return false;
- if(const auto* L=Cast<ABBSBLootPickup>(A))return L->IsAvailable();
+ if(const auto* L=Cast<ABBSBLootPickup>(A))return L->IsAvailable() && !L->Item->IsFieldResource();
  if(const auto* O=Cast<ABBSBCarryObject>(A);O && O->bBroken)return false;
  return A->Implements<UBBSBBunniarSurface>();
 }
@@ -43,30 +43,39 @@ bool UBBSBInteractionComponent::FindQuickInteraction(FHitResult& Out) const
 {
  Out=FHitResult();if(!Player || !Player->FieldActions || bDialogueActive || Player->Combat->bDead || Player->FieldActions->bEquipmentInputBlocked || Player->FieldActions->bEquipmentWheelOpen)return false;
  const auto* A=Player->FieldActions.Get();const bool Locked=Player->Combat->HasTargetLock();
- FVector Origin,Direction;if(Locked) { Origin=Player->GetActorLocation()+FVector(0,0,10);Direction=Player->GetActorForwardVector().GetSafeNormal2D(); }
- else if(!A->CursorAimRay(Origin,Direction))return false;
+ FVector Origin,Direction,TraceOrigin;
+ if(Locked) { Origin=TraceOrigin=Player->GetActorLocation()+FVector(0,0,10);Direction=Player->GetActorForwardVector().GetSafeNormal2D(); }
+ else
+ {
+  FVector TraceDirection;
+  if(!A->CursorAimRay(Origin,Direction) || !A->TargetingAimRay(TraceOrigin,TraceDirection))return false;
+ }
  const float Range=Locked ? FMath::Min(LockedFrontRange,A->WeaponReach):A->WeaponReach;
  FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBQuickInteraction),true,Player);
  Query.AddIgnoredActor(A->BunniarEquipment);
+ // Keep the original camera cone for F assistance, but remove candidates and
+ // occluders that are farther toward the camera than the player-side allowance.
+ for(const auto& Weak:InteractionCandidates)if(auto* Target=Weak.Get();Target && !A->IsAimPointDepthAllowed(Target->GetActorLocation()))Query.AddIgnoredActor(Target);
  // Projectile meshes have no visibility collision. They are never candidates.
  FHitResult Direct;
- if(!Locked && GetWorld()->LineTraceSingleByChannel(Direct,Origin,Origin+Direction*(Range+1500),ECC_Visibility,Query) && IsQuickInteractable(Direct.GetActor()) && FVector::DistSquared(Player->GetActorLocation(),Direct.ImpactPoint)<=FMath::Square(Range)) { Out=Direct;return true; }
+ if(!Locked && GetWorld()->LineTraceSingleByChannel(Direct,TraceOrigin,Origin+Direction*(Range+1500),ECC_Visibility,Query) && IsQuickInteractable(Direct.GetActor()) && A->IsAimPointDepthAllowed(Direct.GetActor()->GetActorLocation()) && A->IsAimPointDepthAllowed(Direct.ImpactPoint) && FVector::DistSquared(Player->GetActorLocation(),Direct.ImpactPoint)<=FMath::Square(Range)) { Out=Direct;return true; }
  float Best=MAX_flt;
  for(const auto& Weak:InteractionCandidates)
  {
-  auto* Target=Weak.Get();if(!IsQuickInteractable(Target))continue;
+  auto* Target=Weak.Get();if(!IsQuickInteractable(Target) || !A->IsAimPointDepthAllowed(Target->GetActorLocation()))continue;
   TArray<UPrimitiveComponent*> Parts;Target->GetComponents<UPrimitiveComponent>(Parts);
   for(auto* Part:Parts)
   {
    if(!Part->IsRegistered() || Part->GetCollisionEnabled()==ECollisionEnabled::NoCollision || Part->GetCollisionResponseToChannel(ECC_Visibility)!=ECR_Block)continue;
-   FVector Point=Part->Bounds.Origin;const FVector Delta=Point-Origin;const float Along=FVector::DotProduct(Delta,Direction);
+   FVector Point=Part->Bounds.Origin;if(!A->IsAimPointDepthAllowed(Point))continue;
+   const FVector Delta=Point-Origin;const float Along=FVector::DotProduct(Delta,Direction);
    if(Along<=0 || FVector::DistSquared(Point,Player->GetActorLocation())>FMath::Square(Range))continue;
    const float Perp=(Delta-Direction*Along).Size();const float Radius=FMath::Clamp(Part->Bounds.SphereRadius,12.f,120.f);
    const float Angle=FMath::RadiansToDegrees(FMath::Atan2(FMath::Max(0.f,Perp-Radius),Along));
    if(Angle>(Locked ? LockedFrontDegrees:QuickAimDegrees) || (!Locked && Perp>QuickAimRadius+Radius))continue;
    FHitResult Hit;
    // Never assist through cover. A separate ray to the candidate must actually hit it.
-   if(!GetWorld()->LineTraceSingleByChannel(Hit,Origin,Point,ECC_Visibility,Query) || Hit.GetActor()!=Target)continue;
+   if(!GetWorld()->LineTraceSingleByChannel(Hit,TraceOrigin,Point,ECC_Visibility,Query) || Hit.GetActor()!=Target || !A->IsAimPointDepthAllowed(Hit.ImpactPoint))continue;
    const float Score=Locked ? Along+Perp*.7f:Angle*100.f+Along*.015f;
    if(Score<Best) { Best=Score;Out=Hit; }
   }

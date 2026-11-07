@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Hunting/BBSBItem.h"
+#include "Hunting/BBSBResourceGain.h"
 #include "BBSBHunting.generated.h"
 
 class ABBSBCharacter;
@@ -50,6 +51,10 @@ public:
  UFUNCTION(BlueprintCallable,Category="Rewards") bool CollectEcstatic(int64 Amount,bool ChargeConcerto=true);
  UFUNCTION(BlueprintCallable,Category="Rewards") bool AddNotes(int64 Amount);
  UFUNCTION(BlueprintCallable,Category="Rewards") bool SpendNotes(int64 Amount);
+ UFUNCTION(BlueprintPure,Category="Rewards|Presentation") double DisplayedWeaponEcstatic(FGuid WeaponId) const;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Rewards|Presentation") int64 RecentNotesGain=0;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Rewards|Presentation") double LastNotesGainAt=-100;
+ UFUNCTION(BlueprintPure,Category="Rewards|Presentation") int32 ItemPickupNoticeCount() const { return Notices.Num(); }
  UFUNCTION(BlueprintCallable,Category="Rewards") int32 CollectLoot(ABBSBLootPickup* Loot) { return Collect(Loot); }
  UFUNCTION(BlueprintCallable,Category="Weapons|Growth") int64 AddWeaponEcstatic(FGuid WeaponId,int64 Amount);
  UFUNCTION(BlueprintPure,Category="Weapons|Growth") bool IsEcstasyWeapon(FGuid WeaponId) const;
@@ -66,9 +71,10 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Inventory") TArray<FBBSBInventoryEntry> Items;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Inventory",meta=(ClampMin="1",ClampMax="24")) int32 Columns=5;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Inventory",meta=(ClampMin="1",ClampMax="24")) int32 Rows=8;
- /** Equipment indices 0..9 are the wheel; 10 companion, 11 armor, 12 accessory. */
+ /** Weapon wheel slots 0..4; 10 companion add-on, 11 armor, 12 accessory. */
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Equipment") TArray<FBBSBInventoryEntry> EquippedItems;
- UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Equipment") int32 CompanionWheelSlot=0;
+ /** Legacy save field; Bunniar now switches independently through E. */
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Equipment") int32 CompanionWheelSlot=INDEX_NONE;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Equipment") bool bEquipmentLayoutPending=false;
  UFUNCTION(BlueprintCallable,Category="Equipment") bool PlaceOwnedItem(FGuid Id,int32 Destination);
  UFUNCTION(BlueprintPure,Category="Equipment") bool CanPlaceOwnedItem(FGuid Id,int32 Destination) const;
@@ -176,6 +182,7 @@ private:
  void TickResourcePickups();
  double NextResourceScanAt=0;
  FGuid LastExperienceWeapon;
+ TMap<FGuid,FBBSBResourceGain> ExperienceGains;
  bool ResolveVacuumAim(FVector& Point,FVector& Normal) const;
  bool LootVisible(const ABBSBLootPickup* Loot,const FVector& From) const;
  void UpdateVacuum(float DT);

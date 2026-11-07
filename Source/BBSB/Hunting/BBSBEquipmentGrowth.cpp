@@ -45,7 +45,7 @@ void UBBSBEquipmentGrowthComponent::LoadFromSave(const UBBSBHuntingSave* Save)
  if(const auto* D=ModuleDefinition(Save->AerialModule);D && D->Slot==EBBSBModuleSlot::Aerial)AerialModule=D->ModuleId;
  if(const auto* D=ModuleDefinition(Save->DirectionalModule);D && D->Slot==EBBSBModuleSlot::Directional)DirectionalModule=D->ModuleId;
  BunniarBagPositions=Save->BunniarBagPositions;EnsureBunniarBag();
- ConcertoCharge=FMath::Clamp(Save->ConcertoCharge,0.f,100.f);bPendingAerial=bPendingDirectional=bModuleChangePending=false;bStatsPending=true;
+ ConcertoCharge=FMath::Clamp(Save->ConcertoCharge,0.f,100.f);ConcertoGain.Reset(ConcertoCharge);bPendingAerial=bPendingDirectional=bModuleChangePending=false;bStatsPending=true;
 }
 void UBBSBEquipmentGrowthComponent::StoreInSave(UBBSBHuntingSave* Save) const
 { Save->OwnedModules=OwnedModules;Save->BunniarBagPositions=BunniarBagPositions;Save->AerialModule=AerialModule;Save->DirectionalModule=DirectionalModule;Save->ConcertoCharge=ConcertoCharge; }

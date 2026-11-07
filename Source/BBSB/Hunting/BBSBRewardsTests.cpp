@@ -33,7 +33,7 @@ bool FBBSBRewardSaveMigrationTest::RunTest(const FString&)
  if(!TestTrue(TEXT("Save the migrated schema"),Saved))return false;
  TStrongObjectPtr<UBBSBHuntingSave> New(Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(Slot,0)));
  if(!TestNotNull(TEXT("Deserialize the migrated SaveGame"),New.Get()))return false;
- TestEqual(TEXT("Version seven is written explicitly"),New->Version,7);
+ TestEqual(TEXT("Version eight is written explicitly"),New->Version,8);
  TestEqual(TEXT("Wallet is serialized exactly"),New->Notes,int64(1234));
  TestEqual(TEXT("Collected total is serialized exactly"),New->TotalEcstaticCollected,int64(4567));
  TStrongObjectPtr<UBBSBHuntingComponent> Fresh(NewObject<UBBSBHuntingComponent>());Fresh->SaveSlotName=Slot;Fresh->bPersistProgress=false;
