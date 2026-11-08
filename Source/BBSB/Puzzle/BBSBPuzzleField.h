@@ -94,6 +94,8 @@ public:
  virtual void BeginPlay() override;
  virtual void EndPlay(const EEndPlayReason::Type Reason) override;
  virtual void Tick(float DT) override;
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Field") FString FieldTitle=TEXT("BUNNIAR MEADOW");
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Field") bool bShowFieldProgress=true;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Field") FVector2D BoundaryRadii=FVector2D(7000,6400);
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Field") float ReturnHysteresis=.91f;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Field") bool bReturning=false;

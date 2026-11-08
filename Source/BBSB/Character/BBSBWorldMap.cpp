@@ -223,6 +223,7 @@ UBBSBWorldMapComponent::UBBSBWorldMapComponent()
 {
  PrimaryComponentTick.bCanEverTick=true;PrimaryComponentTick.TickGroup=TG_PostUpdateWork;
  TerrainMaps.Add(TEXT("CombatFieldTest"),TSoftObjectPtr<UBBSBTerrainMapData>(FSoftObjectPath(TEXT("/Game/BBSB/Maps/DA_TerrainMap_CombatFieldTest.DA_TerrainMap_CombatFieldTest"))));
+ TerrainMaps.Add(TEXT("Stage01_BunniarHalfStepCaravan"),TSoftObjectPtr<UBBSBTerrainMapData>(FSoftObjectPath(TEXT("/Game/BBSB/Maps/DA_TerrainMap_Stage01_BunniarHalfStepCaravan.DA_TerrainMap_Stage01_BunniarHalfStepCaravan"))));
 }
 void UBBSBWorldMapComponent::BeginPlay() { Super::BeginPlay();Player=Cast<ABBSBCharacter>(GetOwner()); }
 FVector2D UBBSBWorldMapComponent::WorldToMap(FVector P) const
@@ -253,8 +254,12 @@ void UBBSBWorldMapComponent::EnsurePresentation()
  if(!bMapConfigured)
  {
   bMapConfigured=true;
-  if(bUseTerrainMap)if(const auto* Profile=TerrainMaps.Find(FName(*UGameplayStatics::GetCurrentLevelName(this,true))))
-   if(auto* Data=Profile->LoadSynchronous();Data && Data->bEnabled && Data->Image && Data->WorldHalfExtent>=500 &&
+  const FString LevelName=UGameplayStatics::GetCurrentLevelName(this,true);
+  // A conventionally named bake makes new stages usable without editing the shared player Blueprint.
+  const FString AssetName=TEXT("DA_TerrainMap_")+LevelName;
+  const TSoftObjectPtr<UBBSBTerrainMapData> StageProfile(FSoftObjectPath(TEXT("/Game/BBSB/Maps/")+AssetName+TEXT(".")+AssetName));
+  if(bUseTerrainMap)
+   if(auto* Data=TerrainMaps.Contains(FName(*LevelName)) ? TerrainMaps.FindChecked(FName(*LevelName)).LoadSynchronous():StageProfile.LoadSynchronous();Data && Data->bEnabled && Data->Image && Data->WorldHalfExtent>=500 &&
     Data->SourceLevel.ToSoftObjectPath().GetLongPackageName()==UWorld::RemovePIEPrefix(GetWorld()->GetOutermost()->GetName()))
    { AppliedTerrainMap=Data;TerrainTexture=Data->Image;MapCenter=Data->WorldCenter;MapHalfExtent=Data->WorldHalfExtent;MinimapHalfExtent=Data->MinimapHalfExtent; }
  }
