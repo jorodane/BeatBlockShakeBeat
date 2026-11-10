@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
+#include "Components/ActorComponent.h"
 #include "Field/BBSBFieldGesture.h"
 #include "BBSBBunniarSurface.generated.h"
 
@@ -26,3 +27,17 @@ public:
  /** Direction is normalized screen space (right/down positive); seconds come from the real held channel. */
  UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Bunniar") void BunniarGesture(ABBSBBunniarCompanion* Bunniar,EBBSBFieldGesture Gesture,FVector2D Direction,float HeldSeconds);
 };
+
+/** Routes the physical prop's contact to its controller without moving the contact point. */
+UCLASS(ClassGroup=(BBSB),meta=(BlueprintSpawnableComponent))
+class BBSB_API UBBSBBunniarSurfaceBinding : public UActorComponent
+{
+ GENERATED_BODY()
+public:
+ UPROPERTY(Transient) TWeakObjectPtr<AActor> Handler;
+};
+namespace BBSBBunniarSurface
+{
+ BBSB_API AActor* Resolve(AActor* PhysicalActor);
+ BBSB_API void Bind(AActor* PhysicalActor,AActor* Handler);
+}

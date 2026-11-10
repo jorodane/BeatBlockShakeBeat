@@ -91,6 +91,7 @@ ABBSBBunniarCompanion::ABBSBBunniarCompanion()
 void ABBSBBunniarCompanion::Tick(float DT)
 {
  Super::Tick(DT);
+ if(bOpeningRest) { SetActorTransform(OpeningRestTransform);return; }
  if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Respawn && P->Respawn->IsSequenceActive())return;
  if(bRestOccluded) { SetActorHiddenInGame(false);bRestOccluded=false; }
  const float T=GetWorld()->GetTimeSeconds(); FVector Target=GetActorLocation();
@@ -189,7 +190,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
    if(!bSurfaceArrived && Transit>=1)
    {
     bSurfaceArrived=true;
-    if(AActor* SurfaceOwner=SurfaceComponent->GetOwner();SurfaceOwner && SurfaceOwner->Implements<UBBSBBunniarSurface>()) IBBSBBunniarSurface::Execute_BunniarArrived(SurfaceOwner,this);
+    if(AActor* SurfaceOwner=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner());SurfaceOwner) IBBSBBunniarSurface::Execute_BunniarArrived(SurfaceOwner,this);
    }
    return;
   }

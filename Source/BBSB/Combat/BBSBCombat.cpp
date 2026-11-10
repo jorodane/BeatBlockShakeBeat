@@ -185,7 +185,7 @@ void UBBSBCombatComponent::SetStageCameraLock(bool bLocked)
 bool UBBSBCombatComponent::IsStageLocked() const { return IsValid(Stage) && Stage->IsActive(); }
 bool UBBSBCombatComponent::BlocksMovement() const
 {
-	return bDead || (IsStageLocked() && ((bCombatStance && !Stage->IsCounterWindow()) || Stage->Phase==EBBSBStagePhase::Forming || Stage->Phase==EBBSBStagePhase::CountIn));
+	return bDead || bExternalRhythmGrab || (IsStageLocked() && ((bCombatStance && !Stage->IsCounterWindow()) || Stage->Phase==EBBSBStagePhase::Forming || Stage->Phase==EBBSBStagePhase::CountIn));
 }
 bool UBBSBCombatComponent::CanAttack() const
 {
@@ -193,7 +193,7 @@ bool UBBSBCombatComponent::CanAttack() const
 }
 bool UBBSBCombatComponent::CanDodge() const
 {
- return !bDead && (!IsStageLocked() || (Stage->Phase!=EBBSBStagePhase::Forming && Stage->Phase!=EBBSBStagePhase::CountIn));
+ return !bDead && !bExternalRhythmGrab && (!IsStageLocked() || (Stage->Phase!=EBBSBStagePhase::Forming && Stage->Phase!=EBBSBStagePhase::CountIn));
 }
 float UBBSBCombatComponent::DamageMultiplier() const
 {
@@ -215,7 +215,7 @@ void UBBSBCombatComponent::OnDodge()
 {
 	if (IsStageLocked()) { bCombatStance=false; Ecstatic=FMath::Max(0.f,Ecstatic-DodgeCost); }
 	ClearParry();
-	SetFeedback(TEXT("DODGE  |  free movement, attack to take stance"));
+	// Readiness is shown by the reticle cooldown ring. Preserve unrelated combat feedback.
 }
 
 void UBBSBCombatComponent::EnemyStruck(ABBSBInkEnemy* Enemy)
@@ -281,6 +281,7 @@ void UBBSBCombatComponent::TakeCombatDamage(float Damage,AActor* Causer,bool bIn
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth && P->EquipmentGrowth->IsConcertoInvulnerable())return;
  const auto* FieldShot=Cast<ABBSBInkProjectile>(Causer);
  if(FieldShot && FieldShot->bFieldProjectile && GetWorld()->GetTimeSeconds()<FieldDamageGraceUntil) return;
+ if(bExternalRhythmGrab && FieldShot && FieldShot->bFieldProjectile)return;
 	UBBSBFieldActionComponent* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>();
 	if (Actions && Actions->IsDodgeInvulnerable()) return;
  if(FieldShot && FieldShot->bFieldProjectile) FieldDamageGraceUntil=GetWorld()->GetTimeSeconds()+FMath::Max(0.f,FieldHitGraceSeconds);
@@ -320,6 +321,7 @@ void UBBSBCombatComponent::GetParryPlane(FVector& Origin,FVector& Normal,FVector
 
 void UBBSBCombatComponent::ParryDown(int32 Direction)
 {
+ if(bExternalRhythmGrab && !bDead && Direction>=0 && Direction<4) { Inputs[Direction].Down(GetWorld()->GetTimeSeconds());StartDefenseMotion(HeldParryMask());return; }
 	if (Direction<0 || Direction>3 || !IsStageLocked() || !bCombatStance || bDead || (Stage->Phase!=EBBSBStagePhase::Fighting && Stage->Phase!=EBBSBStagePhase::Replacing)) return;
 	const UBBSBFieldActionComponent* Actions=Character->FindComponentByClass<UBBSBFieldActionComponent>();
 	if (Actions && !Actions->IsConductorAvailable()) return;

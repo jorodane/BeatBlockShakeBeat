@@ -121,6 +121,9 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") FVector LastDefenseImpact=FVector::ZeroVector;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") bool bLastDefenseBlocked=false;
  UFUNCTION(BlueprintPure,Category="BBSB|Defense") uint8 HeldParryMask() const;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Defense") bool bExternalRhythmGrab=false;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Defense") bool ResolveGrabParry(int32 Mask,float ImpactAt,float Window=.18f);
+ UFUNCTION(BlueprintCallable,Category="BBSB|Defense") void SetExternalRhythmGrab(bool Active);
  UFUNCTION(BlueprintPure,Category="BBSB|Defense") bool IsDefenseMotionActive() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Defense") FVector DefenseTarget(int32 Direction) const;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Defense|Cues") bool bShowDefenseDirectionCues=true;
@@ -327,6 +330,7 @@ public:
  void TickHealthFeedback();
  /** Reversible free-field experiment. No formation, camera lock, or player relocation. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets") bool bFieldBulletHell=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") TObjectPtr<AActor> AimOccluder;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="100",Units="cm")) float FieldAggroRadius=1350.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin="100",Units="cm")) float FieldLoseAggroRadius=2300.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Field bullets",meta=(ClampMin=".1",Units="s")) float FieldLoseAggroSeconds=4.f;

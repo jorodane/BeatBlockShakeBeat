@@ -1,4 +1,5 @@
 #include "Character/BBSBTraversal.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Animation/BlendSpace.h"
@@ -45,6 +46,8 @@ void UBBSBTraversalComponent::BeginPlay()
 {
  Super::BeginPlay();Character=Cast<ABBSBCharacter>(GetOwner());
  if (!Character) return;
+ // Preserve authored timings while migrating the former default.
+ if(FMath::IsNearlyEqual(LadderStepSeconds,.34f))LadderStepSeconds=.25f;
  WireCharges=2;WireRechargeProgress=0;bWireOnRechargeSurface=bWireRechargeArmed=false;
  WireChargeReadyAt=FVector2D(-100.,-100.);
  if(FMath::IsNearlyEqual(SkyWireElevation,45.f) || FMath::IsNearlyEqual(SkyWireElevation,25.f)) SkyWireElevation=30.f;
@@ -76,6 +79,8 @@ bool UBBSBTraversalComponent::TryJump()
  if (!IsValid(Character)) return false;
  const auto* PC=Cast<APlayerController>(Character->GetController());
  if (!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || IsWireTraversalActive()) return false;
+ if(IsDashWallRecoveryActive())return false;
+ if(IsOnLadder())return JumpFromLadder();
  if(ParkourMode==EBBSBParkourMode::LedgeHang)
  {
   const FVector Input=Character->FieldActions ? Character->FieldActions->MovementDashDirection():-LedgeNormal;
@@ -257,6 +262,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
 {
  Super::TickComponent(DT,Type,Function);
  if (!IsValid(Character)) return;
+ if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())bLadderUpHeld=bLadderDownHeld=bLadderHopHeld=false;
  RestoreParkourRunExit();TickWallJumpMovement();auto* Move=Character->GetCharacterMovement();
  TickWireMovement(DT);TickWireRecharge(DT);UpdateWirePresentation();
  TickParkour(DT);

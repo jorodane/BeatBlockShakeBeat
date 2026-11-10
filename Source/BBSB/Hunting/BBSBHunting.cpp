@@ -1,4 +1,5 @@
 #include "Hunting/BBSBHunting.h"
+#include "Save/BBSBSession.h"
 #include "Hunting/BBSBLootPickup.h"
 #include "Hunting/BBSBLootBurst.h"
 #include "Hunting/BBSBInventoryWidget.h"
@@ -51,7 +52,7 @@ void UBBSBHuntingComponent::TickComponent(float DT,ELevelTick Type,FActorCompone
  {
   bHuntingInitialized=true;LoadedDefaultLoot=DefaultLootTable.LoadSynchronous();
   if(Player->EquipmentGrowth)Player->EquipmentGrowth->EnsureInitialized();
-  const bool Loaded=bPersistProgress && LoadProgress();
+  const bool Loaded=bPersistProgress && !UBBSBSessionSubsystem::Owns(GetWorld()) && LoadProgress();
   if(!Loaded && Player->EquipmentGrowth)Player->EquipmentGrowth->InitializeProfile(true);
   if(!bEquipmentInitialized)InitializeEquipment();
   for(TActorIterator<ABBSBLootPickup> It(GetWorld());It;++It)RegisterLoot(*It);
@@ -212,6 +213,8 @@ void UBBSBHuntingComponent::ProgressChanged()
 void UBBSBHuntingComponent::ShowPickup(UBBSBItemDefinition* Item,int32 Quantity)
 {
  if(!Item || Item->IsFieldResource())return;
+ if((Item->bImportantForAutoSave || Item->EquipmentKind==EBBSBItemEquipmentKind::Weapon || Item->Rarity>=EBBSBItemRarity::Rare) && UBBSBSessionSubsystem::Owns(GetWorld()))
+  UBBSBSessionSubsystem::Get(GetWorld())->RequestAutoSave(TEXT("중요한 물건 획득"));
  const double Now=GetWorld()->GetTimeSeconds();
  for(auto& Notice:Notices)if(Notice.Item==Item && Now-Notice.At<1.) { Notice.Quantity+=Quantity;Notice.At=Now;return; }
  FBBSBPickupNotice Notice;Notice.Item=Item;Notice.Quantity=Quantity;Notice.At=Now;Notices.Add(Notice);
@@ -219,7 +222,15 @@ void UBBSBHuntingComponent::ShowPickup(UBBSBItemDefinition* Item,int32 Quantity)
 }
 bool UBBSBHuntingComponent::SaveProgress()
 {
+ if(UBBSBSessionSubsystem::Owns(GetWorld())) { bDirtyProgress=false;UBBSBSessionSubsystem::Get(GetWorld())->MarkChanged();return true; }
  if(!bPersistProgress || bSaveLoadFailed || SaveSlotName.IsEmpty())return false;
+ auto* Save=CaptureProfile();
+ const bool Saved=UGameplayStatics::SaveGameToSlot(Save,SaveSlotName,0);
+ if(Saved)bDirtyProgress=false;else SaveAt=GetWorld()->GetRealTimeSeconds()+3.;
+ return Saved;
+}
+UBBSBHuntingSave* UBBSBHuntingComponent::CaptureProfile() const
+{
  auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::CreateSaveGameObject(UBBSBHuntingSave::StaticClass()));
  Save->Version=8;Save->InventoryRows=Rows;Save->Level=Level;Save->Experience=Experience;Save->Items=Items;Save->EquippedItems=EquippedItems;Save->CompanionWheelSlot=CompanionWheelSlot;
  Save->Notes=Notes;Save->TotalEcstaticCollected=TotalEcstaticCollected;
@@ -230,14 +241,17 @@ bool UBBSBHuntingComponent::SaveProgress()
   if(Player->EquipmentGrowth)Player->EquipmentGrowth->StoreInSave(Save);
   if(Player->Respawn)Player->Respawn->StoreTravel(Save);
  }
- const bool Saved=UGameplayStatics::SaveGameToSlot(Save,SaveSlotName,0);
- if(Saved)bDirtyProgress=false;else SaveAt=GetWorld()->GetRealTimeSeconds()+3.;
- return Saved;
+ return Save;
 }
 bool UBBSBHuntingComponent::LoadProgress()
 {
  if(SaveSlotName.IsEmpty() || !UGameplayStatics::DoesSaveGameExist(SaveSlotName,0))return false;
  bSaveLoadFailed=true;auto* Save=Cast<UBBSBHuntingSave>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));
+ return ApplyProfile(Save);
+}
+bool UBBSBHuntingComponent::ApplyProfile(UBBSBHuntingSave* Save)
+{
+ bSaveLoadFailed=true;
  if(!Save || Save->Version<1 || Save->Version>8 || Save->Notes<0 || Save->TotalEcstaticCollected<0)return false;
  const int32 PreviousRows=Rows,OldWheel=CompanionWheelSlot;
  if(Save->Version>=5)Rows=FMath::Clamp(Save->InventoryRows,8,24);

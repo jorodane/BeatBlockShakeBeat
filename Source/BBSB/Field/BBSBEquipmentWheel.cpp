@@ -76,6 +76,7 @@ bool UBBSBFieldActionComponent::IsEquipmentActionBusy() const
 
 bool UBBSBFieldActionComponent::RequestEquipment(int32 Id)
 {
+ if(bTutorialEquipmentGate && Id>0 && !TutorialWeaponInstance.IsValid())return false;
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && P->Traversal->IsWireTraversalActive()) return false;
  EnsureBunniarEquipment();
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
@@ -100,6 +101,7 @@ bool UBBSBFieldActionComponent::RequestEquipment(int32 Id)
 
 bool UBBSBFieldActionComponent::RequestWeaponInstance(FGuid Id)
 {
+ if(bTutorialEquipmentGate && Id!=TutorialWeaponInstance)return false;
  const auto* H=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;
  const auto* E=H ? H->FindOwnedEntry(Id):nullptr;
  const auto* P=Cast<ABBSBCharacter>(Character);

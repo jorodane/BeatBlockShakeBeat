@@ -8,6 +8,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
+#include "Stage01/BBSBStage01.h"
 
 UAnimSequence* UBBSBBunniarAnimationSet::Clip(int32 Index) const
 {
@@ -87,6 +88,8 @@ void UBBSBBunniarAnimInstance::NativeUpdateAnimation(float DT)
   if(Buddy->bGliding && Reparado && Reparado->Traversal && Reparado->Traversal->bGlideDashing) Motion=EBBSBBunniarMotion::AirDash;
   if(Buddy->bRescueFlying)Motion=EBBSBBunniarMotion::Gliding;
  }
+ else if(const auto* Singer=Cast<ABBSBStage01Singer>(GetOwningActor()))Motion=Singer->bSongAttached ? EBBSBBunniarMotion::Attached:EBBSBBunniarMotion::Idle;
+ else if(const auto* Carried=Cast<ABBSBStage01CarrySinger>(GetOwningActor()))Motion=Carried->Singer && Carried->Singer->bSongAttached ? EBBSBBunniarMotion::Attached:EBBSBBunniarMotion::Idle;
  else if (const auto* Performer=Cast<ABBSBCaravanPerformer>(GetOwningActor())) Motion=Performer->bDefeated ? EBBSBBunniarMotion::Idle:EBBSBBunniarMotion::Equipped;
 }
 FAnimInstanceProxy* UBBSBBunniarAnimInstance::CreateAnimInstanceProxy() { return new FBunniarPoseProxy(this); }

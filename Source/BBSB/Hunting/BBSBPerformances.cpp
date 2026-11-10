@@ -87,7 +87,7 @@ void UBBSBEquipmentGrowthComponent::TickStatuses(float DT)
 bool UBBSBEquipmentGrowthComponent::TryConcerto()
 {
  EnsureInitialized();
- if(!Player || !bProfileReady || bConcertoActive || Player->Combat->bDead || Player->Interaction->bDialogueActive || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive() || Player->FieldActions->bEquipmentInputBlocked)return false;
+ if(!Player || !bProfileReady || bConcertoActive || Player->Combat->bDead || Player->Combat->bExternalRhythmGrab || Player->Interaction->bDialogueActive || Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive() || Player->FieldActions->bEquipmentInputBlocked)return false;
  if(ConcertoCharge<100.f) { Feedback=FString::Printf(TEXT("협주곡 %.0f%%"),ConcertoCharge);return false; }
  FGuid Main=Player->FieldActions->EquippedWeaponInstance;
  if(!Player->FieldActions->EquipmentWheelInstances.Contains(Main))Main=Player->FieldActions->LastCombatWeaponInstance;
@@ -265,7 +265,7 @@ void UBBSBEquipmentGrowthComponent::DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) con
 {
  if(!HUD || !Canvas || !Player || Player->Hunting->bInventoryOpen || Player->Interaction->bDialogueActive)return;
  const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.5f),R=40*S;
- const FVector2D Centre(Canvas->SizeX*.5f,Canvas->SizeY-R-32*S);
+ const FVector2D Centre(Canvas->SizeX*.5f,Canvas->SizeY-R-49*S);
  const FLinearColor Ink(.10f,.075f,.13f,.94f),Paper(.97f,.92f,.86f),Gold(1.f,.76f,.30f),Track(.38f,.33f,.42f,.95f);
  const float Value=FMath::Clamp(bConcertoActive ? 1-ConcertoProgress():ConcertoCharge/100.f,0.f,1.f);
  const bool Ready=ConcertoCharge>=100.f && !bConcertoActive;
@@ -291,15 +291,17 @@ void UBBSBEquipmentGrowthComponent::DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) con
   FCanvasTextItem Item(At,FText::FromString(Value),GEngine->GetMediumFont(),Color);
   Item.Scale=FVector2D(Scale*S);Item.bCentreX=Item.bCentreY=true;Item.bOutlined=true;Item.OutlineColor=Ink;Canvas->DrawItem(Item);
  };
- if(Ready)
- {
-  BBSBItemIcon::DrawCanvas(HUD,Canvas,nullptr,TEXT("Concerto"),Centre,19*S,1,S*1.3f,Gold);
-  const FVector2D KeyAt=Centre-FVector2D(0,R);
-  HUD->DrawRect(Ink,KeyAt.X-17*S,KeyAt.Y-9*S,34*S,18*S);
-  Text(TEXT("[Q]"),KeyAt,.85f,Gold);
- }
- else Text(FString::Printf(TEXT("%d%%"),bConcertoActive ? FMath::CeilToInt(Value*100):FMath::FloorToInt(Value*100)),Centre,1.65f,Paper);
- if(bConcertoActive)Text(FString::Printf(TEXT("탄막 소거 %d"),BulletsCleared-ConcertoClearStart),Centre+FVector2D(0,R+14*S),.72f,Gold);
+ BBSBItemIcon::DrawCanvas(HUD,Canvas,nullptr,TEXT("Concerto"),Centre+FVector2D(0,Ready ? 0:-10*S),(Ready ? 21:13)*S,1,S,Ready ? Gold:Paper);
+ if(!Ready)Text(FString::Printf(TEXT("%d%%"),bConcertoActive ? FMath::CeilToInt(Value*100):FMath::FloorToInt(Value*100)),Centre+FVector2D(0,14*S),1.05f,Paper);
+ const FVector2D KeyAt=Centre-FVector2D(0,R);
+ HUD->DrawRect(Ink,KeyAt.X-17*S,KeyAt.Y-9*S,34*S,18*S);Text(TEXT("[Q]"),KeyAt,.85f,Ready ? Gold:Paper*.75f);
+ FGuid Main=bConcertoActive ? ConcertoMainWeapon:Player->FieldActions->EquippedWeaponInstance;
+ if(!Player->FieldActions->EquipmentWheelInstances.Contains(Main))Main=Player->FieldActions->LastCombatWeaponInstance;
+ const auto Weapon=WeaponSnapshot(Main);
+ const FString Name=Weapon.Definition ? Weapon.Definition->DisplayName.ToString()+TEXT(" 협주곡"):TEXT("협주곡");
+ FCanvasTextItem Caption(Centre+FVector2D(0,R+14*S),FText::FromString(Name),BBSBHUDTypography::NumberFont(12*S),Paper);
+ Caption.bCentreX=Caption.bCentreY=true;Caption.bOutlined=true;Caption.OutlineColor=Ink;Canvas->DrawItem(Caption);
+ if(bConcertoActive)Text(FString::Printf(TEXT("탄막 소거 %d"),BulletsCleared-ConcertoClearStart),Centre+FVector2D(0,R+32*S),.72f,Gold);
  // Currency is anchored above the concerto HUD, independent of equipment rotation.
  const auto* Hunting=Player->Hunting.Get();const double Age=GetWorld()->GetTimeSeconds()-Hunting->LastNotesGainAt;
  const float Pulse=1.f+.18f*FMath::Square(1.f-FMath::Clamp(float(Age/.34),0.f,1.f));

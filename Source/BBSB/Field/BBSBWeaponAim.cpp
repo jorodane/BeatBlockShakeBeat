@@ -1,4 +1,6 @@
 #include "BBSBFieldActions.h"
+#include "BBSBCharacter.h"
+#include "Field/BBSBRepairTool.h"
 #include "Combat/BBSBCombat.h"
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -9,6 +11,7 @@
 
 bool UBBSBFieldActionComponent::RequiresMouseGesture(int32 Channel) const
 {
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->RepairTool && P->RepairTool->IsRepairToolEquipped())return false;
  if (InteractionEquipment()) return false;
  return PrototypeWeapon==EBBSBPrototypeWeapon::Legacy || PrototypeWeapon==EBBSBPrototypeWeapon::Greatsword
   || PrototypeWeapon==EBBSBPrototypeWeapon::Spear || (PrototypeWeapon==EBBSBPrototypeWeapon::Hammer && Channel==1);

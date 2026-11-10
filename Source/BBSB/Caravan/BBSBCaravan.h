@@ -79,6 +79,10 @@ public:
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<ABBSBCaravanStage> Director;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) TObjectPtr<ABBSBBunniarDevice> AttachedDevice;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) bool bFollowing=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly) bool bOpeningRest=false;
+ UPROPERTY(Transient) FTransform OpeningRestTransform;
+ UFUNCTION(BlueprintCallable) void BeginOpeningRest(FTransform Pose);
+ UFUNCTION(BlueprintCallable) void EndOpeningRest();
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) bool bEquipped=false;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float ReturnTravelSeconds=.40f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float EquipmentTravelSeconds=.32f;
@@ -114,6 +118,7 @@ public:
  bool BeginWireAirAnchor(const FVector& Point);
  bool HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool bInitialPress);
  void HandleSurfaceDrag(FVector2D Delta);
+ void RetargetAttachedSurface(UPrimitiveComponent* Component);
 private:
  FTransform SurfaceLocalFrame;
  FTransform SurfaceTransitFrom;

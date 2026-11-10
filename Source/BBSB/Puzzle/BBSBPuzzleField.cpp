@@ -1,4 +1,5 @@
 #include "Puzzle/BBSBPuzzleField.h"
+#include "Interaction/BBSBDragMotion.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
 #include "Interaction/BBSBInteraction.h"
@@ -179,7 +180,7 @@ void ABBSBPuzzleStation::BunniarDragged_Implementation(ABBSBBunniarCompanion* Bu
  {
   FVector Position=Payload->GetComponentLocation()+(CarryRight*Delta.X-CarryUp*Delta.Y)*1.2f;
   FVector Local=GetActorTransform().InverseTransformPosition(Position);Local.X=FMath::Clamp(Local.X,-150.,300.);Local.Y=FMath::Clamp(Local.Y,-300.,350.);Local.Z=FMath::Clamp(Local.Z,55.,360.);
-  Payload->SetWorldLocation(GetActorTransform().TransformPosition(Local),true);
+  BBSBDragMotion::Move(Payload,GetActorTransform().TransformPosition(Local));
   return;
  }
  if (!bHoldSeen) return;
@@ -309,12 +310,19 @@ void ABBSBPuzzleStation::Tick(float DT)
  float Target=bSolved ? 1.f:0.f;
  if (Kind==EBBSBPuzzleKind::HoldGate) Target=bHeld && bHoldSeen ? FMath::Clamp(float(Now-HeldAt)/1.25f,0.f,1.f):0.f;
  if (Kind==EBBSBPuzzleKind::HoldLift || Kind==EBBSBPuzzleKind::Ladder || Kind==EBBSBPuzzleKind::Lever) Target=Progress;
- OutputAlpha=FMath::FInterpTo(OutputAlpha,Target,DT,4.f);
- if (Kind==EBBSBPuzzleKind::Ladder) Output->SetRelativeLocation(OutputHome-FVector(0,0,200*OutputAlpha));
+ const float BeforeAlpha=OutputAlpha;OutputAlpha=FMath::FInterpTo(OutputAlpha,Target,DT,4.f);
+ FVector Goal=OutputHome;
+ if (Kind==EBBSBPuzzleKind::Ladder) Goal-=FVector(0,0,200*OutputAlpha);
  else if (Kind==EBBSBPuzzleKind::Lever) Output->SetRelativeRotation(FRotator(OutputAlpha*65,0,0));
- else if (Kind==EBBSBPuzzleKind::HoldLift) Output->SetRelativeLocation(OutputHome+FVector(0,0,250*OutputAlpha));
- else if (Kind==EBBSBPuzzleKind::DivePendulum && !bSolved) Output->SetRelativeLocation(OutputHome+FVector(0,140*FMath::Sin((Now-HeldAt)*PI),0));
- else Output->SetRelativeLocation(OutputHome+FVector(0,0,280*OutputAlpha));
+ else if (Kind==EBBSBPuzzleKind::HoldLift) Goal+=FVector(0,0,250*OutputAlpha);
+ else if (Kind==EBBSBPuzzleKind::DivePendulum && !bSolved) Goal+=FVector(0,140*FMath::Sin((Now-HeldAt)*PI),0);
+ else Goal+=FVector(0,0,280*OutputAlpha);
+ if(Kind!=EBBSBPuzzleKind::Lever)
+ {
+  const FVector WorldGoal=Output->GetAttachParent() ? Output->GetAttachParent()->GetComponentTransform().TransformPosition(Goal):Goal;
+  const float Allowed=BBSBDragMotion::Move(Output,WorldGoal);
+  if(Allowed<.9999f) { OutputAlpha=FMath::Lerp(BeforeAlpha,OutputAlpha,Allowed);if(Kind==EBBSBPuzzleKind::Ladder || Kind==EBBSBPuzzleKind::HoldLift)Progress=OutputAlpha; }
+ }
  if (bFlight)
  {
   const float T=FMath::Clamp(float((Now-FlightAt)/1.0),0.f,1.f);FVector Position=FMath::Lerp(FlightFrom,FlightTo,T);Position.Z+=FMath::Sin(T*PI)*180;
@@ -421,7 +429,6 @@ void ABBSBPuzzleFieldHUD::DrawHUD()
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.3f),W=Canvas->ClipX,H=Canvas->ClipY,CX=W*.5f,CY=H*.5f;
  const FLinearColor Ink(.94f,.90f,.78f),Green(.57f,.85f,.66f),Rose(.95f,.58f,.65f),Paper(.13f,.17f,.16f,.85f);
  if(Field->bShowFieldProgress) DrawText(FString::Printf(TEXT("%s   %d / %d"),*Field->FieldTitle,Field->SolvedCount,Field->Stations.Num()),Ink,26*S,102*S,GEngine->GetSmallFont(),S);
- DrawText(TEXT("WASD Run   Shift Dash   Space Jump / Glide   E Equipment   F Interact   Q Concerto   Tab Inventory   M Map"),Ink,26*S,H-34*S,GEngine->GetSmallFont(),S);
  if(Field->bReturning) { DrawRect(Paper,CX-230*S,105*S,460*S,42*S);DrawText(TEXT("Move along the edge or turn back."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
  if(auto* Station=Field->Focus.Get())
  {

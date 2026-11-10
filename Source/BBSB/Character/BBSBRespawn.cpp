@@ -82,7 +82,7 @@ FTransform ABBSBRespawnPoint::LandingTransform(const ABBSBCharacter* Player) con
  return FTransform(FRotator(0,LandingPoint->GetComponentRotation().Yaw,0),Position+FVector::UpVector*(HalfHeight+3));
 }
 bool ABBSBRespawnPoint::ActivateFor(ABBSBCharacter* Player)
-{ return Player && Player->Respawn && Player->Respawn->SetCheckpoint(this); }
+{ const bool Accepted=bTravelAvailable && Player && Player->Respawn && Player->Respawn->SetCheckpoint(this);if(Accepted)OnActivated.Broadcast(Player);return Accepted; }
 FText ABBSBRespawnPoint::BunniarInteractionText_Implementation() const
 { return FText::FromString(IsActivePoint() ? TEXT("현재 리스폰 지점"):TEXT("리스폰 지점으로 설정")); }
 FString ABBSBRespawnPoint::TravelId() const
@@ -141,6 +141,7 @@ UBBSBRespawnComponent::UBBSBRespawnComponent()
  DeathAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(TEXT("/Game/BBSB/AnimationAuthoring/Character/A_Player_Death.A_Player_Death")));
  CarryAnimation=TSoftObjectPtr<UAnimSequence>(FSoftObjectPath(TEXT("/Game/BBSB/AnimationAuthoring/Character/A_Player_Fall_Loop.A_Player_Fall_Loop")));
  PromptClass=UBBSBRespawnWidget::StaticClass();
+ TravelFadeLibrary=TSoftObjectPtr<UBBSBViewOcclusionMaterials>(FSoftObjectPath(TEXT("/Game/BBSB/Visibility/DA_ViewOcclusion.DA_ViewOcclusion")));
 }
 void UBBSBRespawnComponent::BeginPlay() { Super::BeginPlay();Player=Cast<ABBSBCharacter>(GetOwner()); }
 bool UBBSBRespawnComponent::SetCheckpoint(ABBSBRespawnPoint* Point)
@@ -156,13 +157,15 @@ bool UBBSBRespawnComponent::TryActivateFromAim()
  return false;
 }
 FTransform UBBSBRespawnComponent::RespawnTransform() const
-{ return IsValid(ActivePoint) ? ActivePoint->LandingTransform(Player):InitialSpawn; }
+{ return IsValid(ActivePoint) && ActivePoint->bTravelAvailable ? ActivePoint->LandingTransform(Player):InitialSpawn; }
 bool UBBSBRespawnComponent::IsDamageProtected() const
 { return IsSequenceActive() || (GetWorld() && GetWorld()->GetTimeSeconds()<ProtectedUntil); }
 void UBBSBRespawnComponent::SavePresentation()
 {
  auto* Mesh=Player->GetMesh();SavedAnimationMode=uint8(Mesh->GetAnimationMode());SavedAnimClass=Mesh->GetAnimClass();bOriginalPostProcess=Mesh->GetDisablePostProcessBlueprint();
- bOriginalEquipmentBlock=Player->FieldActions->bEquipmentInputBlocked;SavedGravityScale=Player->GetCharacterMovement()->GravityScale;
+ bOriginalEquipmentBlock=Player->FieldActions->bEquipmentInputBlocked;
+ // Travel ends in normal locomotion, never with the temporary zero gravity of glide or an air attack.
+ SavedGravityScale=Player->Traversal ? Player->Traversal->BaseGravityScale:Player->GetCharacterMovement()->GravityScale;
  if(auto* Boom=Player->GetCameraBoom()) { bSavedCameraLag=true;bOriginalCameraLag=Boom->bEnableCameraLag;bOriginalCameraRotationLag=Boom->bEnableCameraRotationLag;Boom->bEnableCameraLag=Boom->bEnableCameraRotationLag=false; }
  if(auto* PC=Cast<APlayerController>(Player->GetController()))
  { bOriginalCursor=PC->bShowMouseCursor;PC->SetIgnoreMoveInput(true);PC->SetIgnoreLookInput(true);bOwnMoveLock=bOwnLookLock=true;PC->RotationInput=FRotator::ZeroRotator;
@@ -259,6 +262,7 @@ void UBBSBRespawnComponent::BeginCarryPose()
 }
 bool UBBSBRespawnComponent::RequestFastTravel(ABBSBRespawnPoint* Point)
 {
+ if(!IsValid(Point) || !Point->bTravelAvailable)return false;
  if(!Player || !Player->IsLocallyControlled() || IsSequenceActive() || Player->Combat->bDead || !IsPointDiscovered(Point) ||
     Player->Combat->IsStageLocked() || Player->Interaction->bDialogueActive || Player->EquipmentGrowth->bConcertoActive ||
     Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive() || Player->FieldActions->IsGestureCaptured() || Player->FieldActions->IsDodging() ||
@@ -277,21 +281,13 @@ bool UBBSBRespawnComponent::PrepareTravel(const FTransform& Target,bool FromDeat
  Player->Combat->ReleaseTargetLock();Player->Traversal->CancelWireRecall();Player->Traversal->DropParkour();Player->Traversal->EndGlide();Player->Traversal->EndAirWeaponHang();Player->StopJumping();
  auto* Actions=Player->FieldActions.Get();
  if(!FromDeath) { TArray<AActor*> Gear;Actions->FreezeDeathEquipment(Gear);for(auto* Visual:Gear) { HiddenTravelWeapons.Add(Visual);Visual->SetActorHiddenInGame(true); } }
+ else for(const auto& Drop:Drops)if(auto* Visual=Drop.Actor.Get()) { HiddenTravelWeapons.Add(Visual);Visual->SetActorHiddenInGame(true); }
  Actions->InterruptAction(EBBSBActionState::Dead,100000.f);Actions->bEquipmentInputBlocked=true;
  Buddy=Cast<ABBSBBunniarCompanion>(Actions->BunniarEquipment);if(Buddy) { Buddy->ReleaseSurface();Buddy->bRescueFlying=true;Buddy->SetActorHiddenInGame(false);BuddyPickupFrom=Buddy->GetActorLocation(); }
  Player->GetCharacterMovement()->StopMovementImmediately();Player->GetCharacterMovement()->DisableMovement();Player->ConsumeMovementInputVector();Player->SetActorEnableCollision(false);
- // Lift above the complete route before crossing it. Sample geometry, not enemies or effects.
- const FVector From=TravelFrom.GetLocation(),To=Target.GetLocation();CruiseHeight=FMath::Max(From.Z,To.Z)+FMath::Max(100.f,DeliveryHeight);
- FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBRescueFlight),false,Player);Query.AddIgnoredActor(Buddy);
- for(TActorIterator<ABBSBRespawnPoint> It(GetWorld());It;++It)Query.AddIgnoredActor(*It);
- const int32 Samples=FMath::Clamp(FMath::CeilToInt(FVector::Dist2D(From,To)/150.f),1,140);
- for(int32 I=0;I<=Samples;++I)
- {
-  const FVector XY=FMath::Lerp(From,To,float(I)/Samples);FHitResult Hit;
-  if(GetWorld()->SweepSingleByObjectType(Hit,FVector(XY.X,XY.Y,12000),FVector(XY.X,XY.Y,FMath::Min(From.Z,To.Z)-500),FQuat::Identity,BBSBCombatVisuals::GeometryTypes(),FCollisionShape::MakeSphere(55.f),Query))
-   CruiseHeight=FMath::Max(CruiseHeight,float(Hit.ImpactPoint.Z+Player->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+DeliveryHeight));
- }
- FlightSeconds=FMath::Max(1.f,FVector::Dist2D(From,To)/FMath::Max(300.f,CarrySpeed));
+ // Both ends are short local vertical motions. No route flight or map-wide geometry scan.
+ TravelDepartureLift=ClearLiftHeight(TravelFrom.GetLocation());TravelArrivalLift=ClearLiftHeight(Target.GetLocation());
+ bTravelRelocated=false;BeginTravelFade();
  if(Prompt) { Prompt->RemoveFromParent();Prompt=nullptr; }
  Phase=EBBSBRespawnPhase::Returning;StartedAt=GetWorld()->GetTimeSeconds();BeginCarryPose();
  if(auto* PC=Cast<APlayerController>(Player->GetController())) { PC->bShowMouseCursor=false;PC->SetInputMode(FInputModeGameOnly()); }
@@ -323,6 +319,7 @@ void UBBSBRespawnComponent::ReleaseInput()
 void UBBSBRespawnComponent::FinishRespawn()
 {
  Player->SetActorLocationAndRotation(ReturnTarget.GetLocation(),ReturnTarget.Rotator(),false,nullptr,ETeleportType::TeleportPhysics);Player->SetActorEnableCollision(true);
+ RestoreTravelFade();bTravelRelocated=false;
  bCarryingPlayer=false;CarryBlend=0;RestoreAnimation();if(bTravelFromDeath)Player->Combat->RestoreAfterRespawn();
  for(AActor* Visual:HiddenTravelWeapons)if(IsValid(Visual))Visual->SetActorHiddenInGame(false);HiddenTravelWeapons.Reset();
  Player->FieldActions->RestoreDeathEquipment();Player->FieldActions->bEquipmentInputBlocked=bOriginalEquipmentBlock;
@@ -334,11 +331,12 @@ void UBBSBRespawnComponent::FinishRespawn()
 }
 void UBBSBRespawnComponent::ResetPresentation()
 {
+ RestoreTravelFade();bTravelRelocated=false;
  if(!IsSequenceActive())return;
  if(Prompt) { Prompt->RemoveFromParent();Prompt=nullptr; }
  bCarryingPlayer=false;CarryBlend=0;RestoreAnimation();if(Buddy)Buddy->bRescueFlying=false;
  for(AActor* Visual:HiddenTravelWeapons)if(IsValid(Visual))Visual->SetActorHiddenInGame(false);HiddenTravelWeapons.Reset();
- if(Player) { Player->SetActorEnableCollision(true);Player->FieldActions->RestoreDeathEquipment();Player->FieldActions->bEquipmentInputBlocked=bOriginalEquipmentBlock;Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling); }
+ if(Player) { Player->SetActorEnableCollision(true);Player->FieldActions->RestoreDeathEquipment();Player->FieldActions->bEquipmentInputBlocked=bOriginalEquipmentBlock;Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling);Player->GetCharacterMovement()->GravityScale=SavedGravityScale; }
  Drops.Reset();Phase=EBBSBRespawnPhase::Alive;ReleaseInput();
 }
 void UBBSBRespawnComponent::ApplyCamera(float DT,FMinimalViewInfo& View) const
@@ -380,17 +378,27 @@ void UBBSBRespawnComponent::TickComponent(float DT,ELevelTick Type,FActorCompone
  const float Age=GetWorld()->GetTimeSeconds()-StartedAt;
  if(Phase==EBBSBRespawnPhase::Returning)
  {
-  constexpr float Pickup=.8f,Lift=1.f,Land=1.2f;
-  const float Arrival=Pickup+Lift+FlightSeconds,End=Arrival+Land;
-  CarryBlend=FMath::SmoothStep(0.f,Pickup,Age)*(1.f-FMath::SmoothStep(End-.35f,End,Age));
-  const FVector From=TravelFrom.GetLocation(),To=ReturnTarget.GetLocation();FVector Position=From;
-  if(Age>=Arrival)Position=FMath::Lerp(FVector(To.X,To.Y,CruiseHeight),To,FMath::SmoothStep(Arrival,End,Age));
-  else if(Age>=Pickup+Lift)Position=FMath::Lerp(FVector(From.X,From.Y,CruiseHeight),FVector(To.X,To.Y,CruiseHeight),FMath::SmoothStep(Pickup+Lift,Arrival,Age));
-  else Position.Z=FMath::Lerp(float(From.Z),CruiseHeight,FMath::SmoothStep(Pickup,Pickup+Lift,Age));
-  const FVector Direction=(To-From).GetSafeNormal2D();const FQuat Facing=(Direction.IsNearlyZero() ? ReturnTarget.Rotator():Direction.Rotation()).Quaternion();
-  FQuat Rotation=FQuat::Slerp(TravelFrom.GetRotation(),Facing,FMath::SmoothStep(0.f,Pickup+Lift,Age));
-  if(Age>Arrival)Rotation=FQuat::Slerp(Facing,ReturnTarget.GetRotation(),FMath::SmoothStep(Arrival,End,Age));
-  Player->SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);TickBuddy(Age,true);
+  const float End=FMath::Max(1.5f,ReturnSeconds),Departure=End*.42f,Arrival=End*.52f;
+  const FVector From=TravelFrom.GetLocation(),To=ReturnTarget.GetLocation();
+  FVector Position;FQuat Rotation;
+  CarryBlend=FMath::SmoothStep(0.f,FMath::Min(.45f,Departure),Age)*(1.f-FMath::SmoothStep(End-.3f,End,Age));
+  if(Age<Departure)
+  {
+   const float T=FMath::SmoothStep(0.f,Departure,Age);
+   Position=From+FVector::UpVector*TravelDepartureLift*T;Rotation=TravelFrom.GetRotation();
+   SetTravelOpacity(1.f-FMath::SmoothStep(Departure*.18f,Departure*.92f,Age));
+  }
+  else
+  {
+   // Fade is exactly zero at the cut, including custom-depth silhouettes.
+   if(!bTravelRelocated) { SetTravelOpacity(0);bTravelRelocated=true; }
+   const float T=FMath::SmoothStep(Arrival,End,Age);
+   Position=To+FVector::UpVector*TravelArrivalLift*(1.f-T);Rotation=ReturnTarget.GetRotation();
+   SetTravelOpacity(FMath::SmoothStep(Arrival,End-.12f,Age));
+  }
+  Player->SetActorLocationAndRotation(Position,Rotation,false,nullptr,ETeleportType::TeleportPhysics);
+  if(bTravelRelocated && Age<Arrival)BuddyPickupFrom=Position; // Do not sweep the companion across the map.
+  TickBuddy(Age,true);
   if(Age>=End)FinishRespawn();return;
  }
 

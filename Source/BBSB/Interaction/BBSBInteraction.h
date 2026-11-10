@@ -44,12 +44,17 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float QuickAimDegrees=8;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float LockedFrontRange=600;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction") float LockedFrontDegrees=65;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction",meta=(ClampMin="100",ClampMax="600",Units="cm")) float NearbyFrontRange=320;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Quick interaction",meta=(ClampMin="20",ClampMax="85",Units="deg")) float NearbyFrontDegrees=75;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") TObjectPtr<AActor> QuickFocusActor;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") FText QuickFocusText;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") FText QuickFocusName;
  UFUNCTION(BlueprintPure,Category="Quick interaction") bool IsQuickInteractable(AActor* Actor) const;
  UFUNCTION(BlueprintPure,Category="Quick interaction") FText QuickInteractionText(AActor* Actor) const;
+ UFUNCTION(BlueprintPure,Category="Quick interaction") FText QuickInteractionName(AActor* Actor) const;
  UFUNCTION(BlueprintCallable,Category="Quick interaction") bool FindQuickInteraction(FHitResult& Hit) const;
  void UpdateQuickInteraction();
+ void RegisterInteractionCandidate(AActor* Actor);
  void DrawQuickInteraction(AHUD* HUD,UCanvas* Canvas) const;
 private:
  UPROPERTY(Transient) TObjectPtr<ABBSBCharacter> Player;
@@ -60,7 +65,7 @@ private:
  TSet<TWeakObjectPtr<AActor>> InteractionCandidates;
  FDelegateHandle SpawnedHandle;
  double NextQuickScan=0;
- void RegisterInteractionCandidate(AActor* Actor);
+
  void BindControls();
  void UpdateCamera();
 };
@@ -94,7 +99,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Dialogue") int32 ReleaseReactions=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Animation") FRotator HeadReaction;
  UFUNCTION(BlueprintPure,Category="Dialogue") FVector HeadPoint() const;
- void ResolveAttachment(UPrimitiveComponent*& Component,FVector& Point,FVector& Normal) const;
+ void ResolveAttachment(UPrimitiveComponent*& Component,FVector& Point,FVector& Normal,const FVector& LaunchPoint) const;
  virtual void BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal) override;
  virtual void BunniarArrived_Implementation(ABBSBBunniarCompanion* Buddy) override;
  virtual void BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy) override;

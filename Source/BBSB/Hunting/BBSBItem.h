@@ -33,6 +33,7 @@ public:
  EBBSBItemCategory SortCategory() const { return EquipmentKind==EBBSBItemEquipmentKind::Orb ? EBBSBItemCategory::Orb:EquipmentKind==EBBSBItemEquipmentKind::None ? ItemCategory:EBBSBItemCategory::Equipment; }
  FName SortType() const { return !ItemType.IsNone() ? ItemType:!ItemId.IsNone() ? ItemId:GetFName(); }
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Item") EBBSBItemRarity Rarity=EBBSBItemRarity::Common;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Item") bool bImportantForAutoSave=false;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Equipment") EBBSBItemEquipmentKind EquipmentKind=EBBSBItemEquipmentKind::None;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Equipment",meta=(ClampMin="1",ClampMax="6",EditCondition="EquipmentKind==EBBSBItemEquipmentKind::Weapon")) int32 WeaponId=4;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Equipment",meta=(EditCondition="EquipmentKind==EBBSBItemEquipmentKind::Companion")) TSoftObjectPtr<USkeletalMesh> CompanionMesh;
@@ -60,6 +61,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Stats",meta=(ClampMin="0")) float WeaponDamageMultiplier=1;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Stats",meta=(ClampMin="0")) float DamagePerLevel=.08f;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Normal",meta=(ClampMin=".05")) float NormalBeatCooldown=.5f;
+ UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Normal") bool bRepairTool=false;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Normal") TSoftObjectPtr<UBBSBWeaponAnimationSet> WeaponAnimation;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Concerto") FBBSBPerformanceRole ConcertoMain;
  UPROPERTY(EditAnywhere,BlueprintReadOnly,Category="Weapon|Concerto") FBBSBPerformanceRole ConcertoSub;

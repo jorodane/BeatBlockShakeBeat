@@ -148,6 +148,10 @@ public:
 	/** 0 is Bunniar; combat weapons retain their existing enum IDs. Latest request wins. */
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") int32 PendingEquipmentId=INDEX_NONE;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentInputBlocked=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Tutorial") bool bTutorialEquipmentGate=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Tutorial") bool bTutorialTraversalGate=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Tutorial") bool bTutorialConcertoGate=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Tutorial") FGuid TutorialWeaponInstance;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") bool bEquipmentPointerCaptured=false;
 	void SetEquipmentPointerCapture(bool bCapture);
  void CancelLootGesture();
@@ -212,10 +216,13 @@ public:
 	bool RequiresMouseGesture(int32 Channel) const;
 	void DrawAimFeedback(AHUD* HUD) const;
 	void InterruptAction(EBBSBActionState State, float Seconds);
-	void ResetActionState();
+	void ResetActionState(bool bPreserveBunniarInteraction=false);
+ /** Ladder use belongs to the player body, independently of held Bunniar interaction. */
+ bool CanStartLadder() const;
 	/** Refuses busy actions and held gestures; never queues a later preset change. */
 	UFUNCTION(BlueprintCallable, Category="BBSB|Practice") bool SetWeaponExperiment(EBBSBWeaponCommitment Preset);
 	UFUNCTION(BlueprintPure, Category="BBSB|Weapon") FBBSBWeaponActionRule GetWeaponRule(EBBSBFieldGesture Gesture, int32 Channel=0) const;
+ bool BeginItemAttack(float Seconds);
 	UFUNCTION(BlueprintCallable, Category="BBSB|Movement") bool TryDodge();
  UFUNCTION(BlueprintPure,Category="BBSB|Movement") FVector ActiveDashDirection() const { return DodgeDirection; }
  UFUNCTION(BlueprintPure,Category="BBSB|Movement") bool IsPrecisionWalking() const;
@@ -245,6 +252,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor DeviceAimColor=FLinearColor(.60f,.92f,.73f,1);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor AttackAimColor=FLinearColor(.98f,.65f,.54f,1);
  void DrawContextAim(AHUD* HUD,UCanvas* Canvas) const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Dodge") float DodgeCooldownProgress() const { return FMath::Clamp(1.f-GetDodgeCooldownRemaining()/FMath::Max(.01f,DodgeCooldown),0.f,1.f); }
 	void ExerciseGesture(int32 Index);
 	float GetCharge() const;
 	float GetDodgeCooldownRemaining() const;
@@ -339,7 +347,9 @@ private:
 	TOptional<FWeaponAction> OtherWeaponAction;
 	UPROPERTY(Transient) TObjectPtr<AActor> OtherFloatingWeapon;
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> OtherBlade;
-	UPROPERTY(Transient) TObjectPtr<AActor> ConductorWeapon;
+	struct FDeathAttachment { TWeakObjectPtr<AActor> Actor;TWeakObjectPtr<USceneComponent> Parent;FName Socket;FTransform Relative; };
+ TArray<FDeathAttachment> DeathAttachments;
+ UPROPERTY(Transient) TObjectPtr<AActor> ConductorWeapon;
 	UPROPERTY(Transient) TObjectPtr<AActor> OtherConductorWeapon;
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> ConductorFull;
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> FormUpper;
@@ -449,7 +459,7 @@ private:
  /** Applied to aim, hover, weapon sweeps and cover checks even if a projectile's profile changes. */
  void IgnoreInkProjectiles(FCollisionQueryParams& Query) const;
 	void PlayGestureAnimation(EBBSBFieldGesture Gesture);
-	void CancelCurrentAction(bool bCancelGesture,bool bCountCancel=true);
+	void CancelCurrentAction(bool bCancelGesture,bool bCountCancel=true,bool bPreserveBunniarGesture=false);
 	void UpdateHover();
 	void ClearHover();
 };

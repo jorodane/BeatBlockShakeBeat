@@ -1,4 +1,5 @@
 #include "Interaction/BBSBInteraction.h"
+#include "Interaction/BBSBDragMotion.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
 #include "Caravan/BBSBCaravan.h"
@@ -69,6 +70,8 @@ bool UBBSBInteractionComponent::BeginDialogue(ABBSBInteractionNPC* NPC)
  FActorSpawnParameters P;P.ObjectFlags|=RF_Transient;P.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
  DialogueCamera=GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(),FTransform::Identity,P);
  if(!DialogueCamera) { EndDialogue();return false; }
+ DialogueCamera->GetCameraComponent()->PostProcessSettings=Player->GetFollowCamera()->PostProcessSettings;
+ DialogueCamera->GetCameraComponent()->PostProcessBlendWeight=Player->GetFollowCamera()->PostProcessBlendWeight;
  UpdateCamera();PC->SetViewTargetWithBlend(DialogueCamera,CameraBlendSeconds);
  if(Controls) for(auto& Binding:Controls->KeyBindings) Binding.bConsumeInput=true;
  return true;
@@ -156,12 +159,16 @@ ABBSBInteractionNPC::ABBSBInteractionNPC()
 }
 void ABBSBInteractionNPC::BeginPlay() { Super::BeginPlay();Body->SetAnimInstanceClass(UBBSBNPCAnimInstance::StaticClass()); }
 FVector ABBSBInteractionNPC::HeadPoint() const { return Body->DoesSocketExist(TEXT("head")) ? Body->GetSocketLocation(TEXT("head")):GetActorLocation()+FVector(0,0,75); }
-void ABBSBInteractionNPC::ResolveAttachment(UPrimitiveComponent*& Component,FVector& Point,FVector& Normal) const
+void ABBSBInteractionNPC::ResolveAttachment(UPrimitiveComponent*& Component,FVector& Point,FVector& Normal,const FVector& LaunchPoint) const
 {
- const bool Face=Component==FaceTarget;Component=Face ? static_cast<UPrimitiveComponent*>(FaceTarget.Get()):static_cast<UPrimitiveComponent*>(HeadTarget.Get());
- Normal=Face ? FaceTarget->GetForwardVector():HeadTarget->GetUpVector();
- // Selection spheres are deliberately generous; use the fitted mesh contact, not their outer skin.
- Point=Face ? FaceTarget->GetComponentLocation()+Normal*(FaceAttachmentForward-15):HeadTarget->GetComponentLocation()+Normal*HeadAttachmentHeight;
+ const FVector Head=HeadPoint();Normal=(LaunchPoint-Head).GetSafeNormal();
+ if(Normal.IsNearlyZero())Normal=HeadTarget->GetForwardVector();
+ // The attachment faces its real launch point, regardless of which generous
+ // selection sphere the aim ray touched. Front coverage can silence dialogue.
+ const FVector Local=HeadTarget->GetComponentQuat().UnrotateVector(Normal);
+ const bool Face=Local.X>.45f && FMath::Abs(Local.Z)<.80f;
+ Component=Face ? static_cast<UPrimitiveComponent*>(FaceTarget.Get()):static_cast<UPrimitiveComponent*>(HeadTarget.Get());
+ Point=Head+Normal*(Face ? FaceAttachmentForward:HeadAttachmentHeight);
 }
 void ABBSBInteractionNPC::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal)
 {
@@ -334,8 +341,13 @@ void ABBSBCarryObject::MoveHeld(FVector Desired,float DT)
   const FVector Before=GetActorLocation();
   const FVector Next=bManipulating ? Before+(Target-Before).GetClampedToMaxSize(Budget):OrbitStep(Target,Center,Budget);
   const FVector Delta=Next-Before;FHitResult Hit;
-  HeldMovement->SafeMoveUpdatedComponent(Delta,GetActorQuat(),true,Hit);
-  if(Hit.IsValidBlockingHit()) { bBlocked=true;HeldMovement->SlideAlongSurface(Delta,1.f-Hit.Time,Hit.Normal,Hit,false); }
+  const float Allowed=BBSBDragMotion::Move(Body,Next,&Hit);
+  if(Allowed<.9999f)
+  {
+   bBlocked=true;
+   const FVector Slide=FVector::VectorPlaneProject(Delta*(1.f-Allowed),Hit.Normal);
+   if(!Slide.IsNearlyZero(.001f))BBSBDragMotion::Move(Body,GetActorLocation()+Slide);
+  }
   Remaining-=Budget;
   if(GetActorLocation().Equals(Before,.0001f)) break;
  }
@@ -343,7 +355,7 @@ void ABBSBCarryObject::MoveHeld(FVector Desired,float DT)
  if(FVector::DistSquared(GetActorLocation(),Center)>FMath::Square(Reach+.1f))
  {
   const FVector Limited=Center+(GetActorLocation()-Center).GetClampedToMaxSize(Reach);FHitResult ReachHit;
-  HeldMovement->SafeMoveUpdatedComponent((Limited-GetActorLocation()).GetClampedToMaxSize(Remaining),GetActorQuat(),true,ReachHit);
+  BBSBDragMotion::Move(Body,GetActorLocation()+(Limited-GetActorLocation()).GetClampedToMaxSize(Remaining),&ReachHit);
  }
  SampleMotion();UpdateCarryObstruction(bBlocked,Player);
 }
@@ -435,6 +447,17 @@ void ABBSBCarryObject::Tick(float DT)
  }
  else
  {
+  // The authored step crate rests kinematically on support, so a landing pawn cannot kick it away.
+  // Carrying still uses the shared pointer path; an explicit Flick remains a physical throw.
+  if(ActorHasTag(TEXT("BBSBStepCrate")) && !AttachedBuddy.IsValid())
+  {
+   const FVector Bottom=Body->Bounds.Origin-FVector::UpVector*Body->Bounds.BoxExtent.Z;
+   FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBStepSupport),false,this);Query.AddIgnoredActor(Player);
+   if(Player && Player->FieldActions)Query.AddIgnoredActor(Player->FieldActions->BunniarEquipment);
+   FHitResult Support;const bool Grounded=GetWorld()->LineTraceSingleByObjectType(Support,Bottom+FVector::UpVector*4.f,Bottom-FVector::UpVector*8.f,BBSBCombatVisuals::GeometryTypes(),Query) && Support.ImpactNormal.Z>.65f;
+   if(Body->IsSimulatingPhysics() && Grounded && Body->GetPhysicsLinearVelocity().Size()<60.f && Body->GetPhysicsAngularVelocityInDegrees().Size()<20.f)Body->SetSimulatePhysics(false);
+   else if(!Body->IsSimulatingPhysics() && !Grounded) { Body->SetSimulatePhysics(true);Body->WakeAllRigidBodies(); }
+  }
   PrePhysicsVelocity=Body->GetPhysicsLinearVelocity();
   const float Clearance=Player ? FMath::Max(100.f,Player->GetCapsuleComponent()->GetScaledCapsuleRadius()+float(Body->Bounds.SphereRadius)+15.f):0;
   if(PawnIgnoreUntil>=0 && GetWorld()->GetTimeSeconds()>=PawnIgnoreUntil && (!Player || FVector::Dist(Player->GetActorLocation(),GetActorLocation())>Clearance)) { Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1; }
@@ -443,7 +466,7 @@ void ABBSBCarryObject::Tick(float DT)
 void ABBSBCarryObject::Drop(bool bThrow)
 {
  if(!bCarried) return;
- const FVector Velocity=ReleaseVelocity();bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryIgnores();
+ const FVector Velocity=ActorHasTag(TEXT("BBSBStepCrate")) && !bThrow ? FVector::ZeroVector:ReleaseVelocity();bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryIgnores();
  if(bThrow) LastThrowVelocity=Velocity;
  Body->SetSimulatePhysics(true);Body->SetPhysicsLinearVelocity(Velocity);PrePhysicsVelocity=Velocity;PawnIgnoreUntil=GetWorld()->GetTimeSeconds()+.25;
 }

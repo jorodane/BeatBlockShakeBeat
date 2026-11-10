@@ -23,7 +23,7 @@ UENUM(BlueprintType)
 enum class EBBSBWireArrival : uint8 { Air, Floor, Wall, Enemy };
 
 UENUM(BlueprintType)
-enum class EBBSBParkourMode : uint8 { None, LedgeHang, Mantle, Vault, WallSlide };
+enum class EBBSBParkourMode : uint8 { None, LedgeHang, Mantle, Vault, WallSlide, Ladder };
 
 /** Linked Sequencer clips and the four traversal effects, editable without changing code. */
 UCLASS(BlueprintType)
@@ -48,6 +48,10 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour motion") TObjectPtr<UAnimSequence> LowVault;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour motion") TObjectPtr<UAnimSequence> WallSlide;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour motion") TObjectPtr<UAnimSequence> WallJump;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder motion") TObjectPtr<UAnimSequence> LadderHold;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder motion") TObjectPtr<UAnimSequence> LadderClimb;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder motion") TObjectPtr<UAnimSequence> LadderHop;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder motion") TObjectPtr<UAnimSequence> LadderSlide;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Weapon motion") TArray<TObjectPtr<UAnimSequence>> GroundWeaponCombo;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Weapon motion") TArray<TObjectPtr<UAnimSequence>> AirWeaponCombo;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Effects") TObjectPtr<UNiagaraSystem> WireLandingSmoke;
@@ -82,6 +86,7 @@ UCLASS(ClassGroup=(BBSB),meta=(BlueprintSpawnableComponent))
 class BBSB_API UBBSBTraversalComponent : public UActorComponent
 {
  GENERATED_BODY()
+ friend class UBBSBSessionSubsystem;
 public:
  UBBSBTraversalComponent();
  virtual void BeginPlay() override;
@@ -102,6 +107,33 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0",ClampMax="0.3",Units="s")) float LedgePopPreparationSeconds=.04f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0.5",ClampMax="2")) float ParkourPaceScale=1.f;
  FVector LedgeHand(bool Left) const;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Ladder") bool BeginLadder(AActor* Source,FVector Bottom,FVector Top,FVector Exit,FVector Normal);
+ UFUNCTION(BlueprintPure,Category="BBSB|Ladder") bool IsOnLadder() const { return ParkourMode==EBBSBParkourMode::Ladder; }
+ UFUNCTION(BlueprintCallable,Category="BBSB|Ladder") bool TryLadderHop();
+ UFUNCTION(BlueprintPure,Category="BBSB|Ladder") float LadderInput() const;
+ void LadderUpPressed() { bLadderUpHeld=true; }
+ void LadderUpReleased() { bLadderUpHeld=false; }
+ void LadderDownPressed() { bLadderDownHeld=true; }
+ void LadderDownReleased() { bLadderDownHeld=false; }
+ void LadderHopPressed() { bLadderHopHeld=true; }
+ void LadderHopReleased() { bLadderHopHeld=false; }
+ UFUNCTION(BlueprintPure,Category="BBSB|Parkour") bool IsDashWallRecoveryActive() const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour|Dash contact",meta=(ClampMin=".1",ClampMax=".5",Units="s")) float DashWallSlideSeconds=.22f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour|Dash contact",meta=(ClampMin="100",ClampMax="800",Units="cm/s")) float DashWallSlideSpeed=360.f;
+ FVector LadderHand(bool Left) const;
+ FVector LadderFoot(bool Left) const;
+ float LadderClipPhase() const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="20",ClampMax="50",Units="cm")) float LadderRungSpacing=35.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="0.18",ClampMax="1",Units="s")) float LadderStepSeconds=.25f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="2",ClampMax="12")) int32 LadderHopRungs=6;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="0.5",ClampMax="1.8",Units="s")) float LadderHopSeconds=.95f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="100",ClampMax="800",Units="cm/s")) float LadderSlideSpeed=380.f;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Ladder") float LadderDistance=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Ladder") float LadderStepPhase=0;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Ladder") bool bLadderStepping=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Ladder") bool bLadderHopping=false;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Ladder") bool bLadderSliding=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Ladder") TObjectPtr<AActor> LadderSource;
  void ApplyClimbCamera(float DeltaTime,FMinimalViewInfo& View);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0",ClampMax="1")) float ClimbCameraFollow=.8f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="3",ClampMax="40")) float ClimbCameraBlendSpeed=18.f;
@@ -279,12 +311,13 @@ private:
  double WireStartedAt=0,WireArrivalAt=0;
  double AirWeaponStartedAt=0,AirWeaponHangUntil=0;
  float AirWeaponStartZ=0;
- struct FLedgeCandidate { TWeakObjectPtr<UPrimitiveComponent> Surface;FVector Point,Normal,Hang,Stand; };
+ struct FLedgeCandidate { TWeakObjectPtr<UPrimitiveComponent> Surface;FVector Point,Normal,Hang,Stand,TopNormal; };
  bool FindLedge(const FVector& WallPoint,const FVector& Normal,UPrimitiveComponent* Surface,FLedgeCandidate& Out) const;
  bool FindLowLedge(const FVector& WallPoint,const FVector& Normal,UPrimitiveComponent* Surface,FLedgeCandidate& Out) const;
  void BeginLowMantle(const FLedgeCandidate& Ledge);
  bool TryWireLedge();
  bool TryAutoLedge();
+ bool TryAutoLadder(const FVector& Direction);
  bool BeginWallSlide(const FVector& Point,const FVector& Normal,UPrimitiveComponent* Surface);
  void TickWallSlide(float DeltaTime);
  bool ValidParkourSurface(UPrimitiveComponent* Surface) const;
@@ -304,7 +337,19 @@ private:
  void TickParkour(float DeltaTime);
  void RestoreParkourMovement(bool Grounded);
  UPROPERTY(Transient) TWeakObjectPtr<UPrimitiveComponent> ParkourSurface;
- FVector LedgeLocalPoint,LedgeLocalNormal,LedgeLocalStand;
+ FVector LedgeLocalPoint,LedgeLocalNormal,LedgeLocalStand,LedgeLocalTopNormal;
+ FVector LedgeTopNormal=FVector::UpVector;
+ FVector LadderBottom,LadderTop,LadderExit,LadderOut,LadderAxis,LadderMountFrom,LadderMountTo;
+ float LadderLength=0,LadderStepFrom=0,LadderStepTo=0,LadderMotionSeconds=0;
+ double LadderStepAt=0,LadderMountAt=0;
+ bool bLadderMounting=false,bLadderExiting=false;
+ bool bLadderUpHeld=false,bLadderDownHeld=false,bLadderHopHeld=false;
+ double DashWallRecoveryUntil=-100;
+ bool bDashWallSlide=false;
+ void TickLadder(float DeltaTime);
+ void StartLadderStep(bool Hop);
+ bool JumpFromLadder();
+ void ExitLadderTop();
  FVector ParkourFrom,ParkourTo;
  float ParkourApex=0,ParkourDuration=0;
  float ParkourSavedAirControl=0,ParkourSavedFlyingBraking=0,ParkourSavedMaxFlySpeed=0;

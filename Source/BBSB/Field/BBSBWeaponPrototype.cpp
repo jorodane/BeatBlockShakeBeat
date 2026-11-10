@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "Field/BBSBRepairTool.h"
 #include "Hunting/BBSBHunting.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Character/BBSBVisibilityStencil.h"
@@ -429,6 +430,7 @@ float UBBSBFieldActionComponent::GetWeaponActionProgress() const
 void UBBSBFieldActionComponent::GetWeaponStepPose(UAnimSequence*& Animation,float& Time,float& Weight) const
 {
  Animation=nullptr;Time=Weight=0;
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->RepairTool && P->RepairTool->IsRepairToolEquipped()) { P->RepairTool->GetBodyPose(Animation,Time,Weight);return; }
  if(!Character || !CurrentAction.IsSet() || !Character->GetCharacterMovement()->IsMovingOnGround()) return;
  const auto& A=CurrentAction.GetValue();if(A.bGlideAttack || !A.Motion.StepAnimation || A.Motion.ForwardTravel<=0) return;
  Animation=A.Motion.StepAnimation;

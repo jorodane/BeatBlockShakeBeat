@@ -1,4 +1,5 @@
 #include "Hunting/BBSBEquipmentGrowth.h"
+#include "Save/BBSBSession.h"
 #include "Hunting/BBSBHunting.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
@@ -57,7 +58,7 @@ bool UBBSBEquipmentGrowthComponent::GrantModule(UBBSBModuleDefinition* D,bool Eq
 {
  if(!D || D->ModuleId.IsNone() || (D->Action==EBBSBModuleAction::Glide ? D->Slot!=EBBSBModuleSlot::Aerial:D->Slot!=EBBSBModuleSlot::Directional))return false;
  const bool Acquired=!ModuleDefinition(D->ModuleId);
- if(Acquired) { FBBSBOwnedModule M;M.Definition=D;OwnedModules.Add(M);EnsureBunniarBag();Feedback=D->DisplayName.ToString()+TEXT(" 획득");Changed(); }
+ if(Acquired) { FBBSBOwnedModule M;M.Definition=D;OwnedModules.Add(M);if(UBBSBSessionSubsystem::Owns(GetWorld()))UBBSBSessionSubsystem::Get(GetWorld())->RequestAutoSave(TEXT("새 모듈 획득"));EnsureBunniarBag();Feedback=D->DisplayName.ToString()+TEXT(" 획득");Changed(); }
  if(Acquired && EquipIfEmpty && (D->Slot==EBBSBModuleSlot::Aerial ? AerialModule:DirectionalModule).IsNone())EquipModule(D->Slot,D->ModuleId);
  return true;
 }
@@ -88,6 +89,7 @@ bool UBBSBEquipmentGrowthComponent::UpgradeModule(FName Id)
 }
 bool UBBSBEquipmentGrowthComponent::HasModuleAction(EBBSBModuleAction Action) const
 {
+ if(Player && Player->FieldActions && Player->FieldActions->bTutorialTraversalGate)return false;
  const auto* D=ModuleDefinition(Action==EBBSBModuleAction::Glide ? AerialModule:DirectionalModule);return D && D->Action==Action;
 }
 void UBBSBEquipmentGrowthComponent::ApplyModuleStats()

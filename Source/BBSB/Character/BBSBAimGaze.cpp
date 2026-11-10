@@ -63,7 +63,8 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
  FQuat Offset=FQuat::Identity;
  float GlideWeight=0,WireWeight=0,ParkourWeight=0,EdgeHandWeight=0;
  FVector EdgeHands[2],EdgeElbows[2],ClimbFoot,ClimbKnee;
- float FootPlantWeight=0;
+ float FootPlantWeight=0,LadderWeight=0,LadderFootWeight=0;
+ FVector LadderFeet[2],LadderKnees[2],LadderBodyOffset;float LadderBodyMaxShift=100.f;
  FQuat WireTilt=FQuat::Identity;
  float HangWeight=0,MotionWeight=0,MotionTime=0;
  FQuat AirSpin=FQuat::Identity;
@@ -186,6 +187,10 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
   }
   ParkourWeight=Traversal ? Traversal->ParkourPoseAlpha:0;EdgeHandWeight=Traversal ? ParkourWeight*Traversal->ParkourHandAlpha:0;
   FootPlantWeight=Traversal ? ParkourWeight*Traversal->ClimbFootAlpha:0;
+  // Contact IK and its pelvis reach correction release together during a ladder leap.
+  // Otherwise both planted feet and hands override the authored airborne pose.
+  LadderWeight=Traversal && Traversal->ParkourVisualMode==EBBSBParkourMode::Ladder ? ParkourWeight*Traversal->ParkourHandAlpha:0;
+  LadderFootWeight=Traversal && !Traversal->bLadderSliding ? LadderWeight:0;
   if(Traversal && ParkourWeight>.0001f)
   {
    HangWeight=0;WireWeight*=1.f-ParkourWeight;
@@ -195,14 +200,22 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     MotionClip=Mode==EBBSBParkourMode::LedgeHang ? Library->LedgeHang.Get():Mode==EBBSBParkourMode::Mantle ? Library->LedgeClimb.Get():Mode==EBBSBParkourMode::WallSlide ? (Library->WallSlide ? Library->WallSlide.Get():Library->WireWallLatch.Get()):Library->LowVault.Get();
     MotionTime=MotionClip && Mode!=EBBSBParkourMode::LedgeHang ? Traversal->ParkourMotionPhase()*MotionClip->GetPlayLength():0;
     if(Mode==EBBSBParkourMode::WallSlide && MotionClip) MotionTime=FMath::Clamp(Traversal->ParkourAge,0.f,MotionClip->GetPlayLength());
+    if(Mode==EBBSBParkourMode::Ladder)
+    {
+     MotionClip=Traversal->bLadderHopping ? Library->LadderHop.Get():Traversal->bLadderSliding ? Library->LadderSlide.Get():Traversal->bLadderStepping ? Library->LadderClimb.Get():Library->LadderHold.Get();
+     MotionTime=MotionClip ? Traversal->LadderClipPhase()*MotionClip->GetPlayLength():0;
+    }
     MotionWeight=ParkourWeight;
    }
    const FTransform Mesh=Player->GetMesh()->GetComponentTransform();
+   LadderBodyOffset=Mesh.InverseTransformVector(-Traversal->LedgeNormal*15.f+FVector::UpVector*6.f);LadderBodyMaxShift=Mesh.InverseTransformVector(FVector(42.f,0,0)).Size();
    for(int32 I=0;I<2;++I)
    {
-    EdgeHands[I]=Mesh.InverseTransformPosition(Traversal->LedgeHand(I==0));
+    EdgeHands[I]=Mesh.InverseTransformPosition(LadderWeight>0 ? Traversal->LadderHand(I==0):Traversal->LedgeHand(I==0));
     const FVector EdgeRight=FVector::CrossProduct(FVector::UpVector,-Traversal->LedgeNormal).GetSafeNormal();
-    EdgeElbows[I]=Mesh.InverseTransformPosition(Traversal->LedgePoint+Traversal->LedgeNormal*20.f+EdgeRight*(I==0 ? -45.f:45.f)+FVector::UpVector*8.f);
+    EdgeElbows[I]=Mesh.InverseTransformPosition(Traversal->LedgePoint+Traversal->LedgeNormal*20.f+EdgeRight*(I==0 ? -45.f:45.f)+FVector::UpVector*(LadderWeight>0 ? 30.f:8.f));
+    LadderFeet[I]=Mesh.InverseTransformPosition(Traversal->LadderFoot(I==0));
+    LadderKnees[I]=Mesh.InverseTransformPosition(Player->GetActorLocation()-Traversal->LedgeNormal*35.f+EdgeRight*(I==0 ? -18.f:18.f)-FVector::UpVector*10.f);
    }
    ClimbFoot=Mesh.InverseTransformPosition(Traversal->ClimbFootPoint);
    ClimbKnee=Mesh.InverseTransformPosition(Traversal->ClimbFootPoint-Traversal->LedgeNormal*20.f+FVector::UpVector*30.f);
@@ -481,6 +494,26 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     Pose.LocalBlendCSBoneTransforms(Changes,HangWeight);
    }
   }
+  if(LadderWeight>.0001f)
+  {
+   const int32 Bone=Bones.GetPoseBoneIndexForBoneName(TEXT("pelvis"));
+   if(Bone!=INDEX_NONE)
+   {
+    const auto Index=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Bone));FVector Shift=LadderBodyOffset;
+    const FName Arms[2][3]={{TEXT("upperarm_l"),TEXT("lowerarm_l"),TEXT("hand_l")},{TEXT("upperarm_r"),TEXT("lowerarm_r"),TEXT("hand_r")}};
+    // Bring the body within both arms' actual reach; never stretch the short character's bones.
+    for(int32 Pass=0;Pass<8;++Pass)for(int32 Side=0;Side<2;++Side)
+    {
+     FCompactPoseBoneIndex Chain[3];bool Valid=true;
+     for(int32 I=0;I<3;++I) { const int32 J=Bones.GetPoseBoneIndexForBoneName(Arms[Side][I]);if(J==INDEX_NONE) { Valid=false;break; }Chain[I]=Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(J));if(Chain[I].GetInt()==INDEX_NONE)Valid=false; }
+     if(!Valid)continue;
+     const FVector A=Pose.GetComponentSpaceTransform(Chain[0]).GetLocation(),B=Pose.GetComponentSpaceTransform(Chain[1]).GetLocation(),C=Pose.GetComponentSpaceTransform(Chain[2]).GetLocation();
+     const float Reach=((B-A).Size()+(C-B).Size())*.97f;const FVector Delta=EdgeHands[Side]-A-Shift;
+     if(Delta.Size()>Reach)Shift+=Delta.GetSafeNormal()*(Delta.Size()-Reach);
+    }
+    FTransform T=Pose.GetComponentSpaceTransform(Index);T.AddToTranslation(Shift.GetClampedToMaxSize(LadderBodyMaxShift));const FBoneTransform Change(Index,T);Pose.LocalBlendCSBoneTransforms(MakeArrayView(&Change,1),LadderWeight);
+   }
+  }
   if(EdgeHandWeight>.0001f)
   {
    const FName Chains[2][3]={{TEXT("upperarm_l"),TEXT("lowerarm_l"),TEXT("hand_l")},{TEXT("upperarm_r"),TEXT("lowerarm_r"),TEXT("hand_r")}};
@@ -497,6 +530,19 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
     AnimationCore::SolveTwoBoneIK(A,B,C,EdgeElbows[Side],EdgeHands[Side],false,1.,1.);
     TArray<FBoneTransform> Changes={FBoneTransform(Indices[0],A),FBoneTransform(Indices[1],B),FBoneTransform(Indices[2],C)};
     Pose.LocalBlendCSBoneTransforms(Changes,EdgeHandWeight);
+   }
+  }
+  if(LadderFootWeight>.0001f)
+  {
+   const FName Chains[2][3]={{TEXT("thigh_l"),TEXT("calf_l"),TEXT("foot_l")},{TEXT("thigh_r"),TEXT("calf_r"),TEXT("foot_r")}};
+   for(int32 Side=0;Side<2;++Side)
+   {
+    TArray<FCompactPoseBoneIndex> Indices;
+    for(FName Name:Chains[Side]) { const int32 I=Bones.GetPoseBoneIndexForBoneName(Name);if(I!=INDEX_NONE)Indices.Add(Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(I))); }
+    if(Indices.Num()!=3 || Indices.Contains(FCompactPoseBoneIndex(INDEX_NONE)))continue;
+    FTransform A=Pose.GetComponentSpaceTransform(Indices[0]),B=Pose.GetComponentSpaceTransform(Indices[1]),C=Pose.GetComponentSpaceTransform(Indices[2]);
+    AnimationCore::SolveTwoBoneIK(A,B,C,LadderKnees[Side],LadderFeet[Side],false,1.,1.);
+    const TArray<FBoneTransform> Changes={FBoneTransform(Indices[0],A),FBoneTransform(Indices[1],B),FBoneTransform(Indices[2],C)};Pose.LocalBlendCSBoneTransforms(Changes,LadderFootWeight);
    }
   }
   if(FootPlantWeight>.0001f)

@@ -123,6 +123,5 @@ int32 UBBSBWorldMapWidget::PaintCircularMinimap(const FGeometry& G,FSlateWindowE
   Lines(CompassArrow,Ink,3.6f,22);Lines(CompassArrow,Color,1.8f,23);
   Label(D.ToString(),CompassPosition(D),Color,12);
  }
- Label(TEXT("E 장비 · Tab 소지품 · M 지도"),Size-FVector2D(270,14)*S,Paper,10);
  return Layer+24;
 }

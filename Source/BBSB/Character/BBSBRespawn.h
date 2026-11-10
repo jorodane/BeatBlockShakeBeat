@@ -18,6 +18,21 @@ class UTextBlock;
 class UButton;
 class USceneComponent;
 class UBBSBHuntingSave;
+class UBBSBViewOcclusionMaterials;
+class UMeshComponent;
+class UMaterialInterface;
+
+USTRUCT()
+struct FBBSBTravelFadeMesh
+{
+ GENERATED_BODY()
+ UPROPERTY() TWeakObjectPtr<UMeshComponent> Mesh;
+ UPROPERTY() TArray<TObjectPtr<UMaterialInterface>> Originals;
+ UPROPERTY() TArray<TObjectPtr<UMaterialInterface>> Replacements;
+ float Weight=0,Kind=0,InstanceKind=0;
+ bool bHidden=false;
+};
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FBBSBCheckpointActivated,ABBSBCharacter*,Player);
 
 UENUM(BlueprintType)
 enum class EBBSBRespawnPhase : uint8 { Alive,Downed,AwaitingChoice,Returning };
@@ -39,8 +54,10 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Respawn") FText PointName=NSLOCTEXT("BBSB","RespawnPointName","휴식의 표식");
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Respawn",meta=(ClampMin="100",Units="cm")) float ActivationRange=700;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Respawn") FName PointId;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Respawn") bool bTravelAvailable=true;
  UFUNCTION(BlueprintPure,Category="Respawn") FString TravelId() const;
  UFUNCTION(BlueprintCallable,Category="Respawn") bool ActivateFor(ABBSBCharacter* Player);
+ UPROPERTY(BlueprintAssignable,Category="Respawn") FBBSBCheckpointActivated OnActivated;
  UFUNCTION(BlueprintPure,Category="Respawn") bool IsActivePoint() const;
  FTransform LandingTransform(const ABBSBCharacter* Player) const;
  virtual FText BunniarInteractionText_Implementation() const override;
@@ -90,7 +107,12 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Respawn|Travel") TSet<FString> DiscoveredPoints;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Respawn|Travel") bool bCarryingPlayer=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Respawn|Travel") float CarryBlend=0;
+ /** Retained for existing assets; warp timing is now independent of map distance. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Respawn|Travel",meta=(ClampMin="300")) float CarrySpeed=2200;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Respawn|Travel",meta=(ClampMin="10",ClampMax="150",Units="cm")) float WarpLiftHeight=75.f;
+ UPROPERTY(EditAnywhere,Category="Respawn|Travel") TSoftObjectPtr<UBBSBViewOcclusionMaterials> TravelFadeLibrary;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Respawn|Travel") float TravelOpacity=1.f;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Respawn|Travel") bool bTravelRelocated=false;
  UFUNCTION(BlueprintPure,Category="Respawn|Travel") bool IsPointDiscovered(const ABBSBRespawnPoint* Point) const;
  UFUNCTION(BlueprintCallable,Category="Respawn|Travel") bool RequestFastTravel(ABBSBRespawnPoint* Point);
  void LoadTravel(const UBBSBHuntingSave* Save);
@@ -117,7 +139,13 @@ private:
  FTransform InitialSpawn,ReturnTarget;
  FTransform TravelFrom;
  FVector BuddyPickupFrom;
- float CruiseHeight=0,FlightSeconds=1;
+ float TravelDepartureLift=0,TravelArrivalLift=0;
+ TWeakObjectPtr<class APlayerCameraManager> TravelFadeCamera;
+ UPROPERTY(Transient) TObjectPtr<UBBSBViewOcclusionMaterials> FadeLibrary;
+ void BeginTravelFade();
+ void SetTravelOpacity(float Opacity);
+ void RestoreTravelFade();
+ float ClearLiftHeight(FVector Position) const;
  bool bTravelFromDeath=true,bCarryPoseStarted=false;
  FString PendingPointId;
  UPROPERTY(Transient) TArray<TObjectPtr<AActor>> HiddenTravelWeapons;

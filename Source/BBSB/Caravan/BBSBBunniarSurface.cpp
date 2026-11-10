@@ -129,13 +129,15 @@ bool ABBSBBunniarCompanion::CanMaintainSurfaceAttachment() const
 {
  const auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  const auto* Enemy=IsValid(SurfaceComponent) ? Cast<ABBSBInkEnemy>(SurfaceComponent->GetOwner()):nullptr;
- if(Enemy && Enemy->bDefeated) return false;
- if(!bWireAnchored && Player && IsValid(SurfaceComponent) && !SurfaceComponent->GetOwner()->Implements<UBBSBBunniarSurface>())
+ if(!Player || !Player->FieldActions || !Player->Combat || (Enemy && Enemy->bDefeated)) return false;
+ // Interactive props use their current physical contact, just like ordinary surfaces.
+ // The handler actor may be far away from the door leaf or ladder being dragged.
+ if(!bWireAnchored && IsValid(SurfaceComponent))
  {
   FVector Closest;
   const float Distance=Enemy ? Enemy->GetCapsuleComponent()->GetClosestPointOnCollision(Player->GetActorLocation()+FVector(0,0,35),Closest):
    FVector::Distance(Player->GetActorLocation(),(SurfaceLocalFrame*SurfaceComponent->GetComponentTransform()).GetLocation());
-  if(Distance<0.f || Distance>Player->FieldActions->WeaponReach) return false;
+  if(!FMath::IsFinite(Distance) || Distance<0.f || Distance>Player->FieldActions->WeaponReach+.1f) return false;
  }
  return bSurfaceAttached && IsValid(SurfaceComponent) && Player && Player->FieldActions->InteractionEquipment()==this &&
   (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) && !Player->Combat->bDead &&
@@ -293,6 +295,7 @@ void ABBSBBunniarCompanion::ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& 
 }
 bool ABBSBBunniarCompanion::HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool Initial)
 {
+ if(bOpeningRest && Initial && Gesture==EBBSBFieldGesture::Beat && Channel==0)EndOpeningRest();
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  if (!Player || Player->FieldActions->InteractionEquipment()!=this || Player->Combat->IsStageLocked() || Player->FieldActions->bEquipmentInputBlocked) return false;
  if(Player->Traversal && Player->Traversal->IsWireTraversalActive()) return true;
@@ -315,14 +318,14 @@ bool ABBSBBunniarCompanion::HandleEquipmentGesture(EBBSBFieldGesture Gesture,int
   if (Channel==0) AttachFromCursor();
   else if(!Object)
   {
-   const AActor* SurfaceOwner=IsValid(SurfaceComponent) ? SurfaceComponent->GetOwner():nullptr;
-   const bool FreeAnchor=bAirHovering || (bSurfaceAttached && SurfaceOwner && !SurfaceOwner->Implements<UBBSBBunniarSurface>());
+   AActor* SurfaceOwner=IsValid(SurfaceComponent) ? SurfaceComponent->GetOwner():nullptr;
+   const bool FreeAnchor=bAirHovering || (bSurfaceAttached && SurfaceOwner && !BBSBBunniarSurface::Resolve(SurfaceOwner));
    if(FreeAnchor && Player->Traversal && Player->Traversal->TryWireRecall(this)) return true;
    if(!FreeAnchor) ReleaseSurface();
   }
  }
  if (Channel==0 && bSurfaceAttached && IsValid(SurfaceComponent))
-  if (AActor* Target=SurfaceComponent->GetOwner();Target && Target->Implements<UBBSBBunniarSurface>())
+  if (AActor* Target=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner());Target)
    IBBSBBunniarSurface::Execute_BunniarGesture(Target,this,Gesture,Player->FieldActions->GestureReleaseDirection(Channel),Initial ? 0.f:Player->FieldActions->GestureHeldSeconds(Channel));
  return true;
 }
@@ -334,7 +337,7 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
  if (!PC || Player->FieldActions->InteractionEquipment()!=this || bSurfaceAttached || bAirHovering) return false;
  FRotator View=PC->GetControlRotation();
  FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit)) return Player->FieldActions->bBunniarShortcutActive ? false:BeginAirHoverFromCursor(PC);
- if(Player->FieldActions->bBunniarShortcutActive && (!IsValid(Hit.GetActor()) || !Hit.GetActor()->Implements<UBBSBBunniarSurface>()))return false;
+ if(Player->FieldActions->bBunniarShortcutActive && (!IsValid(Hit.GetActor()) || !BBSBBunniarSurface::Resolve(Hit.GetActor())))return false;
  UPrimitiveComponent* TargetComponent=Hit.GetComponent();
  const auto* Enemy=Cast<ABBSBInkEnemy>(Hit.GetActor());
  if(Enemy)
@@ -344,7 +347,7 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
   Hit.ImpactPoint=Enemy->GetActorLocation()+FVector::UpVector*(Enemy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()+8.f);
   Hit.ImpactNormal=FVector::UpVector;
  }
- if(auto* NPC=Cast<ABBSBInteractionNPC>(Hit.GetActor())) NPC->ResolveAttachment(TargetComponent,Hit.ImpactPoint,Hit.ImpactNormal);
+ if(auto* NPC=Cast<ABBSBInteractionNPC>(Hit.GetActor())) NPC->ResolveAttachment(TargetComponent,Hit.ImpactPoint,Hit.ImpactNormal,GetActorLocation());
  FVector Up=FVector::VectorPlaneProject(FVector::UpVector,Hit.ImpactNormal).GetSafeNormal();
  if (Up.IsNearlyZero()) Up=FVector::VectorPlaneProject(View.Vector(),Hit.ImpactNormal).GetSafeNormal();
  if (Up.IsNearlyZero()) Up=FVector::ForwardVector;
@@ -357,9 +360,9 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
  SurfacePoint=Hit.ImpactPoint; SurfaceNormal=Hit.ImpactNormal; DragPixels=FVector2D::ZeroVector;
  SurfaceTransitFrom=GetActorTransform(); SurfaceTransitAt=GetWorld()->GetTimeSeconds(); SurfaceArrivalAlpha=0; bSurfaceReturning=false; bSurfaceArrived=false; bSurfaceAttached=true;
  Player->FieldActions->SetEquipmentPointerCapture(!Enemy && !Cast<ABBSBCarryObject>(Hit.GetActor()) && !Cast<ABBSBInteractionNPC>(Hit.GetActor()));
- if(AActor* Target=SurfaceComponent->GetOwner();Target && !Enemy && !Target->Implements<UBBSBBunniarSurface>()) LockSurfaceView(PC);
+ if(AActor* Target=SurfaceComponent->GetOwner();Target && !Enemy && !BBSBBunniarSurface::Resolve(Target)) LockSurfaceView(PC);
  Player->FieldActions->EquipmentPointerMotion.BindUObject(this,&ABBSBBunniarCompanion::HandleSurfaceDrag);
- if (AActor* Target=SurfaceComponent->GetOwner(); Target && Target->Implements<UBBSBBunniarSurface>())
+ if (AActor* Target=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner()); Target)
   IBBSBBunniarSurface::Execute_BunniarAttached(Target,this,SurfacePoint,SurfaceNormal);
  // Enemy placement commits the same wire pull as the secondary press.
  if(Enemy && Player->Traversal) Player->Traversal->TryWireRecall(this);
@@ -402,16 +405,24 @@ bool ABBSBBunniarCompanion::CanMaintainAirHover() const
  const auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  const auto* Controller=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
  return bAirHovering && Player && Controller && Controller->IsLocalController() && Player->FieldActions &&
+  (bWireAnchored || FVector::DistSquared(Player->GetActorLocation(),AirHoverPoint)<=FMath::Square(Player->FieldActions->WeaponReach+.1f)) &&
   (Player->FieldActions->InteractionEquipment()==this || bWireAnchored) && (Player->FieldActions->IsGestureChannelHeld(0) || bWireAnchored) &&
   !(Player->Combat && (Player->Combat->bDead || Player->Combat->IsStageLocked())) &&
   (!FSlateApplication::IsInitialized() || FSlateApplication::Get().IsActive());
 }
+void ABBSBBunniarCompanion::RetargetAttachedSurface(UPrimitiveComponent* Component)
+{
+ if(!bSurfaceAttached || !IsValid(SurfaceComponent) || !IsValid(Component))return;
+ const FTransform Frame=SurfaceLocalFrame*SurfaceComponent->GetComponentTransform();
+ SurfaceComponent=Component;SurfaceLocalFrame=Frame.GetRelativeTransform(Component->GetComponentTransform());
+}
 void ABBSBBunniarCompanion::HandleSurfaceDrag(FVector2D Delta)
 {
  if (!bSurfaceAttached || !IsValid(SurfaceComponent) || Delta.IsNearlyZero()) return;
+ if(!CanMaintainSurfaceAttachment()) { ReleaseSurface();return; }
  if(auto* Object=Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner())) { Object->MoveFromPointer(Delta);return; }
  DragPixels+=Delta;
- if (AActor* Target=SurfaceComponent->GetOwner(); Target && Target->Implements<UBBSBBunniarSurface>())
+ if (AActor* Target=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner()); Target)
   IBBSBBunniarSurface::Execute_BunniarDragged(Target,this,Delta,DragPixels);
 }
 void ABBSBBunniarCompanion::ReleaseSurface()
@@ -420,7 +431,7 @@ void ABBSBBunniarCompanion::ReleaseSurface()
  if (!bSurfaceAttached && !bAirHovering) return;
  SurfaceTransitFrom=GetActorTransform(); SurfaceTransitAt=GetWorld()->GetTimeSeconds(); ReturnTransitSeconds=ReturnTravelSeconds; bSurfaceReturning=true; SurfaceArrivalAlpha=0;
  bSurfaceAttached=false;bAirHovering=false;
- if (AActor* Target=IsValid(SurfaceComponent) ? SurfaceComponent->GetOwner():nullptr; IsValid(Target) && Target->Implements<UBBSBBunniarSurface>())
+ if (AActor* Target=IsValid(SurfaceComponent) ? BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner()):nullptr; IsValid(Target))
   IBBSBBunniarSurface::Execute_BunniarReleased(Target,this);
  if (AttachedDevice) { AttachedDevice->bPowered=false; AttachedDevice=nullptr; }
  SurfaceComponent=nullptr;

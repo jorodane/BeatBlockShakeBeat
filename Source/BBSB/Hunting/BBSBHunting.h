@@ -33,6 +33,7 @@ UCLASS(ClassGroup=(BBSB),meta=(BlueprintSpawnableComponent))
 class BBSB_API UBBSBHuntingComponent : public UActorComponent
 {
  GENERATED_BODY()
+ friend class UBBSBSessionSubsystem;
 public:
  UBBSBHuntingComponent();
  virtual void BeginPlay() override;
@@ -109,6 +110,8 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Save") FString SaveSlotName=TEXT("BBSB_HuntingInventory_v1");
  UFUNCTION(BlueprintCallable,Category="Save") bool SaveProgress();
  UFUNCTION(BlueprintCallable,Category="Save") bool LoadProgress();
+ UBBSBHuntingSave* CaptureProfile() const;
+ bool ApplyProfile(UBBSBHuntingSave* Save);
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") bool bCollectionHeld=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") bool bVacuuming=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Collection") bool bQuickCollection=false;

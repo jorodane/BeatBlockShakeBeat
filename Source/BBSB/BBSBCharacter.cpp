@@ -12,6 +12,7 @@
 #include "InputActionValue.h"
 #include "BBSB.h"
 #include "Field/BBSBFieldActions.h"
+#include "Field/BBSBRepairTool.h"
 #include "Character/BBSBAimGaze.h"
 #include "Character/BBSBTraversal.h"
 #include "Character/BBSBViewOcclusion.h"
@@ -33,6 +34,7 @@ ABBSBCharacter::ABBSBCharacter()
 {
  Respawn=CreateDefaultSubobject<UBBSBRespawnComponent>(TEXT("Respawn"));
  WorldMap=CreateDefaultSubobject<UBBSBWorldMapComponent>(TEXT("WorldMap"));
+ RepairTool=CreateDefaultSubobject<UBBSBRepairToolComponent>(TEXT("RepairTool"));
 	FieldActions = CreateDefaultSubobject<UBBSBFieldActionComponent>(TEXT("FieldActions"));
 	Combat = CreateDefaultSubobject<UBBSBCombatComponent>(TEXT("Combat"));
 	AimGaze = CreateDefaultSubobject<UBBSBAimGazeComponent>(TEXT("AimGaze"));
@@ -79,6 +81,24 @@ ABBSBCharacter::ABBSBCharacter()
 
 void ABBSBCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
+ if(Traversal)
+ {
+  for(FKey Key:{EKeys::W,EKeys::Up})
+  {
+   PlayerInputComponent->BindKey(Key,IE_Pressed,Traversal.Get(),&UBBSBTraversalComponent::LadderUpPressed).bConsumeInput=false;
+   PlayerInputComponent->BindKey(Key,IE_Released,Traversal.Get(),&UBBSBTraversalComponent::LadderUpReleased).bConsumeInput=false;
+  }
+  for(FKey Key:{EKeys::S,EKeys::Down})
+  {
+   PlayerInputComponent->BindKey(Key,IE_Pressed,Traversal.Get(),&UBBSBTraversalComponent::LadderDownPressed).bConsumeInput=false;
+   PlayerInputComponent->BindKey(Key,IE_Released,Traversal.Get(),&UBBSBTraversalComponent::LadderDownReleased).bConsumeInput=false;
+  }
+ }
+ for(const FKey Key:{EKeys::LeftShift,EKeys::RightShift})
+ {
+  PlayerInputComponent->BindKey(Key,IE_Pressed,Traversal.Get(),&UBBSBTraversalComponent::LadderHopPressed).bConsumeInput=false;
+  PlayerInputComponent->BindKey(Key,IE_Released,Traversal.Get(),&UBBSBTraversalComponent::LadderHopReleased).bConsumeInput=false;
+ }
 	PlayerInputComponent->BindKey(EKeys::LeftShift,IE_Pressed,this,&ABBSBCharacter::DoDash);
 	PlayerInputComponent->BindKey(EKeys::RightShift,IE_Pressed,this,&ABBSBCharacter::DoDash);
 	// Set up action bindings
@@ -181,6 +201,8 @@ void ABBSBCharacter::DoJumpEnd()
 void ABBSBCharacter::DoDash()
 {
  if(Respawn && Respawn->IsSequenceActive())return;
+ if(Traversal && Traversal->IsDashWallRecoveryActive()) { LastDashPressAt=-100;return; }
+ if(Traversal && Traversal->IsOnLadder()) { LastDashPressAt=-100;Traversal->TryLadderHop();return; }
  if(Traversal && Traversal->IsParkourActive()) { LastDashPressAt=-100;Traversal->DropParkour();return; }
  if(Traversal && Traversal->IsWireTraversalActive()) { LastDashPressAt=-100;return; }
  if(!GetWorld()) return;

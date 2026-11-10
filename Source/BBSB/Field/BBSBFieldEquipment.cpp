@@ -206,7 +206,7 @@ bool UBBSBFieldActionComponent::IsEquipmentTarget(AActor* Actor) const
  if(InteractionEquipment())
  {
   const auto* Enemy=Cast<ABBSBInkEnemy>(Actor);
-  return InteractionEquipment()==BunniarEquipment && (Actor->Implements<UBBSBBunniarSurface>() || (Enemy && !Enemy->bDefeated));
+  return InteractionEquipment()==BunniarEquipment && (BBSBBunniarSurface::Resolve(Actor) || (Enemy && !Enemy->bDefeated));
  }
  if(const auto* Enemy=Cast<ABBSBInkEnemy>(Actor)) return !Enemy->bDefeated;
  if(const auto* Prop=Cast<ABBSBBreakableProp>(Actor)) return !Prop->bBroken;
@@ -274,7 +274,7 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
  {
   if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent())return false;
   auto* Target=CameraHit.GetActor();
-  const bool HasTargetOrigin=Target && (Target->Implements<UBBSBBunniarSurface>() || Target->IsA<APawn>() || Target->IsA<ABBSBLootPickup>() || Target->IsA<ABBSBBreakableProp>() || Target->ActorHasTag(TEXT("BBSBAttackable")));
+  const bool HasTargetOrigin=Target && !Target->ActorHasTag(TEXT("BBSBPhysicalInteraction")) && (BBSBBunniarSurface::Resolve(Target) || Target->IsA<APawn>() || Target->IsA<ABBSBLootPickup>() || Target->IsA<ABBSBBreakableProp>() || Target->ActorHasTag(TEXT("BBSBAttackable")));
   // A near-camera target can overlap the clipped ray start with a large capsule.
   // Ignore the whole target in that case so it cannot hide a valid target ahead.
   if(HasTargetOrigin && !IsAimPointDepthAllowed(Target->GetActorLocation())) { Q.AddIgnoredActor(Target);continue; }

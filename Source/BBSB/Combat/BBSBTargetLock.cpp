@@ -37,6 +37,7 @@ namespace
  {
   if(!IsValid(Player) || !IsValid(Enemy)) return false;
   FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBTargetLockSight),false,Player);Q.AddIgnoredActor(Enemy);
+  if(Enemy->AimOccluder)Q.AddIgnoredActor(Enemy->AimOccluder);
   for(TActorIterator<ABBSBInkProjectile> It(Player->GetWorld());It;++It) Q.AddIgnoredActor(*It);
   FHitResult Hit;
   return !Player->GetWorld()->LineTraceSingleByObjectType(Hit,Eye,Enemy->GetAimPoint(),BBSBCombatVisuals::GeometryTypes(),Q);

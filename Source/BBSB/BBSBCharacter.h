@@ -20,6 +20,7 @@ class UBBSBHuntingComponent;
 class UBBSBEquipmentGrowthComponent;
 class UBBSBRespawnComponent;
 class UBBSBWorldMapComponent;
+class UBBSBRepairToolComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -76,6 +77,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBEquipmentGrowthComponent> EquipmentGrowth;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBRespawnComponent> Respawn;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBWorldMapComponent> WorldMap;
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBRepairToolComponent> RepairTool;
 
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;

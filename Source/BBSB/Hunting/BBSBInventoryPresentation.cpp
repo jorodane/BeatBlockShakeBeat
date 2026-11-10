@@ -5,6 +5,7 @@
 #include "BBSBCharacter.h"
 #include "Engine/World.h"
 #include "Field/BBSBFieldActions.h"
+#include "Field/BBSBRepairTool.h"
 #include "Components/Image.h"
 #include "Components/CanvasPanelSlot.h"
 
@@ -138,8 +139,8 @@ int32 UBBSBInventoryWidget::PaintTooltip(const FGeometry& G,FSlateWindowElementL
   const bool Ecstasy=Hunting->IsEcstasyWeapon(Entry->InstanceId);
   Stats.Add({EBBSBGameIcon::Level,Ecstasy ? FString::Printf(TEXT("Lv.%d · 엑스타시 · 공격력 +%.0f%%"),Entry->WeaponLevel,Item->EcstasyAttackBonus*100):FString::Printf(TEXT("Lv.%d · 엑스태틱 %lld / %lld"),Entry->WeaponLevel,Hunting->WeaponExperienceInLevel(Entry->InstanceId),Hunting->WeaponExperienceToNextLevel(Entry->InstanceId))});
   const auto Snapshot=Growth ? Growth->WeaponSnapshot(Entry->InstanceId):FBBSBWeaponSnapshot();const float Multiplier=Snapshot.InstanceId.IsValid() ? Snapshot.DamageMultiplier:Item->WeaponDamageMultiplier*(1+(FMath::Max(1,Entry->WeaponLevel)-1)*Item->DamagePerLevel);
-  Stats.Add({EBBSBGameIcon::Attack,FString::Printf(TEXT("공격력  %.1f"),(Player ? Player->FieldActions->BaseDamage:18.f)*Multiplier+Snapshot.FlatDamage)});Stats.Add({EBBSBGameIcon::Cooldown,FString::Printf(TEXT("쿨타임  %.2f초"),Item->NormalBeatCooldown*Snapshot.CooldownMultiplier)});
-  Actions=Patterns(Item->WeaponId);
+  Stats.Add({EBBSBGameIcon::Attack,FString::Printf(TEXT("공격력  %.1f"),(Item->bRepairTool ? (Player && Player->RepairTool ? Player->RepairTool->Damage:22.f):(Player ? Player->FieldActions->BaseDamage:18.f))*Multiplier+Snapshot.FlatDamage)});Stats.Add({EBBSBGameIcon::Cooldown,FString::Printf(TEXT("쿨타임  %.2f초"),Item->NormalBeatCooldown*Snapshot.CooldownMultiplier)});
+  Actions=Item->bRepairTool ? TArray<FActionHint>{{EBBSBGameIcon::Beat,TEXT("좌클릭 Beat"),TEXT("직접 한 번 타격 → 긴 회복")},{EBBSBGameIcon::Hold,TEXT("우클릭 Hold + Beat"),TEXT("판 고정 → 자체 박자에 최대 세 번 타격")}}:Patterns(Item->WeaponId);
  }
  if(Module && Growth) { Stats.Add({EBBSBGameIcon::Level,FString::Printf(TEXT("강화 단계  Lv.%d / %d"),Growth->ModuleLevel(Module->ModuleId),Module->MaximumLevel)});Stats.Add({Module->Slot==EBBSBModuleSlot::Aerial ? EBBSBGameIcon::Glide:EBBSBGameIcon::Wire,Module->Slot==EBBSBModuleSlot::Aerial ? TEXT("공중 모듈 · 활강"):TEXT("방향 모듈 · 와이어")}); }
  float ActionHeight=Actions.IsEmpty() ? 0:12*S;

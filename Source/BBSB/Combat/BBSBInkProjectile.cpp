@@ -30,7 +30,8 @@ namespace
  {
   FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBInkFlight),false,Shot);
   if(Pawn) Query.AddIgnoredActor(Pawn);
-  for(TActorIterator<ABBSBInkEnemy> It(Shot->GetWorld());It;++It) Query.AddIgnoredActor(*It);
+  for(TActorIterator<ABBSBInkEnemy> It(Shot->GetWorld());It;++It)
+  { Query.AddIgnoredActor(*It);if(IsValid(It->AimOccluder)) Query.AddIgnoredActor(It->AimOccluder); }
   return Query;
  }
 }

@@ -231,7 +231,7 @@ FVector2D UBBSBWorldMapComponent::WorldToMap(FVector P) const
 FVector UBBSBWorldMapComponent::MapToWorld(FVector2D UV) const
 { return FVector(MapCenter.X+(.5-UV.Y)*MapHalfExtent*2,MapCenter.Y+(UV.X-.5)*MapHalfExtent*2,0); }
 bool UBBSBWorldMapComponent::IsPointAvailable(ABBSBRespawnPoint* Point) const
-{ return Player && Player->Respawn && Player->Respawn->IsPointDiscovered(Point); }
+{ return Player && Player->Respawn && IsValid(Point) && Point->bTravelAvailable && Player->Respawn->IsPointDiscovered(Point); }
 FVector2D UBBSBWorldMapComponent::MapMarkerPosition(ABBSBRespawnPoint* Point) const
 { return FullWidget ? FullWidget->MarkerPosition(Point):FVector2D::ZeroVector; }
 void UBBSBWorldMapComponent::RefreshPoints()
