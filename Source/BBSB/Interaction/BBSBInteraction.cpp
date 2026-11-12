@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/Texture2D.h"
 #include "Engine/DamageEvents.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -29,6 +30,22 @@
 UBBSBInteractionComponent::UBBSBInteractionComponent()
 {
  PrimaryComponentTick.bCanEverTick=true;PrimaryComponentTick.TickGroup=TG_PostUpdateWork;
+ static ConstructorHelpers::FObjectFinder<UTexture2D> Hero(TEXT("/Game/BBSB/UI/Dialogue/T_Portrait_Reparado.T_Portrait_Reparado"));ReparadoPortrait=Hero.Object;
+ static ConstructorHelpers::FObjectFinder<UTexture2D> Buddy(TEXT("/Game/BBSB/UI/Dialogue/T_Portrait_Bunniar.T_Portrait_Bunniar"));BunniarPortrait=Buddy.Object;
+ static ConstructorHelpers::FObjectFinder<UTexture2D> Partner(TEXT("/Game/BBSB/UI/Dialogue/T_Portrait_Partner.T_Portrait_Partner"));DefaultPartnerPortrait=Partner.Object;
+ auto Expressions=[&](TMap<EBBSBDialogueExpression,TObjectPtr<UTexture2D>>& Into,const TCHAR* Character)
+ {
+  const TCHAR* Names[]={TEXT("Neutral"),TEXT("Warm"),TEXT("Annoyed"),TEXT("Surprised")};
+  for(int32 I=0;I<4;++I)
+  {
+   const FString Name=FString::Printf(TEXT("T_Dialogue_%s_%s"),Character,Names[I]);
+   ConstructorHelpers::FObjectFinder<UTexture2D> Texture(*(TEXT("/Game/BBSB/UI/Dialogue/Illustrated/")+Name+TEXT(".")+Name));
+   if(Texture.Succeeded())Into.Add(static_cast<EBBSBDialogueExpression>(I),Texture.Object);
+  }
+ };
+ Expressions(ReparadoExpressions,TEXT("Reparado"));Expressions(BunniarExpressions,TEXT("Bunniar"));
+ static ConstructorHelpers::FObjectFinder<UTexture2D> PartnerCut(TEXT("/Game/BBSB/UI/Dialogue/Illustrated/T_Dialogue_Partner_Neutral.T_Dialogue_Partner_Neutral"));
+ if(PartnerCut.Succeeded())DefaultPartnerExpressions.Add(EBBSBDialogueExpression::Neutral,PartnerCut.Object);
 }
 void UBBSBInteractionComponent::BeginPlay()
 {
@@ -45,7 +62,7 @@ void UBBSBInteractionComponent::BindControls()
   Controls=NewObject<UInputComponent>(this,TEXT("BunniarDialogueControls"));Controls->RegisterComponent();Controls->Priority=40;
   // Dynamic bindings below do not consume keys outside a conversation.
   auto& Next=Controls->BindKey(EKeys::Enter,IE_Pressed,this,&UBBSBInteractionComponent::AdvanceDialogue);Next.bConsumeInput=false;
-  auto& Close=Controls->BindKey(EKeys::BackSpace,IE_Pressed,this,&UBBSBInteractionComponent::EndDialogue);Close.bConsumeInput=false;
+  auto& Close=Controls->BindKey(EKeys::BackSpace,IE_Pressed,this,&UBBSBInteractionComponent::RequestDialogueClose);Close.bConsumeInput=false;
   PC->PushInputComponent(Controls);
  }
 }
@@ -61,15 +78,20 @@ bool UBBSBInteractionComponent::BeginDialogue(ABBSBInteractionNPC* NPC)
 {
  if(Player && Player->Traversal && Player->Traversal->IsWireTraversalActive()) return false;
  auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr;
- if(!PC || !IsValid(NPC) || Player->Combat->bDead || Player->Combat->IsStageLocked()) return false;
- if(bDialogueActive && ActiveNPC==NPC) return true;
+ if(!PC || !IsValid(NPC) || NPC->DialogueLineCount()==0 || Player->Combat->bDead || Player->Combat->IsStageLocked()) return false;
+ if(bDialogueActive && ActiveNPC==NPC) return !bDialogueClosing;
+ AActor* CurrentView=PC->GetViewTarget();
+ const bool ReturningCamera=CurrentView && CurrentView->ActorHasTag(TEXT("BBSBDialogueCamera")) && PreviousViewTarget.IsValid();
+ const TWeakObjectPtr<AActor> RestoreView=(bDialogueActive || ReturningCamera) ? PreviousViewTarget:TWeakObjectPtr<AActor>(CurrentView);
  if(bDialogueActive) EndDialogue();
- ActiveNPC=NPC;LineIndex=0;PreviousViewTarget=PC->GetViewTarget();bDialogueActive=true;
+ ActiveNPC=NPC;LineIndex=0;PreviousViewTarget=RestoreView.IsValid() ? RestoreView.Get():static_cast<AActor*>(Player.Get());bDialogueActive=true;bDialogueClosing=false;bCameraReturning=false;DialogueCloseElapsed=0;
+ bFramingReady=false;ReparadoExpression=BunniarExpression=PartnerExpression=EBBSBDialogueExpression::Neutral;UpdateSpeaker(0,true);
  PC->SetIgnoreMoveInput(true);PC->SetIgnoreLookInput(true);bOwnMoveIgnore=bOwnLookIgnore=true;
  Player->GetCharacterMovement()->StopMovementImmediately();
  FActorSpawnParameters P;P.ObjectFlags|=RF_Transient;P.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
  DialogueCamera=GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(),FTransform::Identity,P);
  if(!DialogueCamera) { EndDialogue();return false; }
+ DialogueCamera->Tags.Add(TEXT("BBSBDialogueCamera"));
  DialogueCamera->GetCameraComponent()->PostProcessSettings=Player->GetFollowCamera()->PostProcessSettings;
  DialogueCamera->GetCameraComponent()->PostProcessBlendWeight=Player->GetFollowCamera()->PostProcessBlendWeight;
  UpdateCamera();PC->SetViewTargetWithBlend(DialogueCamera,CameraBlendSeconds);
@@ -78,22 +100,41 @@ bool UBBSBInteractionComponent::BeginDialogue(ABBSBInteractionNPC* NPC)
 }
 void UBBSBInteractionComponent::AdvanceDialogue()
 {
- if(!bDialogueActive || !IsValid(ActiveNPC)) return;
- if(++LineIndex>=ActiveNPC->Lines.Num()) EndDialogue();
+ if(!bDialogueActive || bDialogueClosing || !IsValid(ActiveNPC)) return;
+ // A quick second press finishes the entrance instead of skipping unseen text.
+ if(PresentationElapsed<PresentationIntroSeconds() || BubbleRevealProgress()<1.f)
+ {
+  PresentationElapsed=FMath::Max(PresentationElapsed,PresentationIntroSeconds());BubbleRevealElapsed=FMath::Max(.05f,BubbleGrowSeconds);return;
+ }
+ if(LineIndex+1>=ActiveNPC->DialogueLineCount())RequestDialogueClose();
+ else { ++LineIndex;UpdateSpeaker(0); }
+}
+void UBBSBInteractionComponent::RequestDialogueClose()
+{
+ if(bDialogueClosing)return;
+ if(!bDialogueActive || !Player || !GetWorld() || !GetWorld()->IsGameWorld() || !IsValid(ActiveNPC) || PresentationElapsed<=0)
+ { EndDialogue();return; }
+ ClosingBubbleFrom=BubbleRevealProgress();bDialogueClosing=true;DialogueCloseElapsed=0;
+ if(auto* PC=Cast<APlayerController>(Player->GetController());PC && PC->GetViewTarget()==DialogueCamera)
+ {
+  PC->SetViewTargetWithBlend(PreviousViewTarget.IsValid() ? PreviousViewTarget.Get():Player.Get(),FMath::Max(.05f,DialogueCloseDuration()),VTBlend_EaseInOut,2.f,true);
+  bCameraReturning=true;
+ }
 }
 void UBBSBInteractionComponent::EndDialogue()
 {
  if(!bDialogueActive && !bOwnMoveIgnore && !bOwnLookIgnore) return;
- bDialogueActive=false;ActiveNPC=nullptr;
+ bDialogueActive=bDialogueClosing=false;ActiveNPC=nullptr;bFramingReady=false;PresentationElapsed=BubbleRevealElapsed=DialogueCloseElapsed=0;
  if(auto* PC=Player ? Cast<APlayerController>(Player->GetController()):nullptr)
  {
   if(bOwnMoveIgnore) PC->SetIgnoreMoveInput(false);
   if(bOwnLookIgnore) PC->SetIgnoreLookInput(false);
-  if(PC->GetViewTarget()==DialogueCamera) PC->SetViewTargetWithBlend(PreviousViewTarget.IsValid() ? PreviousViewTarget.Get():Player.Get(),CameraBlendSeconds);
+  if(!bCameraReturning && PC->GetViewTarget()==DialogueCamera) PC->SetViewTargetWithBlend(PreviousViewTarget.IsValid() ? PreviousViewTarget.Get():Player.Get(),CameraBlendSeconds);
  }
- bOwnMoveIgnore=bOwnLookIgnore=false;PreviousViewTarget.Reset();
+ // Keep the weak return target while the outgoing camera still owns the blend.
+ bOwnMoveIgnore=bOwnLookIgnore=false;
  // Keep the camera alive through the outgoing blend.
- if(DialogueCamera) { DialogueCamera->SetLifeSpan(FMath::Max(.1f,CameraBlendSeconds+.1f));DialogueCamera=nullptr; }
+ if(DialogueCamera) { DialogueCamera->SetLifeSpan(FMath::Max(CameraBlendSeconds,bCameraReturning ? DialogueCloseDuration():.0f)+.1f);DialogueCamera=nullptr; }bCameraReturning=false;
  if(Controls) for(auto& Binding:Controls->KeyBindings) Binding.bConsumeInput=false;
 }
 void UBBSBInteractionComponent::TickComponent(float DT,ELevelTick Type,FActorComponentTickFunction* Function)
@@ -101,48 +142,15 @@ void UBBSBInteractionComponent::TickComponent(float DT,ELevelTick Type,FActorCom
  Super::TickComponent(DT,Type,Function);
  BindControls();UpdateQuickInteraction();
  if(!bDialogueActive) return;
- if(!IsValid(ActiveNPC) || !Player || Player->Combat->bDead || Player->Combat->IsStageLocked() || FVector::Dist(Player->GetActorLocation(),ActiveNPC->GetActorLocation())>1000) { EndDialogue();return; }
- UpdateCamera();
-}
-void UBBSBInteractionComponent::UpdateCamera()
-{
- if(!DialogueCamera || !ActiveNPC) return;
- const FVector Focus=ActiveNPC->HeadPoint()-FVector(0,0,12);
- FVector Desired=Focus+ActiveNPC->GetActorForwardVector()*CameraDistance+ActiveNPC->GetActorRightVector()*CameraSideOffset+FVector(0,0,20);
- FCollisionQueryParams Q(SCENE_QUERY_STAT(BunniarDialogueCamera),false,ActiveNPC);Q.AddIgnoredActor(Player);Q.AddIgnoredActor(DialogueCamera);Q.AddIgnoredActor(Player->FieldActions->BunniarEquipment);
- FHitResult Wall;
- if(GetWorld()->SweepSingleByChannel(Wall,Focus,Desired,FQuat::Identity,ECC_Camera,FCollisionShape::MakeSphere(12),Q)) Desired=Wall.Location+Wall.Normal*2;
- DialogueCamera->SetActorLocationAndRotation(Desired,(Focus-Desired).Rotation());DialogueCamera->GetCameraComponent()->SetFieldOfView(CameraFOV);
-}
-FString UBBSBInteractionComponent::DisplayedLine() const
-{
- if(!bDialogueActive || !ActiveNPC || !ActiveNPC->Lines.IsValidIndex(LineIndex)) return FString();
- const FString Line=ActiveNPC->Lines[LineIndex].ToString();
- if(!ActiveNPC->bFaceCovered) return Line;
- FString Mask;
- for(int32 I=0;I<Line.Len();++I)
+ if(!IsValid(ActiveNPC) || LineIndex>=ActiveNPC->DialogueLineCount() || !Player || Player->Combat->bDead || Player->Combat->IsStageLocked() || FVector::Dist(Player->GetActorLocation(),ActiveNPC->GetActorLocation())>1000) { EndDialogue();return; }
+ if(bDialogueClosing)
  {
-  const TCHAR C=Line[I];
-  if(C=='\n' || C=='\r') Mask.AppendChar(C);
-  else if(C>=0xDC00 && C<=0xDFFF && I>0 && Line[I-1]>=0xD800 && Line[I-1]<=0xDBFF) continue;
-  else Mask.AppendChar(TEXT('.'));
+  DialogueCloseElapsed+=FMath::Max(0.f,DT);UpdateBunniarPortraitAttachment(DT,false);
+  if(DialogueCloseElapsed>=DialogueCloseDuration())EndDialogue();
+  return;
  }
- return Mask;
+ UpdateSpeaker(DT);UpdateCamera();
 }
-void UBBSBInteractionComponent::DrawDialogue(AHUD* HUD,UCanvas* Canvas) const
-{
- if(!bDialogueActive) { DrawQuickInteraction(HUD,Canvas);return; }
- if(!ActiveNPC || !HUD || !Canvas) return;
- const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.4f),Width=FMath::Min(1000*S,Canvas->ClipX-40*S),X=(Canvas->ClipX-Width)*.5f,Y=Canvas->ClipY-190*S;
- HUD->DrawRect(FLinearColor(.13f,.11f,.16f,.94f),X,Y,Width,146*S);
- HUD->DrawText(ActiveNPC->DisplayName.ToString(),FLinearColor(.98f,.8f,.85f),X+22*S,Y+14*S,GEngine->GetMediumFont(),S);
- FString Row;float RowY=Y+47*S;
- auto DrawRow=[&]() { HUD->DrawText(Row,FLinearColor(.97f,.92f,.85f),X+22*S,RowY,GEngine->GetMediumFont(),S);RowY+=24*S;Row.Reset(); };
- for(TCHAR C:DisplayedLine()) { if(C=='\n') { DrawRow();continue; }float TW,TH;Canvas->StrLen(GEngine->GetMediumFont(),Row+FString::Chr(C),TW,TH);if(TW*S>Width-44*S) DrawRow();Row.AppendChar(C); }
- if(!Row.IsEmpty()) DrawRow();
- HUD->DrawText(TEXT("Enter: 다음  |  Backspace: 대화 종료  |  좌클릭 해제: 버니아만 회수"),FLinearColor(.75f,.75f,.8f),X+22*S,Y+119*S,GEngine->GetSmallFont(),S);
-}
-
 ABBSBInteractionNPC::ABBSBInteractionNPC()
 {
  PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.TickGroup=TG_PostPhysics;
@@ -228,7 +236,7 @@ void ABBSBCarryObject::OnConstruction(const FTransform& Transform)
 }
 void ABBSBCarryObject::BeginPlay()
 {
- Super::BeginPlay();Home=GetActorTransform();Health=MaximumHealth;NormalPawnResponse=Body->GetCollisionResponseToChannel(ECC_Pawn);NormalCameraResponse=Body->GetCollisionResponseToChannel(ECC_Camera);Body->SetMassOverrideInKg(NAME_None,MassKg,true);Body->SetSimulatePhysics(true);Body->OnComponentHit.AddDynamic(this,&ABBSBCarryObject::OnBodyHit);
+ Super::BeginPlay();Home=GetActorTransform();Health=MaximumHealth;if(ActorHasTag(TEXT("BBSBStepCrate")))Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Block);NormalPawnResponse=Body->GetCollisionResponseToChannel(ECC_Pawn);NormalCameraResponse=Body->GetCollisionResponseToChannel(ECC_Camera);Body->SetMassOverrideInKg(NAME_None,MassKg,true);Body->SetSimulatePhysics(true);Body->OnComponentHit.AddDynamic(this,&ABBSBCarryObject::OnBodyHit);InitializeCarrySafety();
 }
 float ABBSBCarryObject::DamageForSpeed(float Speed) const { return Speed<MinimumImpactSpeed ? 0.f:FMath::Max(0.f,Speed)*.01f*ImpactDamagePerMeterPerSecond; }
 void ABBSBCarryObject::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal)
@@ -240,6 +248,8 @@ void ABBSBCarryObject::BunniarArrived_Implementation(ABBSBBunniarCompanion* Budd
 {
  if(bBroken || AttachedBuddy.Get()!=Buddy) return;
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));if(!Player) return;
+ // Recheck arrival: the player can land on the prop during the visible flight.
+ if(!CanBeCarriedBy(Player)) { Buddy->ReleaseSurface();return; }
  bCarried=true;bManipulating=bCarryBlocked=false;BlockedTravel=0;CarryOwner=Player;
  Body->SetSimulatePhysics(false);Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Ignore);Body->SetCollisionResponseToChannel(ECC_Camera,ECR_Ignore);PreviousPlayerPosition=Player->GetActorLocation();
  bOwnBodyMoveIgnore=!Body->GetMoveIgnoreActors().Contains(Player);bOwnPlayerMoveIgnore=!Player->GetCapsuleComponent()->GetMoveIgnoreActors().Contains(this);
@@ -428,7 +438,7 @@ void ABBSBCarryObject::SampleMotion()
 FVector ABBSBCarryObject::ReleaseVelocity() { SampleMotion();return CarryVelocity; }
 void ABBSBCarryObject::Tick(float DT)
 {
- Super::Tick(DT);if(bBroken) return;
+ Super::Tick(DT);if(bBroken) { TickCarrySafety(DT,Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0)));return; }
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  if(bCarried)
  {
@@ -447,20 +457,10 @@ void ABBSBCarryObject::Tick(float DT)
  }
  else
  {
-  // The authored step crate rests kinematically on support, so a landing pawn cannot kick it away.
-  // Carrying still uses the shared pointer path; an explicit Flick remains a physical throw.
-  if(ActorHasTag(TEXT("BBSBStepCrate")) && !AttachedBuddy.IsValid())
-  {
-   const FVector Bottom=Body->Bounds.Origin-FVector::UpVector*Body->Bounds.BoxExtent.Z;
-   FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBStepSupport),false,this);Query.AddIgnoredActor(Player);
-   if(Player && Player->FieldActions)Query.AddIgnoredActor(Player->FieldActions->BunniarEquipment);
-   FHitResult Support;const bool Grounded=GetWorld()->LineTraceSingleByObjectType(Support,Bottom+FVector::UpVector*4.f,Bottom-FVector::UpVector*8.f,BBSBCombatVisuals::GeometryTypes(),Query) && Support.ImpactNormal.Z>.65f;
-   if(Body->IsSimulatingPhysics() && Grounded && Body->GetPhysicsLinearVelocity().Size()<60.f && Body->GetPhysicsAngularVelocityInDegrees().Size()<20.f)Body->SetSimulatePhysics(false);
-   else if(!Body->IsSimulatingPhysics() && !Grounded) { Body->SetSimulatePhysics(true);Body->WakeAllRigidBodies(); }
-  }
+  TickStepCratePhysics(DT,Player);
   PrePhysicsVelocity=Body->GetPhysicsLinearVelocity();
-  const float Clearance=Player ? FMath::Max(100.f,Player->GetCapsuleComponent()->GetScaledCapsuleRadius()+float(Body->Bounds.SphereRadius)+15.f):0;
-  if(PawnIgnoreUntil>=0 && GetWorld()->GetTimeSeconds()>=PawnIgnoreUntil && (!Player || FVector::Dist(Player->GetActorLocation(),GetActorLocation())>Clearance)) { Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1; }
+  RestoreReleasedPawnCollision();
+  TickCarrySafety(DT,Player);
  }
 }
 void ABBSBCarryObject::Drop(bool bThrow)
@@ -468,7 +468,8 @@ void ABBSBCarryObject::Drop(bool bThrow)
  if(!bCarried) return;
  const FVector Velocity=ActorHasTag(TEXT("BBSBStepCrate")) && !bThrow ? FVector::ZeroVector:ReleaseVelocity();bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryIgnores();
  if(bThrow) LastThrowVelocity=Velocity;
- Body->SetSimulatePhysics(true);Body->SetPhysicsLinearVelocity(Velocity);PrePhysicsVelocity=Velocity;PawnIgnoreUntil=GetWorld()->GetTimeSeconds()+.25;
+ PrepareStepCrateSimulation();Body->SetSimulatePhysics(true);Body->SetPhysicsLinearVelocity(Velocity);PrePhysicsVelocity=Velocity;
+ PawnIgnoreUntil=GetWorld()->GetTimeSeconds()+(ActorHasTag(TEXT("BBSBStepCrate")) ? 0.:.25);RestoreReleasedPawnCollision();
 }
 void ABBSBCarryObject::BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy)
 {
@@ -504,6 +505,7 @@ void ABBSBCarryObject::BreakObject()
 }
 void ABBSBCarryObject::ResetObject()
 {
- if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();Body->SetSimulatePhysics(false);SetActorTransform(Home);bBroken=bCarried=bManipulating=false;Health=MaximumHealth;Motion.Reset();Contacts.Reset();CarryVelocity=LastThrowVelocity=PrePhysicsVelocity=FVector::ZeroVector;LastImpactDamage=LastImpactSpeed=0;Body->SetVisibility(true);Body->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1;BlockedTravel=0;bCarryBlocked=false;Body->SetSimulatePhysics(true);
+ if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();Body->SetSimulatePhysics(false);SetActorTransform(Home);bBroken=bCarried=bManipulating=false;Health=MaximumHealth;Motion.Reset();Contacts.Reset();CarryVelocity=LastThrowVelocity=PrePhysicsVelocity=FVector::ZeroVector;LastImpactDamage=LastImpactSpeed=0;Body->SetVisibility(true);Body->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1;BlockedTravel=0;bCarryBlocked=false;PrepareStepCrateSimulation();Body->SetSimulatePhysics(true);
 }
 void ABBSBCarryObject::EndPlay(const EEndPlayReason::Type Reason) { if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();ReleaseCarryIgnores();Super::EndPlay(Reason); }
+

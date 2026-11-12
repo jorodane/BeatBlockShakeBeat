@@ -1,4 +1,5 @@
 #pragma once
+#include "UI/BBSBPaperTheme.h"
 #include "Hunting/BBSBItem.h"
 #include "Hunting/BBSBItemIcon.h"
 #include "Hunting/BBSBGameIcons.h"
@@ -13,11 +14,11 @@
 struct FBBSBInventoryDraw
 {
  const FGeometry& G;FSlateWindowElementList& E;int32 Layer;float S;
- static FLinearColor Paper() { return FLinearColor(.94f,.92f,.90f); }
- static FLinearColor Ground() { return FLinearColor(.095f,.077f,.085f,.98f); }
- static FLinearColor CellGround() { return FLinearColor(.052f,.043f,.05f,.96f); }
- static FLinearColor Faint() { return FLinearColor(.65f,.60f,.61f); }
- static FLinearColor Accent() { return FLinearColor(.97f,.76f,.80f); }
+ static FLinearColor Paper() { return BBSBPaper::Ink(); }
+ static FLinearColor Ground() { return BBSBPaper::Paper(); }
+ static FLinearColor CellGround() { return BBSBPaper::Cell(); }
+ static FLinearColor Faint() { return BBSBPaper::Muted(); }
+ static FLinearColor Accent() { return BBSBPaper::Rose(); }
  void Box(FVector2D P,FVector2D Size,FLinearColor C,int32 Z=0) const
  { FSlateDrawElement::MakeBox(E,Layer+Z,G.ToPaintGeometry(Size,FSlateLayoutTransform(P)),FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")),ESlateDrawEffect::None,C); }
  void Text(const FString& T,FVector2D P,float Size,FLinearColor C,int32 Z=4) const
@@ -32,10 +33,10 @@ struct FBBSBInventoryDraw
   // Slate names the orientation of the stop lines, rather than the colour axis.
   FSlateDrawElement::MakeGradient(E,Layer+Z,G.ToPaintGeometry(Size,FSlateLayoutTransform(P)),Stops,Horizontal ? Orient_Vertical:Orient_Horizontal);
  }
- void Panel(FVector2D P,FVector2D Size) const { Box(P-FVector2D(S),Size+FVector2D(2*S),Paper(),1);Box(P,Size,Ground(),2); }
+ void Panel(FVector2D P,FVector2D Size) const { BBSBPaper::SlatePanel(G,E,Layer,P,Size,S); }
  void Cell(FVector2D P,FVector2D Size,FLinearColor Rarity,bool Filled,bool Active,bool Valid=true) const
  {
-  Box(P,Size,Active ? (Valid ? Paper():FLinearColor(1,.35f,.43f)):FLinearColor(.56f,.51f,.53f),3);
+  Box(P,Size,Active ? (Valid ? Paper():FLinearColor(1,.35f,.43f)):BBSBPaper::Muted(),3);
   const float In=Active ? 2.5f*S:S;Box(P+FVector2D(In),Size-FVector2D(In*2),CellGround(),4);
   if(Filled)
   {

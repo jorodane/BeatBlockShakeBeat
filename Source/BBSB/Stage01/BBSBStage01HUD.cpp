@@ -1,3 +1,4 @@
+#include "UI/BBSBPaperTheme.h"
 #include "Stage01/BBSBStage01.h"
 #include "BBSBCharacter.h"
 #include "Field/BBSBRepairTool.h"
@@ -62,17 +63,18 @@ void ABBSBStage01HUD::DrawHUD()
  ABBSBStage01Director* D=nullptr;for(TActorIterator<ABBSBStage01Director> It(GetWorld());It;++It) { D=*It;break; }if(!D)return;
  if(Player->Hunting->bInventoryOpen || Player->WorldMap->bMapOpen || Player->Interaction->bDialogueActive || Player->Respawn->IsSequenceActive())return;
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.3f),W=Canvas->ClipX,H=Canvas->ClipY;
- const FLinearColor Paper(.14f,.12f,.15f,.88f),Ink(.96f,.92f,.88f),Pink(.91f,.56f,.65f),Mint(.54f,.82f,.75f);
+ const FLinearColor Paper=BBSBPaper::Paper(),Ink=BBSBPaper::Ink(),Pink=BBSBPaper::Rose(),Mint(.17f,.39f,.31f);
  auto Text=[&](const FString& Value,FLinearColor Color,float X,float Y,float Pixels)
- { FCanvasTextItem Item(FVector2D(X,Y),FText::FromString(Value),BBSBHUDTypography::NumberFont(Pixels),Color);Item.bOutlined=true;Item.OutlineColor=FLinearColor(.10f,.08f,.12f,.8f);Canvas->DrawItem(Item); };
- DrawRect(Paper,22*S,22*S,FMath::Min(930*S,W-44*S),73*S);
+ { FCanvasTextItem Item(FVector2D(X,Y),FText::FromString(Value),BBSBHUDTypography::NumberFont(Pixels),Color);Canvas->DrawItem(Item); };
+ auto PaperPanel=[&](float X,float Y,float Width,float Height){BBSBPaper::CanvasPanel(Canvas,FVector2D(X,Y),FVector2D(Width,Height),S);};
+ PaperPanel(22*S,22*S,FMath::Min(930*S,W-44*S),73*S);
  Text(TEXT("버니아 반 발자국 상단"),Pink,35*S,30*S,16*S);
  Text(D->Objective(),Ink,35*S,61*S,14*S);
  if(!D->Caption.IsEmpty())
  {
   const float X=W*.5f-360*S,Y=H*.73f;
   TArray<FString> Paragraphs,Lines;D->Caption.ParseIntoArrayLines(Paragraphs);for(const FString& P:Paragraphs)for(int32 Start=0;Start<P.Len();Start+=38)Lines.Add(P.Mid(Start,38));
-  DrawRect(Paper,X,Y,720*S,(24+24*Lines.Num())*S);for(int32 I=0;I<Lines.Num();++I)Text(Lines[I],Ink,X+18*S,Y+(10+24*I)*S,17*S);
+  PaperPanel(X,Y,720*S,(24+24*Lines.Num())*S);for(int32 I=0;I<Lines.Num();++I)Text(Lines[I],Ink,X+18*S,Y+(10+24*I)*S,17*S);
  }
  if(D->Phase>=EBBSBStage01Phase::Restock)Text(FString::Printf(TEXT("[R] 회복 차  %d / 3"),D->Tea),Mint,24*S,H-90*S,16*S);
  if(Player->RepairTool && Player->RepairTool->IsRepairToolEquipped())
@@ -80,13 +82,13 @@ void ABBSBStage01HUD::DrawHUD()
   const float X=W*.5f,Y=H*.58f;
   if(Player->RepairTool->bBoardPlaced)
   {
-   DrawRect(Paper,X-110*S,Y,220*S,25*S);DrawRect(Mint,X-105*S,Y+19*S,210*S*Player->RepairTool->NextBeatProgress(),3*S);
+   PaperPanel(X-110*S,Y,220*S,25*S);DrawRect(Mint,X-105*S,Y+19*S,210*S*Player->RepairTool->NextBeatProgress(),3*S);
    Text(FString::Printf(TEXT("판 타격  %d / 3"),Player->RepairTool->BoardHits),Ink,X-54*S,Y+2*S,14*S);
   }
  }
  if(D->bGrabActive)
  {
-  const float X=W*.5f,Y=H*.48f,Spacing=78*S;DrawRect(Paper,X-350*S,Y-75*S,700*S,150*S);
+  const float X=W*.5f,Y=H*.48f,Spacing=78*S;PaperPanel(X-350*S,Y-75*S,700*S,150*S);
   Text(TEXT("방향 리듬 패링  ·  W ↑   A ←   S ↓   D →"),Ink,X-230*S,Y-58*S,17*S);
   for(int32 I=0;I<8;++I)
   {

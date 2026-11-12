@@ -54,7 +54,7 @@ FText UBBSBInteractionComponent::QuickInteractionText(AActor* A) const
  if(A->IsA<ABBSBInteractionNPC>())return FText::FromString(TEXT("대화하기"));
  if(A->IsA<ABBSBRespawnPoint>())return FText::FromString(TEXT("쉬기"));
  if(const auto* D=Cast<ABBSBInteractionDoor>(A))return FText::FromString(D->bOpen ? TEXT("닫기"):TEXT("열기"));
- if(A->IsA<ABBSBCarryObject>())return FText::FromString(TEXT("옮기기"));
+ if(const auto* Prop=Cast<ABBSBCarryObject>(A))return FText::FromString(Prop->CanBeCarriedBy(Player) ? TEXT("옮기기"):TEXT("조금 떨어져서 옮기기"));
  if(const auto* D=Cast<ABBSBStage01Device>(BBSBBunniarSurface::Resolve(A)))
  {
   switch(D->Kind)

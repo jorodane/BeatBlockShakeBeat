@@ -1,4 +1,5 @@
 #include "Puzzle/BBSBPuzzleField.h"
+#include "UI/BBSBPaperTheme.h"
 #include "Interaction/BBSBDragMotion.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
@@ -427,13 +428,14 @@ void ABBSBPuzzleFieldHUD::DrawHUD()
  if(!Canvas || !Player || !Field) return;auto* Actions=Player->FieldActions.Get();
  if(Actions->bEquipmentWheelOpen) return;
  const float S=FMath::Clamp(Canvas->ClipX/1440.f,.65f,1.3f),W=Canvas->ClipX,H=Canvas->ClipY,CX=W*.5f,CY=H*.5f;
- const FLinearColor Ink(.94f,.90f,.78f),Green(.57f,.85f,.66f),Rose(.95f,.58f,.65f),Paper(.13f,.17f,.16f,.85f);
+ const FLinearColor Ink=BBSBPaper::Ink(),Green(.17f,.39f,.31f),Rose=BBSBPaper::Rose(),Paper=BBSBPaper::Paper();
+ auto PaperPanel=[&](float X,float Y,float Width,float Height){BBSBPaper::CanvasPanel(Canvas,FVector2D(X,Y),FVector2D(Width,Height),S);};
  if(Field->bShowFieldProgress) DrawText(FString::Printf(TEXT("%s   %d / %d"),*Field->FieldTitle,Field->SolvedCount,Field->Stations.Num()),Ink,26*S,102*S,GEngine->GetSmallFont(),S);
- if(Field->bReturning) { DrawRect(Paper,CX-230*S,105*S,460*S,42*S);DrawText(TEXT("Move along the edge or turn back."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
+ if(Field->bReturning) { PaperPanel(CX-230*S,105*S,460*S,42*S);DrawText(TEXT("Move along the edge or turn back."),Ink,CX-215*S,116*S,GEngine->GetSmallFont(),S); }
  if(auto* Station=Field->Focus.Get())
  {
   const float X=CX-360*S,Y=58*S;
-  DrawRect(Paper,X,Y,720*S,114*S);
+  PaperPanel(X,Y,720*S,114*S);
   DrawText(FString::Printf(TEXT("%02d  %s   %s   [R] retry"),Station->Number,*Station->Title(),Station->bSolved ? TEXT("COMPLETE"):TEXT("")),Station->bSolved ? Green:Ink,X+16*S,Y+10*S,GEngine->GetMediumFont(),S);
   DrawText(Station->Hint(),Ink,X+16*S,Y+40*S,GEngine->GetSmallFont(),.94f*S);
   DrawText(Station->Feedback,Station->IsTimingOpen() ? Green:Rose,X+16*S,Y+64*S,GEngine->GetSmallFont(),S);
@@ -441,7 +443,7 @@ void ABBSBPuzzleFieldHUD::DrawHUD()
   const bool Timed=Station->Kind==EBBSBPuzzleKind::BeatRhythm || Station->Kind==EBBSBPuzzleKind::DiveCue || Station->Kind==EBBSBPuzzleKind::DivePendulum || (Station->Kind==EBBSBPuzzleKind::Relay && Station->Step==4);
   if(Timed)
   {
-   DrawRect(Paper,CX-130*S,CY+62*S,260*S,35*S);
+   PaperPanel(CX-130*S,CY+62*S,260*S,35*S);
    DrawText(Station->IsTimingOpen() ? TEXT("GREEN  -  NOW"):TEXT("Wait for green..."),Station->IsTimingOpen() ? Green:Ink,CX-100*S,CY+70*S,GEngine->GetSmallFont(),S);
    DrawRect(Ink,CX-120*S+240*S*Station->CuePhase(),CY+94*S,3*S,12*S);
   }

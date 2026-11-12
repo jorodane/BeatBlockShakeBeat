@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "UI/BBSBPaperMotion.h"
 #include "Camera/CameraTypes.h"
 #include "Components/ActorComponent.h"
 #include "Hunting/BBSBGrowthData.h"
@@ -69,6 +70,7 @@ public:
  void StoreInSave(UBBSBHuntingSave* Save) const;
  void NotifyWeaponHit(const FBBSBWeaponSnapshot& Snapshot,AActor* Target,float Damage,const FVector& Point,bool Support=false);
  void DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) const;
+ mutable FBBSBHUDReveal GrowthHUDReveal;
  void CancelConcerto();
  void ApplyConcertoCamera(float DT,FMinimalViewInfo& View);
  UFUNCTION(BlueprintPure,Category="Concerto") bool IsConcertoCameraActive() const { return bConcertoCameraActive; }

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Logging/LogMacros.h"
 #include "BBSBCharacter.generated.h"
 
@@ -24,6 +25,24 @@ class UBBSBRepairToolComponent;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
+
+/** Solid contact with carry props, with bounded additional character impulses. */
+UCLASS()
+class BBSB_API UBBSBCharacterMovementComponent : public UCharacterMovementComponent
+{
+ GENERATED_BODY()
+public:
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Physics Interaction|Carry",meta=(ClampMin="0")) float MaximumCarryPushAcceleration=250.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Physics Interaction|Carry",meta=(ClampMin="0")) float MaximumCarryPushForce=1500.f;
+ virtual void ApplyImpactPhysicsForces(const FHitResult& Impact,const FVector& ImpactAcceleration,const FVector& ImpactVelocity) override;
+ virtual void ApplyDownwardForce(float DeltaSeconds) override;
+protected:
+ virtual void CapsuleTouched(UPrimitiveComponent* OverlappedComp,AActor* Other,UPrimitiveComponent* OtherComp,int32 OtherBodyIndex,bool bFromSweep,const FHitResult& SweepResult) override;
+private:
+ uint64 CarryPushFrame=MAX_uint64;
+ TSet<TWeakObjectPtr<UPrimitiveComponent>> PushedCarryBodies;
+ void PushCarryBody(UPrimitiveComponent* Body,const FVector& Direction,const FVector& DesiredVelocity,const FVector& Point);
+};
 
 /**
  *  A simple player-controllable third person character
@@ -64,7 +83,7 @@ protected:
 public:
 
 	/** Constructor */
-	ABBSBCharacter();	
+	ABBSBCharacter(const FObjectInitializer& ObjectInitializer=FObjectInitializer::Get());
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB")
 	TObjectPtr<UBBSBFieldActionComponent> FieldActions;

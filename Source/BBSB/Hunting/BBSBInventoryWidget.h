@@ -1,6 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "UI/BBSBPaperWidget.h"
 #include "BBSBInventoryWidget.generated.h"
 
 class UBBSBHuntingComponent;
@@ -11,7 +11,7 @@ struct FBBSBInventoryEntry;
 class UBBSBModuleDefinition;
 
 UCLASS(Blueprintable)
-class BBSB_API UBBSBInventoryWidget : public UUserWidget
+class BBSB_API UBBSBInventoryWidget : public UBBSBPaperWidget
 {
  GENERATED_BODY()
 public:

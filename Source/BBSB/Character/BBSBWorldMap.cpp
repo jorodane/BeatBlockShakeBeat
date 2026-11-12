@@ -1,4 +1,6 @@
 #include "Character/BBSBWorldMap.h"
+#include "HAL/PlatformTime.h"
+#include "UI/BBSBPaperTheme.h"
 #include "Character/BBSBTerrainMapData.h"
 #include "Engine/Texture2D.h"
 #include "Kismet/GameplayStatics.h"
@@ -79,10 +81,18 @@ void UBBSBWorldMapWidget::CancelPointerDrag()
 int32 UBBSBWorldMapWidget::NativePaint(const FPaintArgs& Args,const FGeometry& G,const FSlateRect& Cull,FSlateWindowElementList& E,int32 Layer,const FWidgetStyle& Style,bool ParentEnabled) const
 {
  const int32 Base=Super::NativePaint(Args,G,Cull,E,Layer,Style,ParentEnabled);
- if(!Map || !Map->MapPlayer() || (!bFullMap && !Map->ShouldDrawMinimap()))return Base;
- if(!bFullMap) { const int32 Top=PaintCircularMinimap(G,E,Base);PaintWorldPing(G,E,Top+1);return Top+10; }
+ const bool MiniShown=Map && Map->MapPlayer() && Map->ShouldDrawMinimap();
+ const float Reveal=MinimapReveal.Sample(!bFullMap && MiniShown,FPlatformTime::Seconds(),.06f);
+ if(!Map || !Map->MapPlayer() || (!bFullMap && !MiniShown))return Base;
+ if(!bFullMap)
+ {
+  const float S=FMath::Clamp(float(FMath::Min(G.GetLocalSize().X/1280,G.GetLocalSize().Y/720)),.55f,1.8f);
+  const float K=.86f+.14f*Reveal;
+  const FGeometry Mini=G.MakeChild(G.GetLocalSize(),FSlateLayoutTransform(),FSlateRenderTransform(FScale2D(K),FVector2D(84,84)*S*(1-Reveal)),FVector2D(1));
+  const int32 Top=PaintCircularMinimap(Mini,E,Base);PaintWorldPing(G,E,Top+1);return Top+10;
+ }
  const auto* Player=Map->MapPlayer();const FVector2D V=G.GetLocalSize();const float S=FMath::Clamp(float(V.Y/720.f),.55f,1.8f);PaintScale=S;
- const FLinearColor Paper(.97f,.93f,.86f),Mint(.48f,.91f,.76f),Grey(.55f,.56f,.61f),Gold(1.f,.78f,.37f),Dark(.065f,.055f,.085f,.96f);
+ const FLinearColor Paper=BBSBPaper::Ink(),Mint(.16f,.39f,.31f),Grey=BBSBPaper::Muted(),Gold(.65f,.37f,.09f),Dark=BBSBPaper::Paper();
  const auto* White=FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
  auto Box=[&](FVector2D P,FVector2D Size,FLinearColor C,int32 Z=0){FSlateDrawElement::MakeBox(E,Base+Z,G.ToPaintGeometry(Size,FSlateLayoutTransform(P)),White,ESlateDrawEffect::None,C);};
  auto Text=[&](const FString& T,FVector2D P,float Size,FLinearColor C,int32 Z=5){FSlateDrawElement::MakeText(E,Base+Z,G.ToPaintGeometry(FVector2D(1),FSlateLayoutTransform(P)),T,FCoreStyle::GetDefaultFontStyle("Regular",FMath::Max(8,FMath::RoundToInt(Size*S))),ESlateDrawEffect::None,C);};
@@ -94,9 +104,11 @@ int32 UBBSBWorldMapWidget::NativePaint(const FPaintArgs& Args,const FGeometry& G
   const float Side=FMath::Min(float(V.Y-202*S),float(V.X-330*S));MapSize=FVector2D(FMath::Max(150.f*S,Side));
   MapAt=FVector2D((V.X-MapSize.X-260*S)*.5f,96*S);ListAt=MapAt+FVector2D(MapSize.X+24*S,0);ToolbarAt=MapAt+FVector2D(0,MapSize.Y+34*S);
   CloseAt=FVector2D(ListAt.X+175*S,MapAt.Y-52*S);CloseSize=FVector2D(36*S);
+  BBSBPaper::SlatePanel(G,E,Base,MapAt-FVector2D(20,80)*S,FVector2D(MapSize.X+284*S,MapSize.Y+152*S),S);
+  Box(MapAt,MapSize,BBSBPaper::Cell(),2);
   Text(TEXT("지도"),MapAt-FVector2D(0,65*S),27,Paper);
   Text(TEXT("휠 확대·축소 · 드래그 이동 · M / Esc 닫기"),MapAt+FVector2D(76,-48)*S,11,Grey);
-  Box(CloseAt,CloseSize,FLinearColor(.25f,.20f,.29f));Text(TEXT("×"),CloseAt+FVector2D(10,4)*S,22,Paper);
+  Box(CloseAt,CloseSize,BBSBPaper::Hover(),3);Text(TEXT("×"),CloseAt+FVector2D(10,4)*S,22,Paper);
   Text(TEXT("우클릭: 표식 등록/삭제 · 휠클릭: 핑"),MapAt-FVector2D(0,21*S),10,Grey);
   Text(TEXT("리스폰 표식"),ListAt,19,Paper);
   int32 Row=0;
@@ -104,13 +116,13 @@ int32 UBBSBWorldMapWidget::NativePaint(const FPaintArgs& Args,const FGeometry& G
   {
    const FVector2D At=ListAt+FVector2D(0,(36+Row++*48)*S);const bool Available=Map->IsPointAvailable(Point);
    const bool Hover=InMapRect(Pointer,At,FVector2D(220,42)*S);
-   Box(At,FVector2D(220,42)*S,Hover && Available ? FLinearColor(.22f,.37f,.34f):FLinearColor(.12f,.11f,.15f));
+   Box(At,FVector2D(220,42)*S,Hover && Available ? BBSBPaper::Hover():BBSBPaper::Cell(),3);
    Text(Available ? Point->PointName.ToString():TEXT("미등록 표식"),At+FVector2D(12,5)*S,14,Available ? Mint:Grey);
    Text(Available ? TEXT("클릭하여 버니아로 이동"):TEXT("먼저 표식에 상호작용하세요"),At+FVector2D(12,24)*S,9,Grey);
   }
   Text(TEXT("▲ 현재 위치    ◆ 등록한 표식    ◇ 미등록"),MapAt+FVector2D(0,MapSize.Y+12*S),10,Paper);
   auto Button=[&](FVector2D At,FVector2D Size,const FString& Label,bool Enabled)
-  { const bool Hover=InMapRect(Pointer,At,Size);Box(At,Size,Enabled && Hover ? Mint:Grey,1);Box(At+FVector2D(S),Size-FVector2D(2*S),Dark,2);Text(Label,At+FVector2D(8,5)*S,11,Enabled ? Paper:Grey,5); };
+  { const bool Hover=InMapRect(Pointer,At,Size);Box(At,Size,Enabled && Hover ? Mint:Grey,3);Box(At+FVector2D(S),Size-FVector2D(2*S),Dark,4);Text(Label,At+FVector2D(8,5)*S,11,Enabled ? Paper:Grey,5); };
   Button(ToolbarAt,FVector2D(32,28)*S,TEXT("−"),Zoom>1.001f);Button(ToolbarAt+FVector2D(38,0)*S,FVector2D(32,28)*S,TEXT("+"),Zoom<31.999f);
   Button(ToolbarAt+FVector2D(76,0)*S,FVector2D(86,28)*S,TEXT("전체 보기"),true);Button(ToolbarAt+FVector2D(169,0)*S,FVector2D(90,28)*S,TEXT("내 위치"),true);
   Text(FString::Printf(TEXT("가로 %.0f m"),Map->MapHalfExtent*2/(Zoom*100)),ToolbarAt+FVector2D(274,5)*S,12,Mint);
@@ -275,7 +287,7 @@ void UBBSBWorldMapComponent::EnsurePresentation()
  { auto* PC=Cast<APlayerController>(Player->GetController());MiniWidget=CreateWidget<UBBSBWorldMapWidget>(PC,UBBSBWorldMapWidget::StaticClass());if(MiniWidget) { MiniWidget->Map=this;MiniWidget->SetVisibility(ESlateVisibility::HitTestInvisible);MiniWidget->AddToViewport(10); } }
 }
 bool UBBSBWorldMapComponent::ShouldDrawMinimap() const
-{ return Player && !bMapOpen && !Player->Hunting->bInventoryOpen && !Player->Respawn->IsSequenceActive() && !Player->EquipmentGrowth->bConcertoActive && !Player->Combat->bDead; }
+{ return Player && !bMapOpen && !Player->Hunting->bInventoryOpen && !Player->Interaction->bDialogueActive && !Player->Respawn->IsSequenceActive() && !Player->EquipmentGrowth->bConcertoActive && !Player->Combat->bDead; }
 void UBBSBWorldMapComponent::TickComponent(float DT,ELevelTick Type,FActorComponentTickFunction* Function)
 {
  Super::TickComponent(DT,Type,Function);if(!Player || !Player->IsLocallyControlled())return;EnsurePresentation();InitializeMapMarkers();
@@ -294,12 +306,12 @@ bool UBBSBWorldMapComponent::OpenMap()
  bOriginalBlock=Player->FieldActions->bEquipmentInputBlocked;Player->FieldActions->bEquipmentInputBlocked=true;bOriginalCursor=PC->bShowMouseCursor;
  PC->SetIgnoreMoveInput(true);PC->SetIgnoreLookInput(true);bOwnInput=true;if(Player->GetCharacterMovement()->IsMovingOnGround())Player->GetCharacterMovement()->StopMovementImmediately();Player->ConsumeMovementInputVector();PC->RotationInput=FRotator::ZeroRotator;
  if(!FullWidget) { FullWidget=CreateWidget<UBBSBWorldMapWidget>(PC,UBBSBWorldMapWidget::StaticClass());if(!FullWidget) { bMapOpen=true;CloseMap();return false; }FullWidget->Map=this;FullWidget->bFullMap=true; }
- FullWidget->SetVisibility(ESlateVisibility::Visible);FullWidget->AddToViewport(1200);bMapOpen=true;PC->bShowMouseCursor=true;
+ FullWidget->SetVisibility(ESlateVisibility::Visible);if(!FullWidget->IsInViewport())FullWidget->AddToViewport(1200);FullWidget->OpenPaper(EBBSBPaperEntrance::Center);bMapOpen=true;PC->bShowMouseCursor=true;
  PC->SetInputMode(FInputModeUIOnly().SetWidgetToFocus(FullWidget->TakeWidget()).SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock));FullWidget->CenterOnPlayer();FullWidget->SetKeyboardFocus();return true;
 }
 void UBBSBWorldMapComponent::CloseMap()
 {
- if(!bMapOpen && !bOwnInput)return;bMapOpen=false;if(FullWidget) { FullWidget->CancelPointerDrag();FullWidget->RemoveFromParent(); }
+ if(!bMapOpen && !bOwnInput)return;bMapOpen=false;if(FullWidget) { FullWidget->CancelPointerDrag();FullWidget->ClosePaper(); }
  if(Player)
  {
   Player->FieldActions->bEquipmentInputBlocked=bOriginalBlock;
@@ -312,4 +324,4 @@ void UBBSBWorldMapComponent::CloseMap()
 bool UBBSBWorldMapComponent::TravelTo(ABBSBRespawnPoint* Point)
 { return Player && Player->Respawn && Player->Respawn->RequestFastTravel(Point); }
 void UBBSBWorldMapComponent::EndPlay(const EEndPlayReason::Type Reason)
-{ SaveMapMarkers();CloseMap();if(MiniWidget)MiniWidget->RemoveFromParent();if(Capture)Capture->DestroyComponent();Super::EndPlay(Reason); }
+{ SaveMapMarkers();CloseMap();if(FullWidget)FullWidget->RemoveFromParent();if(MiniWidget)MiniWidget->RemoveFromParent();if(Capture)Capture->DestroyComponent();Super::EndPlay(Reason); }

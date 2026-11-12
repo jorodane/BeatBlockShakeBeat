@@ -3,7 +3,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Tickable.h"
 #include "GameFramework/SaveGame.h"
-#include "Blueprint/UserWidget.h"
+#include "UI/BBSBPaperWidget.h"
 #include "Hunting/BBSBItem.h"
 #include "BBSBSession.generated.h"
 
@@ -157,7 +157,7 @@ public:
 };
 
 UCLASS()
-class BBSB_API UBBSBSessionMenu : public UUserWidget
+class BBSB_API UBBSBSessionMenu : public UBBSBPaperWidget
 {
  GENERATED_BODY()
 public:

@@ -1,3 +1,7 @@
+#include "Brushes/SlateColorBrush.h"
+#include "Components/OverlaySlot.h"
+#include "Components/Overlay.h"
+#include "UI/BBSBPaperTheme.h"
 #include "Save/BBSBSession.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -29,19 +33,25 @@ TSharedRef<SWidget> UBBSBSessionMenu::RebuildWidget()
   auto* Background=Root->AddChildToCanvas(Shade);Background->SetAnchors(FAnchors(0,0,1,1));Background->SetOffsets(FMargin(0));
   auto* Box=WidgetTree->ConstructWidget<USizeBox>();Box->SetWidthOverride(590);
   auto* Panel=Root->AddChildToCanvas(Box);Panel->SetAnchors(FAnchors(.5f,.5f));Panel->SetAlignment(FVector2D(.5f,.5f));Panel->SetAutoSize(true);
-  auto* Border=WidgetTree->ConstructWidget<UBorder>();Border->SetBrushColor(FLinearColor(.16f,.13f,.155f,.98f));Border->SetPadding(FMargin(28,22));Box->AddChild(Border);
+  PaperAnimationTarget=Box;
+  auto* Layers=WidgetTree->ConstructWidget<UOverlay>();Box->AddChild(Layers);
+  auto* Shadow=WidgetTree->ConstructWidget<UBorder>();Shadow->SetBrushColor(BBSBPaper::Shadow());auto* ShadowSlot=Layers->AddChildToOverlay(Shadow);ShadowSlot->SetPadding(FMargin(9,11,-9,-11));ShadowSlot->SetHorizontalAlignment(HAlign_Fill);ShadowSlot->SetVerticalAlignment(VAlign_Fill);
+  auto* Outline=WidgetTree->ConstructWidget<UBorder>();Outline->SetBrushColor(BBSBPaper::Ink());Outline->SetPadding(FMargin(2));auto* OutlineSlot=Layers->AddChildToOverlay(Outline);OutlineSlot->SetHorizontalAlignment(HAlign_Fill);OutlineSlot->SetVerticalAlignment(VAlign_Fill);
+  auto* Border=WidgetTree->ConstructWidget<UBorder>();Border->SetBrushColor(BBSBPaper::Paper());Border->SetPadding(FMargin(28,22));Outline->AddChild(Border);
   auto* Content=WidgetTree->ConstructWidget<UVerticalBox>();Border->AddChild(Content);
-  Content->AddChildToVerticalBox(Text(WidgetTree,TEXT("Beat! Block, Shake~ Beat!"),29,FLinearColor(.96f,.88f,.91f)))->SetPadding(FMargin(0,0,0,16));
+  Content->AddChildToVerticalBox(Text(WidgetTree,TEXT("Beat! Block, Shake~ Beat!"),29,BBSBPaper::Ink()))->SetPadding(FMargin(0,0,0,16));
   auto* ScrollSize=WidgetTree->ConstructWidget<USizeBox>();ScrollSize->SetMaxDesiredHeight(445);Content->AddChildToVerticalBox(ScrollSize);
   auto* Scroll=WidgetTree->ConstructWidget<UScrollBox>();ScrollSize->AddChild(Scroll);Rows=WidgetTree->ConstructWidget<UVerticalBox>();Scroll->AddChild(Rows);
-  Message=Text(WidgetTree,TEXT(""),16,FLinearColor(.78f,.83f,.86f));Content->AddChildToVerticalBox(Message)->SetPadding(FMargin(0,14,0,0));
+  Message=Text(WidgetTree,TEXT(""),16,BBSBPaper::Muted());Content->AddChildToVerticalBox(Message)->SetPadding(FMargin(0,14,0,0));
  }
  return Super::RebuildWidget();
 }
 UButton* UBBSBSessionMenu::AddButton(const FString& Label,bool Enabled)
 {
- auto* Button=WidgetTree->ConstructWidget<UButton>();Button->SetIsEnabled(Enabled);Button->SetBackgroundColor(FLinearColor(.28f,.235f,.27f));
- auto* Caption=Text(WidgetTree,Label,bLoadList ? 17:22,FLinearColor(.98f,.95f,.97f));Caption->SetJustification(ETextJustify::Left);
+ auto* Button=WidgetTree->ConstructWidget<UButton>();Button->SetIsEnabled(Enabled);Button->SetBackgroundColor(FLinearColor::White);
+ FButtonStyle Style;Style.SetNormal(FSlateColorBrush(BBSBPaper::Cell())).SetHovered(FSlateColorBrush(BBSBPaper::Hover())).SetPressed(FSlateColorBrush(FLinearColor(.77f,.64f,.62f))).SetDisabled(FSlateColorBrush(FLinearColor(.88f,.85f,.79f)));
+ Style.SetNormalPadding(FMargin(0));Style.SetPressedPadding(FMargin(0,1,0,-1));Button->SetStyle(Style);
+ auto* Caption=Text(WidgetTree,Label,bLoadList ? 17:22,BBSBPaper::Ink());Caption->SetJustification(ETextJustify::Left);
  Cast<UButtonSlot>(Button->AddChild(Caption))->SetPadding(FMargin(17,bLoadList ? 10:14));Rows->AddChildToVerticalBox(Button)->SetPadding(FMargin(0,4));return Button;
 }
 void UBBSBSessionMenu::Refresh()

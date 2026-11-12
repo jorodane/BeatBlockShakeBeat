@@ -29,8 +29,49 @@
 #include "GameFramework/PlayerController.h"
 #include "InputKeyEventArgs.h"
 #include "EngineUtils.h"
+#include "Engine/World.h"
 
-ABBSBCharacter::ABBSBCharacter()
+void UBBSBCharacterMovementComponent::PushCarryBody(UPrimitiveComponent* Body,const FVector& Direction,const FVector& DesiredVelocity,const FVector& Point)
+{
+ if(!bEnablePhysicsInteraction || !Body || !Body->IsSimulatingPhysics() || !GetWorld())return;
+ const FVector Push=Direction.GetSafeNormal();
+ const float Closing=FMath::Max(0.f,float(FVector::DotProduct(DesiredVelocity-Body->GetPhysicsLinearVelocityAtPoint(Point),Push)));
+ if(Push.IsNearlyZero() || Closing<=0)return;
+ if(CarryPushFrame!=GFrameCounter) { CarryPushFrame=GFrameCounter;PushedCarryBodies.Reset(); }
+ const TWeakObjectPtr<UPrimitiveComponent> Key(Body);if(PushedCarryBodies.Contains(Key))return;
+ const float Weight=FMath::Max(.01f,Body->GetMass()),DT=FMath::Clamp(GetWorld()->GetDeltaSeconds(),0.f,.05f);
+ const float PushAcceleration=FMath::Max(0.f,FMath::Min(MaximumCarryPushAcceleration,MaximumCarryPushForce/Weight));
+ const float DeltaSpeed=FMath::Min(Closing,PushAcceleration*DT);if(DeltaSpeed<=0)return;
+ PushedCarryBodies.Add(Key);
+ // Add a small physical impulse; do not replace velocity from an intentional throw.
+ Body->AddImpulseAtLocation(Push*(Weight*DeltaSpeed),Point);
+}
+void UBBSBCharacterMovementComponent::ApplyImpactPhysicsForces(const FHitResult& Impact,const FVector& ImpactAcceleration,const FVector& ImpactVelocity)
+{
+ if(!Cast<ABBSBCarryObject>(Impact.GetActor())) { Super::ApplyImpactPhysicsForces(Impact,ImpactAcceleration,ImpactVelocity);return; }
+ if(!Impact.bBlockingHit)return;
+ const FVector Desired=ImpactAcceleration.IsNearlyZero() ? ImpactVelocity:ImpactAcceleration.GetSafeNormal()*FMath::Max(double(GetMaxSpeed()),ImpactVelocity.Size());
+ PushCarryBody(Impact.GetComponent(),-Impact.ImpactNormal,Desired,Impact.ImpactPoint);
+}
+void UBBSBCharacterMovementComponent::CapsuleTouched(UPrimitiveComponent* OverlappedComp,AActor* Other,UPrimitiveComponent* OtherComp,int32 OtherBodyIndex,bool bFromSweep,const FHitResult& SweepResult)
+{
+ if(!Cast<ABBSBCarryObject>(Other)) { Super::CapsuleTouched(OverlappedComp,Other,OtherComp,OtherBodyIndex,bFromSweep,SweepResult);return; }
+ if(!OtherComp || !UpdatedComponent)return;
+ const FVector Direction=FVector::VectorPlaneProject(OtherComp->GetComponentLocation()-UpdatedComponent->GetComponentLocation(),GetGravityDirection()).GetSafeNormal();
+ PushCarryBody(OtherComp,Direction,Velocity,OtherComp->GetComponentLocation());
+}
+void UBBSBCharacterMovementComponent::ApplyDownwardForce(float DeltaSeconds)
+{
+ auto* Base=CurrentFloor.HitResult.GetComponent();
+ if(!Base || !Cast<ABBSBCarryObject>(Base->GetOwner())) { Super::ApplyDownwardForce(DeltaSeconds);return; }
+ if(!bEnablePhysicsInteraction || StandingDownwardForceScale<=0 || !CurrentFloor.HitResult.IsValidBlockingHit() || !Base->IsSimulatingPhysics())return;
+ const float Weight=FMath::Max(.01f,Base->GetMass());
+ const float Force=FMath::Max(0.f,FMath::Min3(FMath::Abs(GetGravityZ())*Mass*StandingDownwardForceScale,Weight*MaximumCarryPushAcceleration,MaximumCarryPushForce));
+ Base->AddForceAtLocation(GetGravityDirection()*Force,CurrentFloor.HitResult.ImpactPoint,CurrentFloor.HitResult.BoneName);
+}
+
+ABBSBCharacter::ABBSBCharacter(const FObjectInitializer& ObjectInitializer)
+	:Super(ObjectInitializer.SetDefaultSubobjectClass<UBBSBCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
  Respawn=CreateDefaultSubobject<UBBSBRespawnComponent>(TEXT("Respawn"));
  WorldMap=CreateDefaultSubobject<UBBSBWorldMapComponent>(TEXT("WorldMap"));

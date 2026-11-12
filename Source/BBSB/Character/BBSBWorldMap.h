@@ -1,7 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Blueprint/UserWidget.h"
+#include "UI/BBSBPaperWidget.h"
 #include "Character/BBSBMapAnnotations.h"
 #include "BBSBWorldMap.generated.h"
 
@@ -15,7 +15,7 @@ class UTexture;
 class UBBSBTerrainMapData;
 
 UCLASS()
-class BBSB_API UBBSBWorldMapWidget : public UUserWidget
+class BBSB_API UBBSBWorldMapWidget : public UBBSBPaperWidget
 {
  GENERATED_BODY()
 public:
@@ -55,6 +55,7 @@ protected:
  virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& Event) override;
  virtual FReply NativeOnMouseMove(const FGeometry& Geometry,const FPointerEvent& Event) override;
 private:
+ mutable FBBSBHUDReveal MinimapReveal;
  mutable FVector2D MapAt,MapSize,ListAt,CloseAt,CloseSize,ToolbarAt;
  mutable float PaintScale=1;
  FVector2D DragStart,PreviousDrag;

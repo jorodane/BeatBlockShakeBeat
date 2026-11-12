@@ -36,7 +36,7 @@ bool UBBSBHuntingComponent::OpenInventory()
  InventoryWidget->ResetInteraction();
  float X=0,Y=0;bMenuSavedMouse=PC->GetMousePosition(X,Y);MenuMouse=FVector2D(X,Y);
  PC->SetIgnoreLookInput(true);bMenuOwnLook=true;
- InventoryWidget->AddToViewport(1000);InventoryWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+ if(!InventoryWidget->IsInViewport())InventoryWidget->AddToViewport(1000);InventoryWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);InventoryWidget->OpenPaper(EBBSBPaperEntrance::Right);
  InventoryWidget->RegisterMenuKeys();
  RefreshInventoryInput();
  if(!CursorAlreadyVisible) { int32 Width=0,Height=0;PC->GetViewportSize(Width,Height);if(Width>0 && Height>0)PC->SetMouseLocation(Width/2,Height/2); }
@@ -54,7 +54,7 @@ void UBBSBHuntingComponent::CloseInventory()
 {
  bInventoryPending=false;if(!bInventoryOpen && !bMenuOwnLook)return;
  if(Player && Player->FieldActions && Player->FieldActions->bEquipmentWheelOpen)Player->FieldActions->CancelEquipmentSelection();
- bInventoryOpen=false;if(InventoryWidget) { InventoryWidget->UnregisterMenuKeys();InventoryWidget->ResetInteraction();InventoryWidget->RemoveFromParent(); }
+ bInventoryOpen=false;if(InventoryWidget) { InventoryWidget->UnregisterMenuKeys();InventoryWidget->ResetInteraction();InventoryWidget->ClosePaper(); }
  if(auto* PC=MenuController.Get())
  {
   if(bMenuOwnLook)PC->SetIgnoreLookInput(false);

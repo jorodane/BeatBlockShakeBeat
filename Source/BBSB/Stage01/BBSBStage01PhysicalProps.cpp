@@ -133,7 +133,7 @@ void ABBSBStage01Device::UpdatePhysicalPresentation(bool bSweepMotion,float Prev
  if(bSweepMotion && GetWorld() && GetWorld()->IsGameWorld())
  {
   TArray<UPrimitiveComponent*> Housing;
-  if(Kind==EBBSBStage01Node::CabinDoor)
+  if(Kind==EBBSBStage01Node::CabinDoor || Kind==EBBSBStage01Node::UtilityDoor)
    for(AActor* Structure:DoorTrackHousing)if(IsValid(Structure))
    {
     TInlineComponentArray<UPrimitiveComponent*> Parts(Structure);

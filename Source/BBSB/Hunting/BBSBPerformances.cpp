@@ -1,3 +1,5 @@
+#include "HAL/PlatformTime.h"
+#include "UI/BBSBPaperTheme.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
 #include "Hunting/BBSBItemIcon.h"
@@ -263,9 +265,10 @@ void UBBSBEquipmentGrowthComponent::TickPerformances(float DT)
 
 void UBBSBEquipmentGrowthComponent::DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) const
 {
- if(!HUD || !Canvas || !Player || Player->Hunting->bInventoryOpen || Player->Interaction->bDialogueActive)return;
- const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.5f),R=40*S;
- const FVector2D Centre(Canvas->SizeX*.5f,Canvas->SizeY-R-49*S);
+ const bool Shown=HUD && Canvas && Player && !Player->Hunting->bInventoryOpen && !Player->Interaction->bDialogueActive;
+ const float Entry=GrowthHUDReveal.Sample(Shown,FPlatformTime::Seconds(),.035f);if(!Shown)return;
+ const float BaseScale=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.5f),S=BaseScale*(.88f+.12f*Entry),R=40*S;
+ const FVector2D Centre(Canvas->SizeX*.5f,Canvas->SizeY-89*BaseScale+110*BaseScale*(1-Entry));
  const FLinearColor Ink(.10f,.075f,.13f,.94f),Paper(.97f,.92f,.86f),Gold(1.f,.76f,.30f),Track(.38f,.33f,.42f,.95f);
  const float Value=FMath::Clamp(bConcertoActive ? 1-ConcertoProgress():ConcertoCharge/100.f,0.f,1.f);
  const bool Ready=ConcertoCharge>=100.f && !bConcertoActive;
@@ -282,7 +285,7 @@ void UBBSBEquipmentGrowthComponent::DrawGrowthHUD(AHUD* HUD,UCanvas* Canvas) con
   }
   if(!Triangles.IsEmpty()){FCanvasTriangleItem Item(Triangles,GWhiteTexture);Item.BlendMode=SE_BLEND_Translucent;Canvas->DrawItem(Item);}
  };
- Ring(0,R+3*S,1,Ink);Ring(R-7*S,R+2*S,1,FLinearColor(.68f,.62f,.73f,.8f));Ring(R-5.5f*S,R+.5f*S,1,Track);
+ Ring(0,R+3*S,1,Ink);Ring(0,R-7*S,1,FLinearColor(.14f,.10f,.12f,.96f));Ring(R-7*S,R+2*S,1,Paper);Ring(R-5.5f*S,R+.5f*S,1,Track);
  // Cyan marks the immediately available gain. The original colour catches up after a pause.
  Ring(R-5.5f*S,R+.5f*S,Value,bConcertoActive ? Gold:FLinearColor(.37f,.84f,1.f));
  Ring(R-5.5f*S,R+.5f*S,bConcertoActive ? Value:DisplayedConcertoCharge()/100.f,Ready || bConcertoActive ? Gold:Paper);

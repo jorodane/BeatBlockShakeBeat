@@ -1,4 +1,5 @@
 #include "Caravan/BBSBCaravan.h"
+#include "UI/BBSBPaperTheme.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
 #include "Caravan/BBSBBunniarAnimation.h"
@@ -136,7 +137,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
  if(bEquipped!=bLastEquipped)
  {
   bLastEquipped=bEquipped;
-  if(bFollowing && !bSurfaceAttached && !bAirHovering)
+  if(bFollowing && !bSurfaceAttached && !bAirHovering && !bSurfaceReturning)
   {
    SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;ReturnTransitSeconds=EquipmentTravelSeconds;bSurfaceReturning=true;
   }
@@ -216,7 +217,11 @@ void ABBSBBunniarCompanion::Tick(float DT)
   if(const auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));P && P->FieldActions)
   {
    FTransform Pose(GetActorQuat(),Target,GetActorScale3D());
-   bRestOccluded=!P->FieldActions->ResolveRestEquipmentPose(Pose,CalculateComponentsBoundingBoxInLocalSpace(true),this,true);
+   // Resolve the destination first, then apply the timed recall to that safe
+   // pose. The resting-pose assignment used to overwrite the return every tick.
+   const bool Clear=P->FieldActions->ResolveRestEquipmentPose(Pose,CalculateComponentsBoundingBoxInLocalSpace(true),this,true,!bSurfaceReturning);
+   if(bSurfaceReturning)Pose.SetLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),Pose.GetLocation(),Ease));
+   bRestOccluded=!Clear && (!bSurfaceReturning || Transit>=1.f);
    SetActorTransform(Pose);if(bRestOccluded) SetActorHiddenInGame(true);
   }
  }
@@ -662,7 +667,8 @@ void ABBSBCaravanHUD::DrawHUD()
  Super::DrawHUD();if (!Canvas) return; if(auto* P=Cast<ABBSBCharacter>(GetOwningPawn());P && P->Interaction && P->Interaction->bDialogueActive) return; auto* D=Caravan::Director(GetWorld()); if (!D) return;
  if (auto* Pawn=GetOwningPawn()) if (auto* Actions=Pawn->FindComponentByClass<UBBSBFieldActionComponent>(); Actions && Actions->bEquipmentWheelOpen) return;
  const float S=FMath::Clamp(Canvas->SizeX/1280.f,.70f,1.3f),W=Canvas->SizeX,H=Canvas->SizeY;
- const FLinearColor Paper(.96f,.85f,.68f), Panel(.12f,.10f,.13f,.87f), Pink(.97f,.63f,.70f);
+ const FLinearColor Paper=BBSBPaper::Ink(),Panel=BBSBPaper::Paper(),Pink=BBSBPaper::Rose();
+ auto PaperPanel=[&](float X,float Y,float Width,float Height){BBSBPaper::CanvasPanel(Canvas,FVector2D(X,Y),FVector2D(Width,Height),S);};
  auto WrappedText=[&](const FString& Value,FLinearColor Color,float X,float Y,float Width,float Scale)
  {
   FString Wrapped,Line;
@@ -676,25 +682,25 @@ void ABBSBCaravanHUD::DrawHUD()
   }
   DrawText(Wrapped+Line,Color,X,Y,GEngine->GetLargeFont(),Scale);
  };
- DrawRect(Panel,W-425*S,90*S,410*S,106*S); DrawText(TEXT("버니아 반 발자국 상단  /  LO-FI CHILL"),Pink,W-410*S,100*S,GEngine->GetLargeFont(),1.10f*S);
+ PaperPanel(W-425*S,90*S,410*S,106*S); DrawText(TEXT("버니아 반 발자국 상단  /  LO-FI CHILL"),Pink,W-410*S,100*S,GEngine->GetLargeFont(),1.10f*S);
  WrappedText(D->Objective(),Paper,W-410*S,130*S,380*S,1.25f*S);
  if (D->Inventory) DrawText(FString::Printf(TEXT("상단화 %d  ·  차 %d [H]  ·  엽서 %d%s"),D->Inventory->Coins,D->Inventory->Tea,D->Inventory->Postcards,D->Inventory->bRibbonOwned ? TEXT("  ♪"):TEXT("")),Paper,20*S,94*S,GEngine->GetSmallFont(),1.2f*S);
  if (D->Focus && !D->OpenShop)
  {
   const bool Puzzle=D->Focus->Device==EBBSBBunniarDevice::Shutter || D->Focus->Device==EBBSBBunniarDevice::Lift || D->Focus->Device==EBBSBBunniarDevice::Winch;
-  DrawRect(Panel,W*.5f-210*S,H-100*S,420*S,47*S); WrappedText((Puzzle ? TEXT("[좌클릭] "):TEXT("[버니아·좌클릭] "))+D->Focus->DeviceLabel,Paper,W*.5f-193*S,H-88*S,390*S,1.3f*S);
+  PaperPanel(W*.5f-210*S,H-100*S,420*S,47*S); WrappedText((Puzzle ? TEXT("[좌클릭] "):TEXT("[버니아·좌클릭] "))+D->Focus->DeviceLabel,Paper,W*.5f-193*S,H-88*S,390*S,1.3f*S);
  }
  if (D->Buddy && D->Buddy->bFollowing)
   DrawText(D->Buddy->bSurfaceAttached ? TEXT("버니아: 등을 붙인 채 드래그 · 놓으면 회수"):D->Buddy->bEquipped ? TEXT("좌클릭 유지: 표면 부착 · 놓기: 회수"):TEXT("버니아: 작은 동행 장비 · [E] 장착"),Paper,W*.5f-180*S,H-40*S,GEngine->GetSmallFont(),1.2f*S);
  if (GetWorld()->GetTimeSeconds()<D->DialogueUntil && !D->OpenShop)
- { DrawRect(Panel,W*.5f-450*S,H-205*S,900*S,94*S); WrappedText(D->Dialogue,Paper,W*.5f-431*S,H-195*S,860*S,1.35f*S); }
+ { PaperPanel(W*.5f-450*S,H-205*S,900*S,94*S); WrappedText(D->Dialogue,Paper,W*.5f-431*S,H-195*S,860*S,1.35f*S); }
  FVector2D Screen; const FVector Goal=D->ObjectiveLocation();
  if (GetOwningPlayerController()->ProjectWorldLocationToScreen(Goal+FVector(0,0,150),Screen) && !D->OpenShop && D->Step!=EBBSBCaravanStep::Miniboss && D->Step!=EBBSBCaravanStep::CaptainDuel)
  { Screen.X=FMath::Clamp(Screen.X,40.f,W-40); Screen.Y=FMath::Clamp(Screen.Y,205*S,H-235*S); DrawText(FString::Printf(TEXT("◇  %.0fm"),FVector::Dist(Goal,GetOwningPawn()->GetActorLocation())/100),Pink,Screen.X,Screen.Y,GEngine->GetSmallFont(),S); }
  if (D->OpenShop)
  {
   const bool Art=D->OpenShop->Device==EBBSBBunniarDevice::ArtShop; const float X=W*.5f-310*S,Y=H*.5f-135*S;
-  DrawRect(Panel,X,Y,620*S,270*S); DrawText(Art ? TEXT("2호차 · 예술단 상점"):TEXT("6호차 · 현생단 상점"),Pink,X+25*S,Y+20*S,GEngine->GetLargeFont(),1.5f*S);
+  BBSBPaper::CanvasPanel(Canvas,FVector2D(X,Y),FVector2D(620,270)*S,S); DrawText(Art ? TEXT("2호차 · 예술단 상점"):TEXT("6호차 · 현생단 상점"),Pink,X+25*S,Y+20*S,GEngine->GetLargeFont(),1.5f*S);
   DrawText(TEXT("직원가  /  ↑↓ 선택 · Enter 구매 · Backspace 닫기"),Paper,X+25*S,Y+75*S,GEngine->GetSmallFont(),1.2f*S);
   FString A=Art ? TEXT("절벽길 엽서  ·  15"):TEXT("휴식용 차 1개  ·  20  /  H 체력 회복");
   FString B=D->Inventory->bSupplyUnlocked ? (Art ? TEXT("지역 악보 리본  ·  30"):TEXT("지역 특산 차 2개  ·  30")):TEXT("[미입고] 지역 문제 해결 → 유통망 확보 필요");

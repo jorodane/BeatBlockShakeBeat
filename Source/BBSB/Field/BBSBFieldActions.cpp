@@ -1,4 +1,6 @@
 #include "BBSBFieldActions.h"
+#include "HAL/PlatformTime.h"
+#include "UI/BBSBPaperTheme.h"
 #include "Stage01/BBSBStage01.h"
 #include "Misc/ScopeExit.h"
 #include "Field/BBSBRepairTool.h"
@@ -1341,6 +1343,7 @@ void ABBSBFieldPracticeArea::BeginPlay()
 void ABBSBFieldPracticeHUD::PostRender()
 {
  Super::PostRender();
+ if(const auto* P=GetOwningPawn())if(const auto* D=P->FindComponentByClass<UBBSBInteractionComponent>();D && D->bDialogueActive)return;
  if(bShowHUD && !bShowDebugInfo && Canvas && Canvas->Canvas)
   if(const auto* P=GetOwningPawn())if(const auto* Combat=P->FindComponentByClass<UBBSBCombatComponent>())
   { Canvas->Canvas->PushDepthSortKey(-1000);Combat->DrawDamageNumbers(this,Canvas);Canvas->Canvas->PopDepthSortKey(); }
@@ -1348,14 +1351,18 @@ void ABBSBFieldPracticeHUD::PostRender()
 void ABBSBFieldPracticeHUD::DrawHUD()
 {
 	Super::DrawHUD();
- if(Canvas)if(const auto* P=Cast<ABBSBCharacter>(GetOwningPawn());P && P->EquipmentGrowth)P->EquipmentGrowth->DrawGrowthHUD(this,Canvas);
+ const auto* HUDPlayer=Cast<ABBSBCharacter>(GetOwningPawn());
+ const bool DialogueShown=HUDPlayer && HUDPlayer->Interaction && HUDPlayer->Interaction->bDialogueActive;
+ const float HealthEntry=HealthReveal.Sample(HUDPlayer && !DialogueShown,FPlatformTime::Seconds());
+ if(Canvas && HUDPlayer && HUDPlayer->EquipmentGrowth)HUDPlayer->EquipmentGrowth->DrawGrowthHUD(this,Canvas);
+ if(Canvas)if(const auto* P=GetOwningPawn())if(const auto* D=P->FindComponentByClass<UBBSBInteractionComponent>();D && D->bDialogueActive) { D->DrawDialogue(this,Canvas);return; }
+
 
 	APawn* Pawn=GetOwningPawn();
 	UBBSBFieldActionComponent* Actions=Pawn ? Pawn->FindComponentByClass<UBBSBFieldActionComponent>() : nullptr;
 	if (!Canvas || !Actions) return;
  if(const auto* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>()) Combat->DrawDamageVignette(this,Canvas);
  if(const auto* Hunting=Pawn->FindComponentByClass<UBBSBHuntingComponent>()) { Hunting->DrawFeedback(this,Canvas);if(Hunting->bInventoryOpen)Hunting->DrawLootNames(this,Canvas); }
- if(const auto* Dialogue=Pawn->FindComponentByClass<UBBSBInteractionComponent>();Dialogue && Dialogue->bDialogueActive) { Dialogue->DrawDialogue(this,Canvas);return; }
  if(const auto* I=Pawn->FindComponentByClass<UBBSBInteractionComponent>())I->DrawQuickInteraction(this,Canvas);
 	const float Scale=FMath::Clamp(Canvas->SizeX/1280.f,0.7f,1.35f);
 	const float W=Canvas->SizeX, H=Canvas->SizeY;
@@ -1507,14 +1514,13 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	if (Combat)
 	{
 		Combat->DrawDefenseFeedback(this,Canvas);Combat->DrawEnemyHealthBars(this,Canvas);
-		const float BarW=260*Scale,BarH=24*Scale,BarX=22*Scale,BarY=H-60*Scale;
-		DrawRect(FLinearColor(.10f,.075f,.13f,.94f),BarX-3*Scale,BarY-3*Scale,BarW+6*Scale,BarH+6*Scale);
-		DrawRect(FLinearColor(.97f,.92f,.86f,.9f),BarX-Scale,BarY-Scale,BarW+2*Scale,BarH+2*Scale);
-		DrawRect(FLinearColor(.25f,.20f,.25f),BarX,BarY,BarW,BarH);
+		const float HPScale=Scale*(.92f+.08f*HealthEntry),BarW=260*HPScale,BarH=24*HPScale,BarX=22*Scale-300*Scale*(1-HealthEntry),BarY=H-36*Scale-BarH+18*Scale*(1-HealthEntry);
+		BBSBPaper::CanvasPanel(Canvas,FVector2D(BarX-3*HPScale,BarY-3*HPScale),FVector2D(BarW+6*HPScale,BarH+6*HPScale),HPScale);
+		DrawRect(BBSBPaper::Cell(),BarX,BarY,BarW,BarH);
 		DrawRect(FLinearColor(.88f,.58f,.65f),BarX,BarY,BarW*FMath::Clamp(Combat->Health/FMath::Max(1.f,Combat->MaximumHealth),0.f,1.f),BarH);
-		const auto HealthFont=BBSBHUDTypography::NumberFont(14*Scale);
-		FCanvasTextItem HealthText(FVector2D(BarX+BarW*.5f,BarY+BarH*.5f),FText::FromString(FString::Printf(TEXT("%.0f/%.0f"),Combat->Health,Combat->MaximumHealth)),HealthFont,FLinearColor(.97f,.92f,.86f));
-		HealthText.bCentreX=HealthText.bCentreY=true;HealthText.bOutlined=true;HealthText.OutlineColor=FLinearColor(.10f,.075f,.13f);Canvas->DrawItem(HealthText);
+		const auto HealthFont=BBSBHUDTypography::NumberFont(14*HPScale);
+		FCanvasTextItem HealthText(FVector2D(BarX+BarW*.5f,BarY+BarH*.5f),FText::FromString(FString::Printf(TEXT("%.0f/%.0f"),Combat->Health,Combat->MaximumHealth)),HealthFont,BBSBPaper::Ink());
+		HealthText.bCentreX=HealthText.bCentreY=true;Canvas->DrawItem(HealthText);
 		if (Combat->FeedbackExperiment==2)
 		{
 			const float X=22*Scale,Y=100*Scale,MeterW=306*Scale;

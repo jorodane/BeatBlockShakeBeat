@@ -155,12 +155,13 @@ void UBBSBSessionSubsystem::OpenMenu()
  auto* PC=Cast<APlayerController>(Player->GetController());if(!PC)return;RefreshSlots();
  bPreviousCursor=PC->bShowMouseCursor;PC->SetIgnoreMoveInput(true);PC->SetIgnoreLookInput(true);bOwnMoveIgnore=bOwnLookIgnore=true;
  bOwnPause=!GetWorld()->IsPaused() && UGameplayStatics::SetGamePaused(GetWorld(),true);
- Menu=CreateWidget<UBBSBSessionMenu>(PC,UBBSBSessionMenu::StaticClass());Menu->Session=this;Menu->AddToViewport(2000);bMenuOpen=true;
+ if(!Menu)Menu=CreateWidget<UBBSBSessionMenu>(PC,UBBSBSessionMenu::StaticClass());Menu->Session=this;
+ if(!Menu->IsInViewport())Menu->AddToViewport(2000);Menu->SetVisibility(ESlateVisibility::Visible);Menu->OpenPaper(EBBSBPaperEntrance::Center);bMenuOpen=true;
  PC->bShowMouseCursor=true;FInputModeUIOnly Input;Input.SetWidgetToFocus(Menu->TakeWidget());Input.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);PC->SetInputMode(Input);Menu->Refresh();
 }
 void UBBSBSessionSubsystem::CloseMenu()
 {
- if(Menu)Menu->RemoveFromParent();Menu=nullptr;
+ if(Menu)Menu->ClosePaper();
  if(auto* PC=Player.IsValid() ? Cast<APlayerController>(Player->GetController()):nullptr)
  {
   if(bOwnMoveIgnore)PC->SetIgnoreMoveInput(false);if(bOwnLookIgnore)PC->SetIgnoreLookInput(false);

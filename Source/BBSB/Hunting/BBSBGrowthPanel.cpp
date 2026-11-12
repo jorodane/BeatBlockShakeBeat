@@ -114,7 +114,7 @@ int32 UBBSBInventoryWidget::PaintGrowthPanel(const FGeometry& G,FSlateWindowElem
  {
   FGrowthControl C;C.Key=Key;C.Position=P;C.Size=Size;C.Action=Action;C.Item=Id;C.Index=Number;C.Module=Module;C.Enabled=Enabled;C.Tooltip=Tip;
   const int32 Index=GrowthControls.Add(C);const bool Hover=bKeyboardMode ? Index==FocusIndex:bPointerInside && Contains(Pointer,P,Size);
-  Box(P,Size,Hover && Enabled ? Draw.Paper():Draw.Faint(),3);Box(P+FVector2D(S),Size-FVector2D(2*S),Hover && Enabled ? FLinearColor(.25f,.20f,.23f):Draw.CellGround(),4);
+  Box(P,Size,Hover && Enabled ? Draw.Paper():Draw.Faint(),3);Box(P+FVector2D(S),Size-FVector2D(2*S),Hover && Enabled ? BBSBPaper::Hover():Draw.CellGround(),4);
   if(!Label.IsEmpty())Text(Label,P+FVector2D(6,6)*S,10,Enabled ? Ink:Faint,8);return Index;
  };
  auto Icon=[&](UBBSBItemDefinition* Item,FName Kind,FVector2D Center,float R) { BBSBItemIcon::DrawSlate(Elements,G,Layer+7,Item,Kind,Center,R,1.f,S,Ink); };

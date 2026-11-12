@@ -51,7 +51,7 @@ void UBBSBInventoryWidget::PaintEquipment(const FGeometry& G,FSlateWindowElement
   for(int32 J=0;J<=16;++J) { const float T=A-Half+J*2*Half/16;Arc.Add(Ring(T,(L.Outer+L.Inner)*.5));Outline.Add(Ring(T,L.Outer)); }
   for(int32 J=16;J>=0;--J)Outline.Add(Ring(A-Half+J*2*Half/16,L.Inner));const FVector2D FirstPoint=Outline[0];Outline.Add(FirstPoint);
   const bool Hover=GrowthPage==0 && FocusedSlot()==Count+I;const bool Selected=I==Equipped;
-  D.Lines(Arc,Selected ? FLinearColor(.27f,.18f,.23f):D.CellGround(),(L.Outer-L.Inner-2*S)/S,3);D.Lines(Outline,Hover || Selected ? D.Paper():D.Faint(),Hover || Selected ? 2.f:1.f,5);
+  D.Lines(Arc,Selected ? BBSBPaper::Hover():D.CellGround(),(L.Outer-L.Inner-2*S)/S,3);D.Lines(Outline,Hover || Selected ? D.Paper():D.Faint(),Hover || Selected ? 2.f:1.f,5);
   const auto* Item=EntryForSlot(Count+I);const FVector2D Centre=Ring(A,(L.Inner+L.Outer)*.5);
   D.Icon(Item ? Item->Item.Get():nullptr,Item && Item->Item ? Item->Item->IconGlyph:NAME_None,Centre,18*S,Item && Item->InstanceId==HeldId ? .3f:1.f);
   D.Text(FString::FromInt(I+1),Ring(A,L.Outer-7*S)-FVector2D(3,4)*S,7,D.Faint(),8);
@@ -77,7 +77,7 @@ int32 UBBSBInventoryWidget::NativePaint(const FPaintArgs& Args,const FGeometry& 
  const FString Notes=FString::Printf(TEXT("노트 %s"),*FText::AsNumber(Hunting->Notes).ToString());
  D.Text(Notes,L.Panel+FVector2D(110,23)*S,9,D.Accent());
  const float TW=(L.Size.X-40*S)/3;
- for(int32 I=0;I<3;++I) { const auto P=L.Panel+FVector2D(20*S+I*TW,51*S);D.Box(P,FVector2D(TW-3*S,25*S),I==GrowthPage ? FLinearColor(.26f,.20f,.23f):D.CellGround(),5);D.Lines({P+FVector2D(0,25*S),P+FVector2D(TW-3*S,25*S)},I==GrowthPage ? D.Paper():D.Faint(),I==GrowthPage ? 2.f:1.f,6);D.Text(Pages[I],P+FVector2D(8,5)*S,11,I==GrowthPage ? D.Paper():D.Faint(),7); }
+ for(int32 I=0;I<3;++I) { const auto P=L.Panel+FVector2D(20*S+I*TW,51*S);D.Box(P,FVector2D(TW-3*S,25*S),I==GrowthPage ? BBSBPaper::Hover():D.CellGround(),5);D.Lines({P+FVector2D(0,25*S),P+FVector2D(TW-3*S,25*S)},I==GrowthPage ? D.Paper():D.Faint(),I==GrowthPage ? 2.f:1.f,6);D.Text(Pages[I],P+FVector2D(8,5)*S,11,I==GrowthPage ? D.Paper():D.Faint(),7); }
  const bool SortHover=bPointerInside && Inside(Pointer,L.Sort,L.SortSize),CloseHover=bPointerInside && IsClosePoint(L,Pointer);
  if(GrowthPage!=1) { D.Box(L.Sort,L.SortSize,SortHover ? D.Accent():D.Faint(),5);D.Box(L.Sort+FVector2D(S),L.SortSize-FVector2D(2*S),D.Ground(),6);D.Text(TEXT("정렬"),L.Sort+FVector2D(15,5)*S,11,D.Paper(),7); }
  D.Box(L.Close,L.CloseSize,CloseHover ? D.Accent():D.Faint(),5);D.Box(L.Close+FVector2D(S),L.CloseSize-FVector2D(2*S),D.Ground(),6);D.Lines({L.Close+FVector2D(8,8)*S,L.Close+FVector2D(18,18)*S},D.Paper(),1.4f,7);D.Lines({L.Close+FVector2D(18,8)*S,L.Close+FVector2D(8,18)*S},D.Paper(),1.4f,7);

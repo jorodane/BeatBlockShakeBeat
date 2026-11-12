@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UI/BBSBPaperMotion.h"
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/HUD.h"
@@ -505,6 +506,8 @@ class BBSB_API ABBSBFieldPracticeHUD : public AHUD
 public:
 	virtual void DrawHUD() override;
  virtual void PostRender() override;
+ private:
+ FBBSBHUDReveal HealthReveal;
 };
 
 UCLASS()

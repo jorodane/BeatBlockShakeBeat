@@ -338,6 +338,8 @@ bool ABBSBBunniarCompanion::AttachFromCursor()
  FRotator View=PC->GetControlRotation();
  FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit)) return Player->FieldActions->bBunniarShortcutActive ? false:BeginAirHoverFromCursor(PC);
  if(Player->FieldActions->bBunniarShortcutActive && (!IsValid(Hit.GetActor()) || !BBSBBunniarSurface::Resolve(Hit.GetActor())))return false;
+ // A moving-base dependency must never point back to its rider through carry/camera ticks.
+ if(const auto* Prop=Cast<ABBSBCarryObject>(Hit.GetActor());Prop && !Prop->CanBeCarriedBy(Player))return false;
  UPrimitiveComponent* TargetComponent=Hit.GetComponent();
  const auto* Enemy=Cast<ABBSBInkEnemy>(Hit.GetActor());
  if(Enemy)

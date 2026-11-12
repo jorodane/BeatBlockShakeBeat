@@ -1,4 +1,4 @@
-#include "Stage01/BBSBStage01.h"
+﻿#include "Stage01/BBSBStage01.h"
 #include "Save/BBSBSession.h"
 #include "BBSBCharacter.h"
 #include "Caravan/BBSBCaravan.h"
@@ -160,17 +160,59 @@ void ABBSBStage01Director::Tick(float DT)
 void ABBSBStage01Director::TalkTo(ABBSBStage01NPC* NPC)
 {
  if(!Player || !NPC)return;
+ NPC->Conversation.Reset();
+ auto Turn=[&](EBBSBDialogueSpeaker Speaker,const TCHAR* Text,EBBSBDialogueExpression Expression=EBBSBDialogueExpression::Neutral) { auto& Line=NPC->Conversation.AddDefaulted_GetRef();Line.Speaker=Speaker;Line.Expression=Expression;Line.Text=FText::FromString(Text); };
+ auto Partner=[&](const TCHAR* Text) { Turn(EBBSBDialogueSpeaker::Partner,Text); };
+ auto Hero=[&](const TCHAR* Text,EBBSBDialogueExpression Expression=EBBSBDialogueExpression::Neutral) { Turn(EBBSBDialogueSpeaker::Reparado,Text,Expression); };
+ auto Buddy=[&](const TCHAR* Text,EBBSBDialogueExpression Expression=EBBSBDialogueExpression::Warm) { Turn(EBBSBDialogueSpeaker::Bunniar,Text,Expression); };
  if(NPC->CarNumber==6)
  {
-  if(Phase<=EBBSBStage01Phase::Outside) { Advance(EBBSBStage01Phase::FindTools);NPC->Lines={FText::FromString(TEXT("안쪽에서 다 같이 삑사리를 내고 있어. 문을 잠가뒀지.")),FText::FromString(TEXT("네 나무 판과 고무 망치? 위험 물품이라며 저 위에 압수해뒀더라.")),FText::FromString(TEXT("밖의 상자와 사다리를 써봐. 도구를 찾으면 돌아와."))}; }
-  else if(Phase==EBBSBStage01Phase::ReturnToMerchant) { Advance(EBBSBStage01Phase::ShopBattle);NPC->Lines={FText::FromString(TEXT("찾았구나! 뒤쪽 문을 열어줄게.")),FText::FromString(TEXT("모두 같은 박자에 쏴. 한곳에 서 있지 말고, 쏘고 난 틈을 노려."))}; }
-  else NPC->Lines={FText::FromString(Phase<EBBSBStage01Phase::Cargo ? TEXT("도구를 되찾고 나면, 저 뒤 문으로 들어가줘."):TEXT("한결 조용하네. 화물차 안의 장치로 위쪽 길을 열 수 있을 거야."))};
+  if(Phase<=EBBSBStage01Phase::Outside)
+  {
+   Advance(EBBSBStage01Phase::FindTools);
+   Partner(TEXT("안쪽에서 다 같이 삑사리를 내고 있어. 문을 잠가뒀지."));
+   Hero(TEXT("그 전에... 내 나무 판과 고무 망치는?"),EBBSBDialogueExpression::Annoyed);
+   Partner(TEXT("네 나무 판과 고무 망치? 위험 물품이라며 저 위에 압수해뒀더라."));
+   Buddy(TEXT("저 위라면, 상자랑 사다리부터 살펴보자!"),EBBSBDialogueExpression::Surprised);
+   Partner(TEXT("밖의 상자와 사다리를 써봐. 도구를 찾으면 돌아와."));
+  }
+  else if(Phase==EBBSBStage01Phase::ReturnToMerchant)
+  {
+   Advance(EBBSBStage01Phase::ShopBattle);
+   Partner(TEXT("찾았구나! 뒤쪽 문을 열어줄게."));
+   Hero(TEXT("이제 도구도 찾았으니... 빨리 끝내죠."),EBBSBDialogueExpression::Annoyed);
+   Partner(TEXT("모두 같은 박자에 쏴. 한곳에 서 있지 말고, 쏘고 난 틈을 노려."));
+   Buddy(TEXT("박자가 비는 틈에 움직이자, 레파라도!"));
+  }
+  else
+  {
+   Partner(Phase<EBBSBStage01Phase::Cargo ? TEXT("도구를 되찾고 나면, 저 뒤 문으로 들어가줘."):TEXT("한결 조용하네. 화물차 안의 장치로 위쪽 길을 열 수 있을 거야."));
+   Hero(TEXT("알겠어요. 길을 확인해볼게요."));
+  }
  }
  else
  {
-  if(Phase==EBBSBStage01Phase::Restock) { Advance(EBBSBStage01Phase::FindLight);NPC->Lines={FText::FromString(TEXT("트리오가 남긴 공명 조각은 옆 교환대에서 구슬로 바꿀 수 있어.")),FText::FromString(TEXT("표식에서는 회복 차를 채울 수 있어. 차는 R로 마셔.")),FText::FromString(TEXT("상단장님이 혼자 연주 중이야. 1호차에서 조명 레버를 켜줄래?"))}; }
-  else if(Phase==EBBSBStage01Phase::ReturnForReady)NPC->Lines={FText::FromString(TEXT("혼자 계속 연주하고 계셨구나...")),FText::FromString(TEXT("보급을 마치면 버니아를 무대 쪽 문에 붙여 옆으로 열어줘."))};
-  else NPC->Lines={FText::FromString(TEXT("상점과 표식은 언제든 써도 돼. 무대에 들어가기 전에 준비하고 가."))};
+  if(Phase==EBBSBStage01Phase::Restock)
+  {
+   Advance(EBBSBStage01Phase::FindLight);
+   Partner(TEXT("트리오가 남긴 공명 조각은 옆 교환대에서 구슬로 바꿀 수 있어."));
+   Hero(TEXT("잠깐 정비하고 가죠. 다음은 어디예요?"));
+   Partner(TEXT("표식에서는 회복 차를 채울 수 있어. 차는 R로 마셔."));
+   Partner(TEXT("상단장님이 혼자 연주 중이야. 1호차에서 조명 레버를 켜줄래?"));
+   Buddy(TEXT("조명은 맡겨줘! 준비되면 1호차로 가자."));
+  }
+  else if(Phase==EBBSBStage01Phase::ReturnForReady)
+  {
+   Partner(TEXT("혼자 계속 연주하고 계셨구나..."));
+   Hero(TEXT("이제 무대로 가봐야겠네요."),EBBSBDialogueExpression::Surprised);
+   Partner(TEXT("보급을 마치면 버니아를 무대 쪽 문에 붙여 옆으로 열어줘."));
+   Buddy(TEXT("준비되면 문을 열어줄게!"));
+  }
+  else
+  {
+   Partner(TEXT("상점과 표식은 언제든 써도 돼. 무대에 들어가기 전에 준비하고 가."));
+   Hero(TEXT("필요한 것만 챙기고 갈게요."),EBBSBDialogueExpression::Warm);
+  }
  }
  Player->Interaction->BeginDialogue(NPC);
 }
