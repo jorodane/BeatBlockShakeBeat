@@ -148,6 +148,9 @@ namespace
     for(const auto& Path:Remainder)Path.Frame->SetWorldLocation(Path.Frame->GetComponentLocation()+Path.Delta*Safe,false,nullptr,ETeleportType::TeleportPhysics);
     Reached=FMath::Lerp(Reached,Goal,Safe);
     if(!Blocked) { Reached=Goal;Finished=true;break; }
+    // A held object's carrier is an obstacle, never a target of its push chain.
+    const auto* Held=Cast<ABBSBCarryObject>(Remainder[Index].Frame->GetOwner());
+    if(Held && Held->bCarried && Held->CarryingCharacter()==Hit.GetActor())break;
     auto* Pushed=PushFrame(Hit.GetComponent());if(!Pushed || Stack.Contains(Pushed))break;
     FVector Delta=Remainder[Index].Delta*(1.f-Safe);
     if(Hit.bStartPenetrating)Delta-=Hit.Normal*(Hit.PenetrationDepth+Skin);

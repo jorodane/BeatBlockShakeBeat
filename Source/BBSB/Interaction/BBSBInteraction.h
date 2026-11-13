@@ -251,7 +251,10 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Impact",meta=(ClampMin="0")) float ImpactDamagePerMeterPerSecond=12;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Impact",meta=(ClampMin="0")) float MinimumImpactSpeed=60;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".05")) float DragCentimetersPerPixel=1.2f;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="1",Units="cm/s")) float FollowSpeed=1000.f;
+ /** Maximum held movement speed for both camera-follow orbits and right-button target adjustment. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="1",Units="cm/s")) float FollowSpeed=4000.f;
+ /** Initial release velocity is inherited from real motion, with this speed ceiling. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="0",Units="cm/s")) float MaximumThrowSpeed=1600.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="1",ClampMax="90")) float WheelRotationDegrees=15;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".02",ClampMax=".25")) float VelocitySampleSeconds=.10f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".1",ClampMax="1")) float BlockedReleaseFraction=.5f;
@@ -264,11 +267,13 @@ public:
  /** Camera-to-object distance captured on the initial click or after a gentle right release. */
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") float HoldDistance=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") FVector CarryVelocity=FVector::ZeroVector;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Carry") FVector CarryGoal=FVector::ZeroVector;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") FVector LastThrowVelocity=FVector::ZeroVector;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Impact") float LastImpactSpeed=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Impact") float LastImpactDamage=0;
  UFUNCTION(BlueprintCallable,Category="Object") void ResetObject();
  UFUNCTION(BlueprintPure,Category="Carry") bool CanBeCarriedBy(const ACharacter* Player) const;
+ const ACharacter* CarryingCharacter() const;
  /** A step crate becomes a solid platform only after its support and motion stay stable. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Step crate",meta=(ClampMin=".1",Units="s")) float StepSettleSeconds=.35f;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Step crate") float StepSupportedSeconds=0;
@@ -296,12 +301,11 @@ private:
  TWeakObjectPtr<ABBSBBunniarCompanion> AttachedBuddy;
  TWeakObjectPtr<ABBSBCharacter> CarryOwner;
  FVector CameraForward,CameraRight,PreviousPlayerPosition,PrePhysicsVelocity;
- FVector ManipulationGoal,BlockedPlayerAnchor,BlockedObjectAnchor;
+ FVector BlockedPlayerAnchor,BlockedObjectAnchor;
  FVector CameraLocalHoldOffset=FVector::ZeroVector;
  FVector OrbitAxis=FVector::UpVector;
  float CarryReachLimit=0;
  ECollisionResponse NormalPawnResponse=ECR_Block,NormalCameraResponse=ECR_Block;
- bool bOwnBodyMoveIgnore=false,bOwnPlayerMoveIgnore=false;
  FRotator FixedView;
  FTransform Home;
  struct FMotionSample { double Time; FVector Position; };
@@ -324,10 +328,10 @@ private:
  void MoveHeld(FVector Desired,float DT);
  FVector OrbitStep(FVector Target,FVector Center,float MaximumDistance);
  void UpdateCarryObstruction(bool bBlocked,ABBSBCharacter* Player);
- void ReleaseCarryIgnores();
+ void ReleaseCarryBindings();
  void SampleMotion();
  FVector ReleaseVelocity();
- void Drop(bool bThrow);
+ void Drop();
  void BreakObject();
  UFUNCTION() void OnBodyHit(UPrimitiveComponent* Component,AActor* Other,UPrimitiveComponent* OtherComponent,FVector Impulse,const FHitResult& Hit);
 };

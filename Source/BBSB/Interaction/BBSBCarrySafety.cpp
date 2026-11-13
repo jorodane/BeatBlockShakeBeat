@@ -90,7 +90,7 @@ bool ABBSBCarryObject::TryRecoverPuzzleObject()
   if(PuzzlePlacementClear(Anchor,true) && PuzzleHasApproach(Anchor)) { Goal=Anchor;Found=true;break; }
  }
  if(!Found)return false;
- Body->SetSimulatePhysics(false);ReleaseCarryIgnores();SetActorTransform(Goal,false,nullptr,ETeleportType::TeleportPhysics);
+ Body->SetSimulatePhysics(false);ReleaseCarryBindings();SetActorTransform(Goal,false,nullptr,ETeleportType::TeleportPhysics);
  bBroken=bCarried=bManipulating=bCarryBlocked=false;Health=MaximumHealth;BlockedTravel=0;PuzzleLostSeconds=0;
  Body->SetVisibility(true);Body->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);SetActorHiddenInGame(false);SetActorEnableCollision(true);
  Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1;
@@ -214,6 +214,9 @@ void ABBSBCarryObject::RestoreReleasedPawnCollision()
  const auto* Player=UGameplayStatics::GetPlayerCharacter(this,0);const auto* Capsule=Player ? Player->GetCapsuleComponent():nullptr;
  // A held prop can be released inside the player. Only this existing overlap
  // delays restoration; free simulation is not a reason to turn collision off.
- if(Capsule && Body->OverlapComponent(Capsule->GetComponentLocation(),Capsule->GetComponentQuat(),Capsule->GetCollisionShape(-.5f)))return;
+ if(Capsule && Body->OverlapComponent(Capsule->GetComponentLocation(),Capsule->GetComponentQuat(),Capsule->GetCollisionShape(-.5f)))
+ {
+  Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Ignore);Body->SetCollisionResponseToChannel(ECC_Camera,ECR_Ignore);return;
+ }
  Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1;
 }

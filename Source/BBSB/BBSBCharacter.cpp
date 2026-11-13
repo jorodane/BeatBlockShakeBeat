@@ -31,6 +31,14 @@
 #include "EngineUtils.h"
 #include "Engine/World.h"
 
+bool UBBSBCharacterMovementComponent::IsWalkable(const FHitResult& Hit) const
+{
+ const auto* Held=Cast<ABBSBCarryObject>(Hit.GetActor());
+ // The carrier cannot acquire their own carried object as a movement base.
+ if(Held && Held->bCarried && Held->CarryingCharacter()==CharacterOwner)return false;
+ return Super::IsWalkable(Hit);
+}
+
 void UBBSBCharacterMovementComponent::PushCarryBody(UPrimitiveComponent* Body,const FVector& Direction,const FVector& DesiredVelocity,const FVector& Point)
 {
  if(!bEnablePhysicsInteraction || !Body || !Body->IsSimulatingPhysics() || !GetWorld())return;

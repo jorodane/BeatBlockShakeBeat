@@ -251,10 +251,7 @@ void ABBSBCarryObject::BunniarArrived_Implementation(ABBSBBunniarCompanion* Budd
  // Recheck arrival: the player can land on the prop during the visible flight.
  if(!CanBeCarriedBy(Player)) { Buddy->ReleaseSurface();return; }
  bCarried=true;bManipulating=bCarryBlocked=false;BlockedTravel=0;CarryOwner=Player;
- Body->SetSimulatePhysics(false);Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Ignore);Body->SetCollisionResponseToChannel(ECC_Camera,ECR_Ignore);PreviousPlayerPosition=Player->GetActorLocation();
- bOwnBodyMoveIgnore=!Body->GetMoveIgnoreActors().Contains(Player);bOwnPlayerMoveIgnore=!Player->GetCapsuleComponent()->GetMoveIgnoreActors().Contains(this);
- if(bOwnBodyMoveIgnore) Body->IgnoreActorWhenMoving(Player,true);
- if(bOwnPlayerMoveIgnore) Player->GetCapsuleComponent()->IgnoreActorWhenMoving(this,true);
+ Body->SetSimulatePhysics(false);Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Block);Body->SetCollisionResponseToChannel(ECC_Camera,ECR_Ignore);PreviousPlayerPosition=Player->GetActorLocation();
  // The click already captured the distance. Camera movement during Bunniar's flight must not replace it.
  CarryReachLimit=FMath::Max(FVector::Dist(Player->GetActorLocation(),GetActorLocation()),FMath::Max(100.f,Player->FieldActions->WeaponReach-45));
  AddTickPrerequisiteActor(Player);AddTickPrerequisiteComponent(Player->GetCameraBoom());Buddy->AddTickPrerequisiteActor(this);
@@ -286,8 +283,10 @@ void ABBSBCarryObject::CaptureHoldAnchor(bool bKeepPosition)
 {
  FVector Location,Direction;FRotator Rotation;
  if(!GetCarryAim(Location,Rotation,Direction)) return;
- HoldDistance=FVector::Dist(GetActorLocation(),Location);
- CameraLocalHoldOffset=bKeepPosition ? Rotation.UnrotateVector(GetActorLocation()-Location-Direction*HoldDistance):FVector::ZeroVector;
+ const FVector Anchor=bKeepPosition ? CarryGoal:GetActorLocation();
+ HoldDistance=FVector::Dist(Anchor,Location);
+ CameraLocalHoldOffset=bKeepPosition ? Rotation.UnrotateVector(Anchor-Location-Direction*HoldDistance):FVector::ZeroVector;
+ CarryGoal=Anchor;
  if(!bKeepPosition) OrbitAxis=FVector::UpVector;
 }
 bool ABBSBCarryObject::BeginManipulation()
@@ -297,24 +296,24 @@ bool ABBSBCarryObject::BeginManipulation()
  FixedView=PC->GetControlRotation();FVector ViewLocation;FRotator ViewRotation;
  if(!GetCarryView(ViewLocation,ViewRotation)) return false;
  CameraForward=ViewRotation.Vector();CameraRight=FRotationMatrix(ViewRotation).GetUnitAxis(EAxis::Y);
- ManipulationGoal=GetActorLocation();bManipulating=true;Motion.Reset();CarryVelocity=FVector::ZeroVector;SampleMotion();return true;
+ bManipulating=true;return true;
 }
 void ABBSBCarryObject::EndManipulation(bool bFlick)
 {
  if(!bManipulating) return;
  if(bFlick)
  {
-  Drop(true);
+  Drop();
   if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();
  }
- else { CaptureHoldAnchor(true);bManipulating=false;Motion.Reset();CarryVelocity=FVector::ZeroVector;SampleMotion(); }
+ else { CaptureHoldAnchor(true);bManipulating=false; }
 }
 void ABBSBCarryObject::MoveFromPointer(FVector2D Delta)
 {
  if(bCarried && bManipulating && !Delta.IsNearlyZero())
  {
-  ManipulationGoal+=(CameraRight*Delta.X-CameraForward*Delta.Y)*DragCentimetersPerPixel;
-  if(CarryOwner.IsValid()) ManipulationGoal=CarryOwner->GetActorLocation()+(ManipulationGoal-CarryOwner->GetActorLocation()).GetClampedToMaxSize(CarryReachLimit);
+  CarryGoal+=(CameraRight*Delta.X-CameraForward*Delta.Y)*DragCentimetersPerPixel;
+  if(CarryOwner.IsValid()) CarryGoal=CarryOwner->GetActorLocation()+(CarryGoal-CarryOwner->GetActorLocation()).GetClampedToMaxSize(CarryReachLimit);
   // Apply movement once in Tick, after the camera updates, so extra pointer samples cannot multiply the speed budget.
  }
 }
@@ -347,9 +346,9 @@ void ABBSBCarryObject::MoveHeld(FVector Desired,float DT)
  for(int32 Segment=0;Segment<64 && Remaining>.001f && !GetActorLocation().Equals(Target,.001f);++Segment)
  {
   // Sweep small chords of the shortest orbit arc, including on long frames, rather than cutting through its centre.
-  const float Budget=bManipulating ? Remaining:FMath::Min(Remaining,FMath::Max(1.f,float(FVector::Dist2D(GetActorLocation(),Center))*FMath::DegreesToRadians(5.f)));
+  const float Budget=FMath::Min(Remaining,FMath::Max(1.f,float(FVector::Dist2D(GetActorLocation(),Center))*FMath::DegreesToRadians(5.f)));
   const FVector Before=GetActorLocation();
-  const FVector Next=bManipulating ? Before+(Target-Before).GetClampedToMaxSize(Budget):OrbitStep(Target,Center,Budget);
+  const FVector Next=OrbitStep(Target,Center,Budget);
   const FVector Delta=Next-Before;FHitResult Hit;
   const float Allowed=BBSBDragMotion::Move(Body,Next,&Hit);
   if(Allowed<.9999f)
@@ -396,19 +395,17 @@ void ABBSBCarryObject::UpdateCarryObstruction(bool bBlocked,ABBSBCharacter* Play
  const bool bTooFar=FVector::Dist(Player->GetActorLocation(),GetActorLocation())>FMath::Max(CarryReachLimit,Maximum+float(Body->Bounds.SphereRadius));
  if(bTooFar || (bCarryBlocked && BlockedTravel>=Maximum*BlockedReleaseFraction))
  {
-  if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();else Drop(false);
+  if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();else Drop();
  }
 }
-void ABBSBCarryObject::ReleaseCarryIgnores()
+void ABBSBCarryObject::ReleaseCarryBindings()
 {
  if(CarryOwner.IsValid())
  {
-  if(bOwnBodyMoveIgnore) Body->IgnoreActorWhenMoving(CarryOwner.Get(),false);
-  if(bOwnPlayerMoveIgnore) CarryOwner->GetCapsuleComponent()->IgnoreActorWhenMoving(this,false);
   RemoveTickPrerequisiteActor(CarryOwner.Get());RemoveTickPrerequisiteComponent(CarryOwner->GetCameraBoom());
  }
  if(AttachedBuddy.IsValid()) AttachedBuddy->RemoveTickPrerequisiteActor(this);
- bOwnBodyMoveIgnore=bOwnPlayerMoveIgnore=false;CarryOwner.Reset();
+ CarryOwner.Reset();
 }
 void ABBSBCarryObject::RotateFromWheel(float Steps)
 {
@@ -418,7 +415,7 @@ void ABBSBCarryObject::RotateFromWheel(float Steps)
  const float Degrees=Steps*WheelRotationDegrees;
  const int32 Count=FMath::Max(1,FMath::CeilToInt(FMath::Abs(Degrees)/5.f));
  const FQuat Increment(Axis.GetSafeNormal(),FMath::DegreesToRadians(Degrees/Count));
- FComponentQueryParams Query;Query.AddIgnoredActor(this);Query.AddIgnoredActor(UGameplayStatics::GetPlayerCharacter(this,0));Query.AddIgnoredActor(AttachedBuddy.Get());
+ FComponentQueryParams Query;Query.AddIgnoredActor(this);Query.AddIgnoredActor(AttachedBuddy.Get());
  for(int32 I=0;I<Count;++I)
  {
   const FQuat Rotation=(Increment*GetActorQuat()).GetNormalized();TArray<FOverlapResult> Overlaps;
@@ -435,24 +432,26 @@ void ABBSBCarryObject::SampleMotion()
  while(Motion.Num()>2 && Motion[1].Time<Now-FMath::Max(.02f,VelocitySampleSeconds)) Motion.RemoveAt(0);
  if(Motion.Num()>1) CarryVelocity=(Motion.Last().Position-Motion[0].Position)/FMath::Max(.001,Now-Motion[0].Time);
 }
-FVector ABBSBCarryObject::ReleaseVelocity() { SampleMotion();return CarryVelocity; }
+FVector ABBSBCarryObject::ReleaseVelocity() { SampleMotion();return CarryVelocity.GetClampedToMaxSize(FMath::Max(0.f,MaximumThrowSpeed)); }
+const ACharacter* ABBSBCarryObject::CarryingCharacter() const { return CarryOwner.Get(); }
 void ABBSBCarryObject::Tick(float DT)
 {
  Super::Tick(DT);if(bBroken) { TickCarrySafety(DT,Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0)));return; }
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
  if(bCarried)
  {
-  if(!AttachedBuddy.IsValid() || !AttachedBuddy->bSurfaceAttached || !Player) { Drop(false);return; }
+  if(!AttachedBuddy.IsValid() || !AttachedBuddy->bSurfaceAttached || !Player) { Drop();return; }
   if(bManipulating)
   {
    if(auto* PC=Cast<APlayerController>(Player->GetController())) { PC->SetControlRotation(FixedView);PC->RotationInput=FRotator::ZeroRotator; }
-   ManipulationGoal+=Player->GetActorLocation()-PreviousPlayerPosition;MoveHeld(ManipulationGoal,DT);
+   CarryGoal+=Player->GetActorLocation()-PreviousPlayerPosition;
   }
   else
   {
    FVector Location,Direction;FRotator Rotation;
-   if(GetCarryAim(Location,Rotation,Direction)) MoveHeld(Location+Direction*HoldDistance+Rotation.RotateVector(CameraLocalHoldOffset),DT);
+   if(GetCarryAim(Location,Rotation,Direction)) CarryGoal=Location+Direction*HoldDistance+Rotation.RotateVector(CameraLocalHoldOffset);
   }
+  MoveHeld(CarryGoal,DT);
   PreviousPlayerPosition=Player->GetActorLocation();SampleMotion();
  }
  else
@@ -463,17 +462,17 @@ void ABBSBCarryObject::Tick(float DT)
   TickCarrySafety(DT,Player);
  }
 }
-void ABBSBCarryObject::Drop(bool bThrow)
+void ABBSBCarryObject::Drop()
 {
  if(!bCarried) return;
- const FVector Velocity=ActorHasTag(TEXT("BBSBStepCrate")) && !bThrow ? FVector::ZeroVector:ReleaseVelocity();bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryIgnores();
- if(bThrow) LastThrowVelocity=Velocity;
- PrepareStepCrateSimulation();Body->SetSimulatePhysics(true);Body->SetPhysicsLinearVelocity(Velocity);PrePhysicsVelocity=Velocity;
- PawnIgnoreUntil=GetWorld()->GetTimeSeconds()+(ActorHasTag(TEXT("BBSBStepCrate")) ? 0.:.25);RestoreReleasedPawnCollision();
+ const FVector Velocity=ReleaseVelocity();bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryBindings();
+ LastThrowVelocity=Velocity;
+ PrepareStepCrateSimulation();PawnIgnoreUntil=GetWorld()->GetTimeSeconds();RestoreReleasedPawnCollision();
+ Body->SetSimulatePhysics(true);Body->SetPhysicsLinearVelocity(Velocity);PrePhysicsVelocity=Velocity;
 }
 void ABBSBCarryObject::BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy)
 {
- if(AttachedBuddy.Get()!=Buddy) return;Drop(false);AttachedBuddy.Reset();
+ if(AttachedBuddy.Get()!=Buddy) return;Drop();AttachedBuddy.Reset();
 }
 void ABBSBCarryObject::OnBodyHit(UPrimitiveComponent* Component,AActor* Other,UPrimitiveComponent* OtherComponent,FVector Impulse,const FHitResult& Hit)
 {
@@ -507,5 +506,5 @@ void ABBSBCarryObject::ResetObject()
 {
  if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();Body->SetSimulatePhysics(false);SetActorTransform(Home);bBroken=bCarried=bManipulating=false;Health=MaximumHealth;Motion.Reset();Contacts.Reset();CarryVelocity=LastThrowVelocity=PrePhysicsVelocity=FVector::ZeroVector;LastImpactDamage=LastImpactSpeed=0;Body->SetVisibility(true);Body->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);Body->SetCollisionResponseToChannel(ECC_Pawn,NormalPawnResponse);Body->SetCollisionResponseToChannel(ECC_Camera,NormalCameraResponse);PawnIgnoreUntil=-1;BlockedTravel=0;bCarryBlocked=false;PrepareStepCrateSimulation();Body->SetSimulatePhysics(true);
 }
-void ABBSBCarryObject::EndPlay(const EEndPlayReason::Type Reason) { if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();ReleaseCarryIgnores();Super::EndPlay(Reason); }
+void ABBSBCarryObject::EndPlay(const EEndPlayReason::Type Reason) { if(AttachedBuddy.IsValid()) AttachedBuddy->ReleaseSurface();ReleaseCarryBindings();Super::EndPlay(Reason); }
 

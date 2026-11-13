@@ -36,6 +36,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Physics Interaction|Carry",meta=(ClampMin="0")) float MaximumCarryPushForce=1500.f;
  virtual void ApplyImpactPhysicsForces(const FHitResult& Impact,const FVector& ImpactAcceleration,const FVector& ImpactVelocity) override;
  virtual void ApplyDownwardForce(float DeltaSeconds) override;
+ virtual bool IsWalkable(const FHitResult& Hit) const override;
 protected:
  virtual void CapsuleTouched(UPrimitiveComponent* OverlappedComp,AActor* Other,UPrimitiveComponent* OtherComp,int32 OtherBodyIndex,bool bFromSweep,const FHitResult& SweepResult) override;
 private:
