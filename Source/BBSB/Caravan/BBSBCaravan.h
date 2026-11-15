@@ -138,6 +138,7 @@ private:
  double SurfaceFramingBlockedAt=-100;
  TWeakObjectPtr<APlayerController> SurfaceBlendController;
  FVector SurfaceBlendLocalEye=FVector::ZeroVector;
+ FRotator SurfaceBlendViewRotation=FRotator::ZeroRotator;
  float SurfaceBlendElapsed=0,SurfaceBlendRetreat=0;
  bool bSurfaceCameraBlending=false;
  bool bSurfaceFocusSuppressed=false;

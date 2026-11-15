@@ -2,6 +2,7 @@
 #include "Caravan/BBSBCaravan.h"
 #include "Caravan/BBSBBunniarAnimation.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBCameraRotation.h"
 #include "Combat/BBSBCombat.h"
 #include "Character/BBSBTraversal.h"
 #include "Interaction/BBSBInteraction.h"
@@ -71,10 +72,9 @@ void ABBSBBunniarCompanion::ReleaseSurfaceView()
   const auto* Player=Cast<ABBSBCharacter>(SurfaceLookController->GetPawn());
   if(Player && !Player->Combat->IsStageLocked() && !Player->Combat->HasTargetLock() && SurfaceLookController->PlayerCameraManager && SurfaceLookController->GetViewTarget()==Player)
   {
-   FQuat ContinueView=SurfaceLookController->PlayerCameraManager->GetCameraRotation().Quaternion();
-   if(const UCameraComponent* Camera=Player->GetFollowCamera();Camera && !Camera->bUsePawnControlRotation)
-    ContinueView=ContinueView*Camera->GetRelativeRotation().Quaternion().Inverse();
-   SurfaceLookController->SetControlRotation(ContinueView.Rotator());
+   const UCameraComponent* Camera=Player->GetFollowCamera();
+   const FRotator Local=Camera && !Camera->bUsePawnControlRotation ? Camera->GetRelativeRotation():FRotator::ZeroRotator;
+   SurfaceLookController->SetControlRotation(BBSBCameraRotation::ControlFromView(SurfaceLookController->PlayerCameraManager->GetCameraRotation(),Local));
    BeginSurfaceCameraBlend(SurfaceLookController.Get());
   }
   SurfaceLookController->SetIgnoreLookInput(false);SurfaceLookController->RotationInput=FRotator::ZeroRotator;
@@ -89,6 +89,7 @@ void ABBSBBunniarCompanion::BeginSurfaceCameraBlend(APlayerController* Controlle
  // Store it around the pawn in the current control frame so walking and fresh mouse input
  // continue immediately instead of leaving a world-fixed camera behind during recovery.
  SurfaceBlendController=Controller;
+ SurfaceBlendViewRotation=Controller->PlayerCameraManager->GetCameraRotation();
  SurfaceBlendLocalEye=Controller->GetControlRotation().Quaternion().UnrotateVector(Controller->PlayerCameraManager->GetCameraLocation()-Pawn->GetActorLocation());
  SurfaceBlendElapsed=0;SurfaceBlendRetreat=SurfaceCameraRetreat;bSurfaceCameraBlending=true;
 }
@@ -111,7 +112,8 @@ void ABBSBBunniarCompanion::ApplySurfaceCameraBlend(float DeltaTime,FMinimalView
  {
   // Release may happen after the boom tick. Do not show its stale orbit rotation for a frame.
   const UCameraComponent* Camera=Player->GetFollowCamera();
-  View.Rotation=(Camera && !Camera->bUsePawnControlRotation ? Control*Camera->GetRelativeRotation().Quaternion():Control).Rotator();
+  const FRotator Destination=(Camera && !Camera->bUsePawnControlRotation ? Control*Camera->GetRelativeRotation().Quaternion():Control).Rotator();
+  View.Rotation=BBSBCameraRotation::BlendLevel(SurfaceBlendViewRotation,Destination,1.f-Weight);
   SurfaceCameraRetreat=SurfaceBlendRetreat*Weight;SurfaceRetreatVelocity=0;
  }
  const FVector Start=View.Location;
@@ -228,7 +230,7 @@ void ABBSBBunniarCompanion::ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& 
  FRotator Orbit=(FromPawn.Rotation()+SurfaceOrbitOffset).GetNormalized();
  if(FromPawn.SizeSquared2D()<1.f) Orbit.Yaw=SurfaceLookController->GetControlRotation().Yaw;
  Orbit.Pitch=FMath::ClampAngle(Orbit.Pitch,-85.f,85.f);Orbit.Roll=0;
- SurfaceLookController->SetControlRotation(FMath::RInterpTo(SurfaceLookController->GetControlRotation(),Orbit,DeltaTime,12.f));
+ SurfaceLookController->SetControlRotation(BBSBCameraRotation::ConstrainControl(FMath::RInterpTo(SurfaceLookController->GetControlRotation(),Orbit,DeltaTime,12.f),Player->GetFollowCamera()->GetRelativeRotation()));
  // CalcCamera supplies this frame's collision-adjusted eye. Final view focus is exact.
  const FVector ToPoint=SurfacePoint-View.Location;
  if(!ToPoint.IsNearlyZero()) View.Rotation=ToPoint.Rotation();
@@ -290,7 +292,7 @@ void ABBSBBunniarCompanion::ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& 
  if(!bSurfaceViewLocked) return;
  if(!(SurfacePoint-View.Location).IsNearlyZero()) View.Rotation=(SurfacePoint-View.Location).Rotation();
  const float Resume=FMath::Clamp(float((GetWorld()->GetTimeSeconds()-SurfaceResumeStartedAt)/.16),0.f,1.f);
- if(Resume<1.f) View.Rotation=FQuat::Slerp(SurfaceResumeRotation,View.Rotation.Quaternion(),Resume*Resume*(3.f-2.f*Resume)).GetNormalized().Rotator();
+ if(Resume<1.f) View.Rotation=BBSBCameraRotation::BlendLevel(SurfaceResumeRotation.Rotator(),View.Rotation,Resume*Resume*(3.f-2.f*Resume));
  SurfaceLookController->RotationInput=FRotator::ZeroRotator;
 }
 bool ABBSBBunniarCompanion::HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool Initial)

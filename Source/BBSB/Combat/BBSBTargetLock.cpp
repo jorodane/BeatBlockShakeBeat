@@ -1,5 +1,6 @@
 #include "Combat/BBSBCombat.h"
 #include "BBSBCharacter.h"
+#include "Character/BBSBCameraRotation.h"
 #include "Combat/BBSBCombatVisuals.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Field/BBSBFieldActions.h"
@@ -104,9 +105,11 @@ void UBBSBCombatComponent::ReleaseTargetLock()
  if(FieldLockedTarget && Character)
   if(auto* PC=Cast<APlayerController>(Character->GetController());PC && PC->PlayerCameraManager && PC->GetViewTarget()==Character)
   {
-   const FQuat Control=PC->PlayerCameraManager->GetCameraRotation().Quaternion()*CameraRelativeRotation.Quaternion().Inverse();
+   TargetReleaseViewRotation=PC->PlayerCameraManager->GetCameraRotation();
+   const FRotator ContinueView=BBSBCameraRotation::ControlFromView(TargetReleaseViewRotation,CameraRelativeRotation);
+   const FQuat Control=ContinueView.Quaternion();
    TargetReleaseLocalEye=Control.UnrotateVector(PC->PlayerCameraManager->GetCameraLocation()-Character->GetActorLocation());
-   TargetReleaseElapsed=0;bTargetReleaseBlending=true;PC->SetControlRotation(Control.Rotator());
+   TargetReleaseElapsed=0;bTargetReleaseBlending=true;PC->SetControlRotation(ContinueView);
   }
  if(IsValid(FieldLockedTarget) && FieldLockedTarget!=SelectedEnemy) FieldLockedTarget->SetSelected(false);
  LockMouseMotion=FVector2D::ZeroVector;bLockPointerTracked=false;
@@ -301,11 +304,12 @@ void UBBSBCombatComponent::TickTargetLock()
  if(TargetSwitchStartedAt>=0)
  {
   const float Alpha=LockSwitchAlpha(GetWorld()->GetTimeSeconds(),TargetSwitchStartedAt,TargetLockSwitchBlendSeconds);
-  TargetOrbitRotation=FQuat::Slerp(TargetSwitchFromOrbit.Quaternion(),Desired.Quaternion(),Alpha).GetNormalized().Rotator();
+  TargetOrbitRotation=BBSBCameraRotation::BlendLevel(TargetSwitchFromOrbit,Desired,Alpha);
   if(Alpha>=1.f)TargetSwitchStartedAt=-100;
  }
  else TargetOrbitRotation=FMath::RInterpConstantTo(TargetOrbitRotation,FMath::RInterpTo(TargetOrbitRotation,Desired,DT,12.f),DT,180.f);
  auto* Controller=Cast<APlayerController>(Character->GetController());
+ TargetOrbitRotation=BBSBCameraRotation::ConstrainControl(TargetOrbitRotation,CameraRelativeRotation);
  Controller->RotationInput=FRotator::ZeroRotator;Controller->SetControlRotation(TargetOrbitRotation);
 }
 
@@ -346,7 +350,7 @@ void UBBSBCombatComponent::ApplyTargetLockCamera(FMinimalViewInfo& View)
    FCollisionShape::MakeSphere(Boom->ProbeSize),Query) ? Hit.Location:Desired;
  }
  else View.Location=Desired;
- View.Rotation=(Control*CameraRelativeRotation.Quaternion()).Rotator();
+ View.Rotation=BBSBCameraRotation::BlendLevel(TargetReleaseViewRotation,(Control*CameraRelativeRotation.Quaternion()).Rotator(),Alpha);
  TargetReleaseElapsed+=FMath::Max(0.f,GetWorld()->GetDeltaSeconds());
  if(T>=1.f) bTargetReleaseBlending=false;
 }

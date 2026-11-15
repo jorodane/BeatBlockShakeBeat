@@ -100,6 +100,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB") TObjectPtr<UBBSBRepairToolComponent> RepairTool;
 
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
+	virtual FRotator GetViewRotation() const override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 
 	UFUNCTION(Exec) void FieldPress(int32 Channel = 0);

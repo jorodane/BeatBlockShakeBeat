@@ -3,6 +3,7 @@
 #include "BBSBCharacter.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
+#include "Character/BBSBCameraRotation.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -118,6 +119,7 @@ ABBSBCharacter::ABBSBCharacter(const FObjectInitializer& ObjectInitializer)
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = 400.0f;
 	CameraBoom->bUsePawnControlRotation = true;
+ CameraBoom->bInheritRoll = false;
 
 	// Create a follow camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
@@ -279,8 +281,21 @@ float ABBSBCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AContr
 	return Super::TakeDamage(Amount,Event,InstigatorController,Causer);
 }
 
+FRotator ABBSBCharacter::GetViewRotation() const
+{
+ return BBSBCameraRotation::ConstrainControl(Super::GetViewRotation(),FollowCamera ? FollowCamera->GetRelativeRotation():FRotator::ZeroRotator);
+}
+
 void ABBSBCharacter::CalcCamera(float DeltaTime,FMinimalViewInfo& OutResult)
 {
+ // Repair stale roll before it can persist as free-look state. GetViewRotation
+ // also constrains the boom before its earlier tick, so no tilted frame leaks.
+ if(IsLocallyControlled())if(auto* PC=Cast<APlayerController>(GetController()))
+ {
+  const FRotator Current=PC->GetControlRotation();
+  const FRotator Safe=BBSBCameraRotation::ConstrainControl(Current,FollowCamera ? FollowCamera->GetRelativeRotation():FRotator::ZeroRotator);
+  if(!Current.Equals(Safe,.0001))PC->SetControlRotation(Safe);
+ }
 	Super::CalcCamera(DeltaTime,OutResult);
  if(Traversal) Traversal->ApplyClimbCamera(DeltaTime,OutResult);
 	// A release blend also finishes when Tab switches away from Bunniar.

@@ -231,6 +231,7 @@ private:
  FRotator TargetOrbitRotation=FRotator::ZeroRotator,TargetOrbitOffset=FRotator::ZeroRotator;
  bool bTargetOrbitHasBearing=false,bTargetReleaseBlending=false;
  FVector TargetReleaseLocalEye=FVector::ZeroVector;
+ FRotator TargetReleaseViewRotation=FRotator::ZeroRotator;
  float TargetReleaseElapsed=0.f;
 	FBBSBParryInput Inputs[4];
 	FBBSBParryTimingHistory TimingHistory;
