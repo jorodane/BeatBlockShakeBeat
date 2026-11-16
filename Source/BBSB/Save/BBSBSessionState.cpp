@@ -1,4 +1,5 @@
 #include "Save/BBSBSession.h"
+#include "UI/BBSBGuides.h"
 #include "BBSBCharacter.h"
 #include "Hunting/BBSBHunting.h"
 #include "Hunting/BBSBLootPickup.h"
@@ -78,6 +79,7 @@ UBBSBSessionSave* UBBSBSessionSubsystem::Capture() const
   else continue;
   S->Actors.Add(R);
  }
+ if(const auto* G=UBBSBGuideSubsystem::Get(this)) { S->SeenGuides=G->SeenGuides;S->bLearnedMove=G->bLearnedMove;S->bLearnedLook=G->bLearnedLook; }
  S->Actors.Sort([](const auto& A,const auto& B){return A.Path<B.Path;});
  S->Loot.Sort([](const auto& A,const auto& B){const FString X=A.Entry.Item ? A.Entry.Item->GetPathName():FString(),Y=B.Entry.Item ? B.Entry.Item->GetPathName():FString();return X==Y ? A.Location.X<B.Location.X:X<Y;});
  return S;
@@ -94,10 +96,11 @@ bool UBBSBSessionSubsystem::Restore(UBBSBSessionSave* S)
  auto* T=P->Traversal.Get();auto* Move=P->GetCharacterMovement();P->Interaction->EndDialogue();T->CancelWireRecall();T->DropParkour();T->EndGlide();P->FieldActions->ResetActionState();
  if(auto* B=Cast<ABBSBBunniarCompanion>(P->FieldActions->BunniarEquipment))B->ReleaseSurface();
  if(!P->Hunting->ApplyProfile(Profile))return false;P->Hunting->TickEquipmentLoadout();
+ if(auto* G=UBBSBGuideSubsystem::Get(this)) { G->CloseGuide();G->SeenGuides=S->SeenGuides;G->bLearnedMove=S->bLearnedMove;G->bLearnedLook=S->bLearnedLook; }
  if(Story)for(TActorIterator<ABBSBStage01Director> It(GetWorld());It;++It)
  {
   auto* D=*It;D->Phase=Story->Phase;D->Solved=Story->Solved;D->Quieted=Story->Quieted;D->Tea=Story->Tea;D->bRewardGranted=Story->bRewardGranted;D->ToolInstance=S->StoryTool;D->bEnforceTutorialLoadout=S->bTutorialLoadoutEnforced;D->ApplyProgress();D->UpdateTutorialGate();
-  if(!S->bBunniarOpeningRest || S->Movement==EBBSBSavedMovement::Glide)if(auto* B=Cast<ABBSBBunniarCompanion>(P->FieldActions->BunniarEquipment))B->EndOpeningRest();
+  if(auto* B=Cast<ABBSBBunniarCompanion>(P->FieldActions->BunniarEquipment))B->EndOpeningRest();
  }
  for(const auto& R:S->Actors)
  {

@@ -46,7 +46,7 @@ struct FBBSBOccludingMesh
  UPROPERTY() TArray<TObjectPtr<UMaterialInterface>> Originals;
  UPROPERTY() TArray<TObjectPtr<UMaterialInterface>> Replacements;
  float Weight=0,OriginalWeight=0,OriginalKind=0;
- bool bCharacter=false;
+ bool bCharacter=false,bLensHidden=false;
  uint8 OriginalShadowInvalidation=0;
  int32 OriginalInstanceFloats=0;
  TArray<float> OriginalInstanceData;
@@ -102,6 +102,7 @@ private:
  UPROPERTY(Transient) TObjectPtr<UBBSBViewOcclusionMaterials> Library;
  UPROPERTY(Transient) TArray<FBBSBOccludingMesh> States;
  TSet<TWeakObjectPtr<UMeshComponent>> WantedGeometry,WantedCharacters;
+ TSet<TWeakObjectPtr<UMeshComponent>> LensHiddenMeshes;
  TMap<TWeakObjectPtr<UMeshComponent>,TSet<int32>> WantedInstances;
  TMap<TWeakObjectPtr<AActor>,bool> HiddenCharacters;
  TSharedPtr<FBBSBViewOcclusionQueries> Queries;

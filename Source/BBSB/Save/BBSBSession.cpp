@@ -1,4 +1,6 @@
 #include "Save/BBSBSession.h"
+#include "UI/BBSBGuides.h"
+#include "Stage01/BBSBOpening.h"
 #include "BBSBCharacter.h"
 #include "Hunting/BBSBHunting.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
@@ -53,6 +55,8 @@ bool UBBSBSessionSubsystem::BindPlayer()
  else if(bNewGamePending)
  {
   bNewGamePending=false;bLoading=false;bGameStarted=true;LastStateHash.Empty();SaveNow(TEXT("처음부터"),true);
+  for(TActorIterator<ABBSBStage01Director> It(W);It;++It)
+  { auto* Scene=W->SpawnActor<ABBSBStage01Opening>();if(!Scene->Start(*It,P))Scene->Destroy();break; }
  }
  else if(!bGameStarted)OpenMenu();
  return true;
@@ -69,6 +73,7 @@ void UBBSBSessionSubsystem::Tick(float DeltaTime)
 bool UBBSBSessionSubsystem::IsStable() const
 {
  if(!Player.IsValid() || Player->Combat->bDead || Player->Respawn->IsSequenceActive() || Player->Interaction->bDialogueActive)return false;
+ if(const auto* G=UBBSBGuideSubsystem::Get(this);G && (G->bOpeningActive || G->bGuideOpen))return false;
  const auto* A=Player->FieldActions.Get();const auto* T=Player->Traversal.Get();
  return !Player->EquipmentGrowth->bConcertoActive && !A->IsDodging() && !A->IsGestureCaptured() && A->ActiveState==EBBSBActionState::Idle && !T->IsWireTraversalActive() &&
   T->ParkourMode!=EBBSBParkourMode::Mantle && T->ParkourMode!=EBBSBParkourMode::Vault;
@@ -86,6 +91,7 @@ void UBBSBSessionSubsystem::CheckAutoSave()
 bool UBBSBSessionSubsystem::SaveNow(FString Reason,bool Force)
 {
  if(!bEnabled || !bGameStarted || bApplying || bLoading || !Player.IsValid() || Player->Combat->bDead || Player->Respawn->IsSequenceActive())return false;
+ if(const auto* G=UBBSBGuideSubsystem::Get(this);G && G->bOpeningActive) { StatusText=TEXT("도입 연출이 끝나면 저장할 수 있어요.");return false; }
  if(!Force && !IsStable()) { RequestAutoSave(Reason);return false; }
  auto* Record=Capture();if(!Record)return false;const FString Hash=Record->StateHash();
  if(!Force && Hash==LastStateHash) { PendingReason.Empty();bChanged=false;return true; }
@@ -99,7 +105,7 @@ void UBBSBSessionSubsystem::OnWorldTearDown(UWorld* W)
  {
   if(auto* Record=Capture();Record && Record->StateHash()!=LastStateHash)SaveNow(TEXT("마지막 위치"),true);
  }
- if(W==BoundWorld.Get()) { if(Menu)Menu->RemoveFromParent();Menu=nullptr;bMenuOpen=bOwnPause=bOwnMoveIgnore=bOwnLookIgnore=false;Player.Reset();Controls=nullptr; }
+ if(W==BoundWorld.Get()) { if(auto* G=UBBSBGuideSubsystem::Get(this))G->CloseGuide();if(Menu)Menu->RemoveFromParent();Menu=nullptr;bMenuOpen=bOwnPause=bOwnMoveIgnore=bOwnLookIgnore=false;Player.Reset();Controls=nullptr; }
 }
 bool UBBSBSessionSubsystem::HasLegacy() const
 {
@@ -120,6 +126,7 @@ bool UBBSBSessionSubsystem::StartNewGame()
  if(!Player.IsValid())return false;
  const FString Map=FPackageName::GetLongPackagePath(GetWorld()->GetOutermost()->GetName())+TEXT("/")+UGameplayStatics::GetCurrentLevelName(GetWorld(),true);
  if(bGameStarted)SaveNow(TEXT("처음부터 시작 전"),true);
+ if(auto* G=UBBSBGuideSubsystem::Get(this))G->ResetForNewGame();
  Pending=nullptr;bNewGamePending=true;bGameStarted=false;BeginMap(Map);return true;
 }
 bool UBBSBSessionSubsystem::LoadSlot(int32 Index)

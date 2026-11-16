@@ -111,8 +111,11 @@ public:
  bool EquipmentWheelSavedCursor() const { return bWheelOriginalCursor; }
  UFUNCTION(BlueprintCallable,Category="BBSB|Interaction") void QuickBunniarDown();
  UFUNCTION(BlueprintCallable,Category="BBSB|Interaction") void QuickBunniarUp();
+ /** Reconcile releases consumed by a paused tutorial without resetting other actions. */
+ void ReconcileGuideRelease(bool PrimaryReleased,bool ShortcutReleased);
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") AActor* InteractionEquipment() const { return bBunniarShortcutActive ? BunniarEquipment.Get():FieldEquipment.Get(); }
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsBunniarControlActive() const { return BunniarEquipment && InteractionEquipment()==BunniarEquipment; }
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly) bool bStoryPresentationHidden=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Interaction") bool bBunniarShortcutActive=false;
  UFUNCTION(BlueprintPure,Category="BBSB|Interaction") bool IsEquipmentTarget(AActor* Actor) const;
 	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Equipment") TObjectPtr<AActor> BunniarEquipment;
@@ -184,6 +187,7 @@ public:
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool IsWeaponReturning() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Reparaton") int32 GetReparatonForm() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Weapon") bool CanContinueSwordCombo() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Reparaton") TArray<AActor*> GetReparatonActors() const;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") EBBSBActionState ActiveState = EBBSBActionState::Idle;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 RejectedActions = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="BBSB|Action") int32 CanceledAttacks = 0;
@@ -280,7 +284,7 @@ private:
  bool CanMoveWithInputBlock(bool bIgnoreEquipmentInputBlock) const;
 	friend class ABBSBWeaponVerification;
  friend class ABBSBPlayerWeaponProjectile;
- struct FRestEquipmentPoseState { FVector OwnerOffset=FVector::ZeroVector,CollisionOffset=FVector::ZeroVector; double UpdatedAt=-1; };
+ struct FRestEquipmentPoseState { FVector OwnerOffset=FVector::ZeroVector,CollisionOffset=FVector::ZeroVector,RequestedOffset=FVector::ZeroVector,RequestOwner=FVector::ZeroVector; float StableRequestSeconds=0; double UpdatedAt=-1; };
  mutable TMap<TWeakObjectPtr<AActor>,FRestEquipmentPoseState> RestEquipmentPoses;
 	FActorComponentTickFunction WeaponViewTick;
 	bool bEquipmentTabHeld=false,bEquipmentTabCancelled=false,bWheelOriginalCursor=false,bWheelOpenedInCombat=false;
@@ -376,6 +380,8 @@ private:
 	FTransform CurrentUpperPose, CurrentLowerPose;
 	float FormProgress=0;
 	FBBSBActionArbiter Arbiter;
+	// Only our own short equipment-command pose may yield to a fresh Bunniar send.
+	uint32 BunniarCommandRevision=MAX_uint32;
 	UPROPERTY(Transient) TObjectPtr<UAnimMontage> ActionMontage;
 	struct FHoverState { TWeakObjectPtr<UPrimitiveComponent> Primitive; bool bDepth=false; int32 Stencil=0; };
 	TArray<FHoverState> HoverStates;

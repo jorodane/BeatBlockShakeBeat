@@ -22,12 +22,15 @@ void UBBSBHuntingComponent::UnregisterLoot(ABBSBLootPickup* Loot)
 { LootActors.Remove(Loot); }
 void UBBSBHuntingComponent::IgnoreLoot(FCollisionQueryParams& Query) const
 { for(const auto& Weak:LootActors)if(Weak.IsValid())Query.AddIgnoredActor(Weak.Get()); }
-bool UBBSBHuntingComponent::TryBeginCollection()
+bool UBBSBHuntingComponent::TryBeginCollection(bool bFromAimFollow)
 {
  if(!Player || !Player->FieldActions || Player->FieldActions->InteractionEquipment()!=Player->FieldActions->BunniarEquipment)return false;
  FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit))return false;
  auto* Loot=Cast<ABBSBLootPickup>(Hit.GetActor());if(!Loot || !Loot->IsAvailable())return false;
- if(Player->Combat->bDead || Player->Combat->IsStageLocked() || Player->FieldActions->IsEquipmentActionBusy())return true;
+ const auto* Buddy=Cast<ABBSBBunniarCompanion>(Player->FieldActions->BunniarEquipment);
+ const bool FollowingOwnCommand=bFromAimFollow && Buddy && Buddy->bAimFollowing && Player->FieldActions->IsGestureChannelHeld(0) &&
+  !Player->FieldActions->bEquipmentInputBlocked && !Player->FieldActions->IsDodging() && !Player->Traversal->IsWireTraversalActive() && !Player->Traversal->IsParkourActive();
+ if(Player->Combat->bDead || Player->Combat->IsStageLocked() || (!FollowingOwnCommand && Player->FieldActions->IsEquipmentActionBusy()))return true;
  bCollectionHeld=true;bVacuuming=false;bBuddyLootReturning=false;
  CollectionStartedAt=GetWorld()->GetTimeSeconds();NextVacuumScanAt=CollectionStartedAt;
  VacuumPoint=Hit.ImpactPoint;VacuumNormal=Hit.ImpactNormal.IsNearlyZero() ? FVector::UpVector:Hit.ImpactNormal;

@@ -115,6 +115,13 @@ bool UBBSBFieldActionComponent::IsWeaponReturning() const
  return (bHasFollowThrough[0] && Now<FollowThroughUntil[0]) || (bHasFollowThrough[1] && Now<FollowThroughUntil[1]);
 }
 
+TArray<AActor*> UBBSBFieldActionComponent::GetReparatonActors() const
+{
+ TArray<AActor*> Result;
+ for(AActor* Actor:{ConductorWeapon.Get(),OtherConductorWeapon.Get()})if(IsValid(Actor))Result.Add(Actor);
+ return Result;
+}
+
 int32 UBBSBFieldActionComponent::GetReparatonForm() const
 {
  // Read the hand-held form actually visible when the hit arrives, before interruption.

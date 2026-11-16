@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BBSBCharacter.h"
+#include "UI/BBSBGuides.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Character/BBSBCameraRotation.h"
@@ -202,7 +204,9 @@ void ABBSBCharacter::DoMove(float Right, float Forward)
 	if (Traversal && (Traversal->bGlideDashing || Traversal->IsWallJumpSteeringLocked())) return;
 	if (GetController() != nullptr)
 	{
-		// find out which way is forward
+  if(!GetController()->IsMoveInputIgnored() && FMath::Abs(Right)+FMath::Abs(Forward)>.05f)
+   if(auto* G=UBBSBGuideSubsystem::Get(this))G->NotifyMoveInput();
+  // find out which way is forward
 		const FRotator Rotation = GetController()->GetControlRotation();
 		FRotator MoveView=Rotation;
 		const auto* Buddy=FieldActions ? Cast<ABBSBBunniarCompanion>(FieldActions->InteractionEquipment()):nullptr;
@@ -228,7 +232,9 @@ void ABBSBCharacter::DoLook(float Yaw, float Pitch)
 	if (FieldActions && FieldActions->GetLookInputScale()<=0.f) return;
 	if (GetController() != nullptr)
 	{
-		// add yaw and pitch input to controller
+  if(!GetController()->IsLookInputIgnored() && FMath::Abs(Yaw)+FMath::Abs(Pitch)>.01f)
+   if(auto* G=UBBSBGuideSubsystem::Get(this))G->NotifyLookInput();
+  // add yaw and pitch input to controller
 		const float InputScale=FieldActions ? FieldActions->GetLookInputScale() : 1.f;
 		AddControllerYawInput(Yaw*InputScale);
 		AddControllerPitchInput(Pitch*InputScale);

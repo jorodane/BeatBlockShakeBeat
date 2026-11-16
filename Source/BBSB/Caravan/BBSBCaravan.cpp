@@ -1,4 +1,5 @@
 #include "Caravan/BBSBCaravan.h"
+#include "Engine/SkeletalMesh.h"
 #include "UI/BBSBPaperTheme.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBHunting.h"
@@ -142,6 +143,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
    SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;ReturnTransitSeconds=EquipmentTravelSeconds;bSurfaceReturning=true;
   }
  }
+ if(bAimFollowing)UpdateAimFollowing();
  if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Hunting && P->Hunting->TickBuddyPresentation(DT))return;
  const float SmallScale=AnimationSet ? AnimationSet->CompanionScale:.12f;
  const float NormalScale=!bFollowing ? 1.f:bEquipped ? (AnimationSet ? AnimationSet->EquippedScale:.175f):SmallScale;
@@ -155,7 +157,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
   else
   {
    SurfaceArrivalAlpha=Transit;
-   SetActorLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),AirHoverPoint,Ease));
+   SetActorLocation(bAimFollowing && Transit>=1.f ? FMath::VInterpTo(GetActorLocation(),AirHoverPoint,DT,AimFollowInterpSpeed):FMath::Lerp(SurfaceTransitFrom.GetLocation(),AirHoverPoint,Ease));
    const auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
    const FVector Face=AnimationSet ? AnimationSet->FaceDirection.GetSafeNormal():FVector::RightVector;
    const FQuat ModelFrame=FRotationMatrix::MakeFromXZ(Visual->GetRelativeTransform().TransformVectorNoScale(Face),Visual->GetRelativeTransform().TransformVectorNoScale(FVector::UpVector)).ToQuat();
@@ -186,9 +188,10 @@ void ABBSBBunniarCompanion::Tick(float DT)
    const FVector Contact=Visual->GetRelativeTransform().TransformPosition(Back)*GetActorScale3D();
    SurfaceArrivalAlpha=Transit;
    if(auto* Object=Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner());Object && Object->bManipulating && !P->FieldActions->IsGestureChannelHeld(1)) { Object->EndManipulation(false);P->FieldActions->SetEquipmentPointerCapture(false); }
-   SetActorRotation(FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Q,Ease));
-   SetActorLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),SurfacePoint-Q.RotateVector(Contact)+SurfaceNormal*(AnimationSet ? AnimationSet->SurfaceGap:2),Ease));
-   if(!bSurfaceArrived && Transit>=1)
+   const FVector Goal=SurfacePoint-Q.RotateVector(Contact)+SurfaceNormal*(AnimationSet ? AnimationSet->SurfaceGap:2);
+   SetActorRotation(bAimFollowing && Transit>=1.f ? FMath::QInterpTo(GetActorQuat(),Q,DT,AimFollowInterpSpeed):FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Q,Ease));
+   SetActorLocation(bAimFollowing && Transit>=1.f ? FMath::VInterpTo(GetActorLocation(),Goal,DT,AimFollowInterpSpeed):FMath::Lerp(SurfaceTransitFrom.GetLocation(),Goal,Ease));
+   if(!bAimFollowing && !bSurfaceArrived && Transit>=1)
    {
     bSurfaceArrived=true;
     if(AActor* SurfaceOwner=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner());SurfaceOwner) IBBSBBunniarSurface::Execute_BunniarArrived(SurfaceOwner,this);
@@ -219,7 +222,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
    FTransform Pose(GetActorQuat(),Target,GetActorScale3D());
    // Resolve the destination first, then apply the timed recall to that safe
    // pose. The resting-pose assignment used to overwrite the return every tick.
-   const bool Clear=P->FieldActions->ResolveRestEquipmentPose(Pose,CalculateComponentsBoundingBoxInLocalSpace(true),this,true,!bSurfaceReturning);
+   const bool Clear=P->FieldActions->ResolveRestEquipmentPose(Pose,RestClearanceBounds(),this,true,!bSurfaceReturning);
    if(bSurfaceReturning)Pose.SetLocation(FMath::Lerp(SurfaceTransitFrom.GetLocation(),Pose.GetLocation(),Ease));
    bRestOccluded=!Clear && (!bSurfaceReturning || Transit>=1.f);
    SetActorTransform(Pose);if(bRestOccluded) SetActorHiddenInGame(true);
@@ -708,4 +711,13 @@ void ABBSBCaravanHUD::DrawHUD()
   WrappedText((D->ShopSelection==1 ? TEXT("▶ "):TEXT("   "))+B,Paper,X+25*S,Y+160*S,570*S,1.3f*S);
   DrawText(FString::Printf(TEXT("소지금 %d  ·  상품 해금과 소유는 별개"),D->Inventory->Coins),Pink,X+25*S,Y+215*S,GEngine->GetSmallFont(),1.2f*S);
  }
+}
+
+FBox ABBSBBunniarCompanion::RestClearanceBounds() const
+{
+ // Asset bounds describe the complete companion, including its unfolded ears.
+ // Animated world bounds feed collision correction back into the next frame.
+ if(Visual && Visual->GetSkeletalMeshAsset())
+  return Visual->GetSkeletalMeshAsset()->GetBounds().GetBox().TransformBy(Visual->GetRelativeTransform());
+ return FBox(FVector(-160,-100,-25),FVector(160,100,225));
 }

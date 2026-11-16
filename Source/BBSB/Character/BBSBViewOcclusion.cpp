@@ -1,5 +1,6 @@
 #include "Character/BBSBViewOcclusion.h"
 #include "BBSBCharacter.h"
+#include "Field/BBSBFieldActions.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "Combat/BBSBCombat.h"
 #include "Combat/BBSBFieldAttack.h"
@@ -331,7 +332,8 @@ bool UBBSBViewOcclusionComponent::CharacterTouchesLens(AActor* Actor,const FVect
 }
 void UBBSBViewOcclusionComponent::UpdateCharacterProtection(const FVector& Eye)
 {
- WantedCharacters.Reset();TSet<TWeakObjectPtr<AActor>> Protected;
+ WantedCharacters.Reset();LensHiddenMeshes.Reset();TSet<TWeakObjectPtr<AActor>> Protected;
+ TArray<AActor*> Conductors=Character->FieldActions->GetReparatonActors();
  // Projectile counts must not increase the cost of this camera safety pass.
  TSet<AActor*> Characters;
  for(TActorIterator<APawn> It(GetWorld());It;++It)Characters.Add(*It);
@@ -340,18 +342,35 @@ void UBBSBViewOcclusionComponent::UpdateCharacterProtection(const FVector& Eye)
  for(auto* Actor:Characters)
  {
   if(Actor!=Character && KeepVisible(Actor,Character))continue;
-  PrepareCharacterCamera(Actor);if(!CharacterTouchesLens(Actor,Eye))continue;
+  PrepareCharacterCamera(Actor);
+  bool Touches=CharacterTouchesLens(Actor,Eye);
   TArray<UMeshComponent*> Meshes;Actor->GetComponents(Meshes);bool Critical=false;
+  if(Actor==Character)for(AActor* Hand:Conductors)
+  {
+   if(Hand->IsHidden())continue;
+   Touches|=CharacterTouchesLens(Hand,Eye);TArray<UMeshComponent*> Parts;Hand->GetComponents(Parts);Meshes.Append(Parts);
+  }
+  if(!Touches)continue;
+  const float PlayerWeight=Actor==Character ? OcclusionWeight(Character->GetMesh()):0.f;
   for(auto* Mesh:Meshes)
   {
    if(!Mesh->IsVisible())continue;
    Critical|=Mesh->Bounds.GetBox().ComputeSquaredDistanceToPoint(Eye)<=FMath::Square(CharacterLensRadius+2.f);
-   if(AddMesh(Mesh,true))WantedCharacters.Add(Mesh);
+   if(AddMesh(Mesh,true))
+   {
+    WantedCharacters.Add(Mesh);
+    // A form change can reveal another piece midway through the fade.
+    if(Actor==Character && Mesh->GetOwner()!=Character)
+     for(auto& State:States)if(State.Mesh==Mesh) { State.Weight=PlayerWeight;break; }
+   }
   }
   if(Critical)
   {
    if(!HiddenCharacters.Contains(Actor))HiddenCharacters.Add(Actor,Actor->IsHidden());
    Actor->SetActorHiddenInGame(true);Protected.Add(Actor);
+   // Components are hidden independently of the weapon presentation's actor
+   // visibility writes, so the near plane cannot reveal a conductor interior.
+   for(auto* Mesh:Meshes)if(Mesh->IsVisible())LensHiddenMeshes.Add(Mesh);
   }
  }
  for(auto It=HiddenCharacters.CreateIterator();It;++It)if(!Protected.Contains(It.Key()))
@@ -518,7 +537,7 @@ void UBBSBViewOcclusionComponent::RestoreGeometryVisibility()
 void UBBSBViewOcclusionComponent::RestoreCharacterVisibility()
 {
  for(int32 I=States.Num()-1;I>=0;--I)if(States[I].bCharacter) { RestoreMesh(States[I]);States.RemoveAtSwap(I); }
- WantedCharacters.Reset();
+ WantedCharacters.Reset();LensHiddenMeshes.Reset();
  for(auto& Pair:CharacterCameraResponses) if(auto* P=Pair.Key.Get()) P->SetCollisionResponseToChannel(ECC_Camera,Pair.Value);CharacterCameraResponses.Reset();
  for(auto& Pair:HiddenCharacters)if(auto* Actor=Pair.Key.Get())Actor->SetActorHiddenInGame(Pair.Value);HiddenCharacters.Reset();
  CharacterOccluders=0;
@@ -575,7 +594,11 @@ void UBBSBViewOcclusionComponent::TickComponent(float DT,ELevelTick TickType,FAc
   for(const auto& Material:State.Replacements)if(auto* Dynamic=Cast<UMaterialInstanceDynamic>(Material.Get()))Dynamic->SetScalarParameterValue(TEXT("BBSB_ViewOcclusionWeight"),State.Weight);
   // Unknown materials get a visibility fallback until the editor prepares them.
   // Critical near-plane character protection is actor-wide and independent of materials.
-  if(State.bUnsupported) { ++FallbackOccluders;Mesh->SetHiddenInGame(State.bOriginalHidden || (Wanted && State.Weight>0.f)); }
+  const bool LensHidden=LensHiddenMeshes.Contains(Mesh);
+  if(State.bUnsupported)++FallbackOccluders;
+  if(State.bUnsupported || LensHidden || State.bLensHidden)
+   Mesh->SetHiddenInGame(State.bOriginalHidden || LensHidden || (State.bUnsupported && Wanted && State.Weight>0.f));
+  State.bLensHidden=LensHidden;
   if(!Wanted && State.Weight<=0.f) { RestoreMesh(State);States.RemoveAtSwap(Index);continue; }
   if(State.bCharacter)++CharacterOccluders;else ++GeometryOccluders;
  }

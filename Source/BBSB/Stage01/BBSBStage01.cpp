@@ -49,10 +49,9 @@ void ABBSBStage01Director::BindPlayer()
  Player->FieldActions->bShowPracticeHUD=false;PC->ClientSetHUD(ABBSBStage01HUD::StaticClass());bBound=true;
  UpdateTutorialGate();
  if(!HasTool())Player->FieldActions->RequestEquipment(0);else if(Phase!=EBBSBStage01Phase::Complete)GiveRepairTool();
- if(Phase==EBBSBStage01Phase::Opening)if(auto* Buddy=Cast<ABBSBBunniarCompanion>(Player->FieldActions->BunniarEquipment))Buddy->BeginOpeningRest(BookstandPose);
+ // The session starts the interactive opening only for an explicit new game.
  if(CabinCheckpoint && (!Player->Respawn->ActivePoint || !Player->Respawn->ActivePoint->bTravelAvailable))CabinCheckpoint->ActivateFor(Player);
- if(Phase==EBBSBStage01Phase::Opening)Say(TEXT("레파라도: ...또 삑사리야? 입에 반창고까지 붙였는데.\n버니아는 입으로 노래하는 게 아니었다."),6);
- else Say(Objective(),5);
+ Caption.Empty();
 }
 void ABBSBStage01Director::EndPlay(const EEndPlayReason::Type Reason)
 {

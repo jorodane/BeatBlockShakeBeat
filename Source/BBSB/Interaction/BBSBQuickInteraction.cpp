@@ -79,6 +79,17 @@ bool UBBSBInteractionComponent::FindQuickInteraction(FHitResult& Out) const
  const auto* Actions=Player->FieldActions.Get();const bool Locked=Player->Combat->HasTargetLock();
  auto DepthAllowed=[&](AActor* Target)
  { return Target && (Target->ActorHasTag(TEXT("BBSBPhysicalInteraction")) || Actions->IsAimPointDepthAllowed(Target->GetActorLocation())); };
+ auto Reachable=[&](const FHitResult& Contact)
+ {
+  if(!IsQuickInteractable(Contact.GetActor()))return false;
+  const FVector Start=Player->GetActorLocation()+FVector(0,0,10);
+  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBQuickInteractionReach),true,Player);Q.AddIgnoredActor(Actions->BunniarEquipment);
+  FHitResult Block;const FVector End=Contact.ImpactPoint+(Contact.ImpactPoint-Start).GetSafeNormal()*2.f;
+  if(!GetWorld()->LineTraceSingleByChannel(Block,Start,End,ECC_Visibility,Q))return true;
+  if(Block.GetActor()==Contact.GetActor())return true;
+  AActor* Handler=BBSBBunniarSurface::Resolve(Contact.GetActor());
+  return Handler && BBSBBunniarSurface::Resolve(Block.GetActor())==Handler;
+ };
  auto Search=[&](FVector Origin,FVector Direction,FVector TraceOrigin,float Range,float Degrees,bool Camera,FHitResult& Result)
  {
   FCollisionQueryParams Query(SCENE_QUERY_STAT(BBSBQuickInteraction),true,Player);Query.AddIgnoredActor(Actions->BunniarEquipment);
@@ -87,7 +98,7 @@ bool UBBSBInteractionComponent::FindQuickInteraction(FHitResult& Out) const
   {
    FHitResult Direct;
    if(GetWorld()->LineTraceSingleByChannel(Direct,TraceOrigin,Origin+Direction*(Range+1500),ECC_Visibility,Query) && IsQuickInteractable(Direct.GetActor()) &&
-      DepthAllowed(Direct.GetActor()) && Actions->IsAimPointDepthAllowed(Direct.ImpactPoint) && FVector::DistSquared(Player->GetActorLocation(),Direct.ImpactPoint)<=FMath::Square(Range))
+      DepthAllowed(Direct.GetActor()) && Actions->IsAimPointDepthAllowed(Direct.ImpactPoint) && FVector::DistSquared(Player->GetActorLocation(),Direct.ImpactPoint)<=FMath::Square(Range) && Reachable(Direct))
    { Result=Direct;return true; }
   }
   float Best=MAX_flt;
@@ -126,7 +137,7 @@ bool UBBSBInteractionComponent::FindQuickInteraction(FHitResult& Out) const
      FHitResult Hit;const FVector End=Point+(Point-TraceOrigin).GetSafeNormal()*4.f;
      if(!GetWorld()->LineTraceSingleByChannel(Hit,TraceOrigin,End,ECC_Visibility,Query) || !IsQuickInteractable(Hit.GetActor()) ||
        (Hit.GetActor()!=Target && BBSBBunniarSurface::Resolve(Hit.GetActor())!=BBSBBunniarSurface::Resolve(Target)) ||
-       (Camera && !Actions->IsAimPointDepthAllowed(Hit.ImpactPoint)))continue;
+       (Camera && !Actions->IsAimPointDepthAllowed(Hit.ImpactPoint)) || !Reachable(Hit))continue;
      const float Score=Camera ? Angle*100.f+Along*.015f:Along+Perp*.7f;
      if(Score<Best) { Best=Score;Result=Hit; }
     }

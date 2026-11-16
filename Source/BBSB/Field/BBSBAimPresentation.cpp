@@ -36,7 +36,8 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
  const auto* PC=Character ? Cast<APlayerController>(Character->GetController()):nullptr;
  const auto* Interaction=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
- const bool BuddyFocus=PC && PC->IsLocalController() && !bEquipmentWheelOpen && IsSurfaceAimLocked() && !(Interaction && Interaction->bDialogueActive) && !(Combat && Combat->bDead);
+ const auto* BuddyAnchor=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
+ const bool BuddyFocus=PC && PC->IsLocalController() && !bEquipmentWheelOpen && BuddyAnchor && (BuddyAnchor->IsPlainSurfaceAttached() || BuddyAnchor->bAirHovering) && !(Interaction && Interaction->bDialogueActive) && !(Combat && (Combat->bDead || Combat->HasTargetLock()));
  if(Camera && (BuddyFocus || BuddyOutlineMID))
  {
   if(!BuddyOutlineMID) if(auto* Material=BuddyOutlineMaterial.LoadSynchronous()) BuddyOutlineMID=UMaterialInstanceDynamic::Create(Material,this);

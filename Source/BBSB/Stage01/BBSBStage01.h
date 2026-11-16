@@ -72,6 +72,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) bool bHeld=false;
  UFUNCTION(BlueprintCallable) bool Use();
  UFUNCTION(BlueprintCallable) void SetSolved(bool Value);
+ UFUNCTION(BlueprintPure,Category="Stage01|Hints") bool DragHint(ABBSBBunniarCompanion* Buddy,FVector2D& ScreenAxis,bool& BothDirections) const;
  virtual FText BunniarInteractionText_Implementation() const override;
  virtual bool BunniarQuickUse_Implementation(ABBSBBunniarCompanion* Buddy) override;
  virtual void BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal) override;

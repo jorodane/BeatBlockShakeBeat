@@ -121,6 +121,10 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
  auto& State=RestEquipmentPoses.FindOrAdd(Equipment);
  const bool HasHistory=State.UpdatedAt>=0 && Now-State.UpdatedAt<.25;
  const FVector Previous=Origin+State.OwnerOffset+Offset;
+ const float DT=FMath::Max(0.f,GetWorld()->GetDeltaSeconds());
+ if(!HasHistory || !State.RequestedOffset.Equals(Desired-Origin,.05f) || !State.RequestOwner.Equals(Origin,.05f))
+ { State.RequestedOffset=Desired-Origin;State.RequestOwner=Origin;State.StableRequestSeconds=0; }
+ else State.StableRequestSeconds+=DT;
  // Sweep continuously along the obstacle instead of pinning the previous safe goal.
  auto Slide=[&](FVector From,const FVector& To,FVector& Result)
  {
@@ -165,7 +169,6 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
  }
  if(!Found) return false;
  const FVector Goal=Center;
- const float DT=FMath::Max(0.f,GetWorld()->GetDeltaSeconds());
  if(bInterpolate || HasHistory)
  {
   const FVector From=HasHistory ? Previous:Equipment->GetActorLocation()+Offset;
@@ -185,6 +188,11 @@ bool UBBSBFieldActionComponent::ResolveRestEquipmentPose(FTransform& Pose,const 
   if((!bInterpolate && Clear(Smoothed)) || Slide(From,Smoothed,Smoothed)) Center=Smoothed;
   else { FVector Safe=From;if(Project(Safe)) Center=Safe; }
  }
+ // At an unchanged anchor, alternating slide/penetration solutions must not
+ // repeatedly undo the previous frame's progress. Keep a still-valid closer
+ // pose; fresh camera/owner motion and moving obstructions remain responsive.
+ if(bInterpolate && HasHistory && State.StableRequestSeconds>.15f && Clear(Previous) &&
+    FVector::DistSquared(Center,Desired)>FVector::DistSquared(Previous,Desired)+.01f)Center=Previous;
  Pose.SetLocation(Center-Offset);
  // Keep the rendered position as history, never an unreached future goal.
  State.OwnerOffset=Center-Offset-Origin;State.CollisionOffset=Center-Desired;State.UpdatedAt=Now;

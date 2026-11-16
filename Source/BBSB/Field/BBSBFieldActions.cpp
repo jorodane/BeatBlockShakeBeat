@@ -1,6 +1,7 @@
 #include "BBSBFieldActions.h"
 #include "HAL/PlatformTime.h"
 #include "UI/BBSBPaperTheme.h"
+#include "UI/BBSBGuides.h"
 #include "Stage01/BBSBStage01.h"
 #include "Misc/ScopeExit.h"
 #include "Field/BBSBRepairTool.h"
@@ -206,8 +207,10 @@ void UBBSBFieldActionComponent::BindControls()
 	if (!Input || BoundInput == Input) return;
 	Input->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &UBBSBFieldActionComponent::PrimaryDown);
 	Input->BindKey(EKeys::LeftMouseButton, IE_Released, this, &UBBSBFieldActionComponent::PrimaryUp);
+	Input->BindKey(EKeys::LeftMouseButton, IE_DoubleClick, this, &UBBSBFieldActionComponent::PrimaryDown);
 	Input->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &UBBSBFieldActionComponent::SecondaryDown);
 	Input->BindKey(EKeys::RightMouseButton, IE_Released, this, &UBBSBFieldActionComponent::SecondaryUp);
+	Input->BindKey(EKeys::RightMouseButton, IE_DoubleClick, this, &UBBSBFieldActionComponent::SecondaryDown);
 	Input->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentScrollUp).bConsumeInput=false;
 	Input->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentScrollDown).bConsumeInput=false;
 	Input->BindKey(EKeys::E, IE_Pressed, this, &UBBSBFieldActionComponent::EquipmentTabDown);
@@ -377,6 +380,10 @@ void UBBSBFieldActionComponent::EndGesture(int32 Channel)
 	const float Charge = FMath::Clamp((Now - Channels[Channel].PressedAt - HoldThreshold) / 1.1, 0.0, 1.0);
 	const EBBSBFieldGesture Gesture=Channels[Channel].End(Now, GetGestureSettings());
 	const bool bAccepted=(InteractionEquipment() || PrototypeWeapon==EBBSBPrototypeWeapon::Legacy || MouseGesture || PrototypeWeapon==EBBSBPrototypeWeapon::Hammer) ? EmitGesture(Gesture,Channel,Charge) : false;
+	// Deliver Flick/Dive to the held object first, then detach synchronously.
+	// Waiting for the companion tick loses release/re-press pairs in one input frame.
+	if(Channel==0)
+		if(auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());Buddy && !Buddy->bWireAnchored) Buddy->ReleaseSurface();
 	const double Finish=bAccepted && CurrentAction.IsSet() ? CurrentAction->StartedAt+CurrentAction->Duration : Now;
 	if (MouseGesture) CameraResumeAt=FMath::Max(CameraResumeAt,Finish+(Gesture==EBBSBFieldGesture::Flick ? FlickSettleSeconds : 0.07f));
 }
@@ -414,7 +421,7 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
 	if (!PC) { BoundInput.Reset(); return; }
 	BindControls();
- if(bDeathEquipmentFrozen) { ClearHover();return; }
+ if(bDeathEquipmentFrozen || bStoryPresentationHidden) { ClearHover();return; }
 
  if(bBunniarZoomHeld && (!CanUseBunniarZoom() || (!bSyntheticInput && !PC->IsInputKeyDown(EKeys::RightMouseButton)) ||
     (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()))) bBunniarZoomHeld=false;
@@ -768,6 +775,11 @@ void UBBSBFieldActionComponent::RestoreDeathEquipment()
 
 void UBBSBFieldActionComponent::UpdateWeaponPresentation()
 {
+ if(bStoryPresentationHidden)
+ {
+  for(auto* Visual:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get()})if(Visual)Visual->SetActorHiddenInGame(true);
+  return;
+ }
  if(bDeathEquipmentFrozen)return;
  ON_SCOPE_EXIT
  {
@@ -827,9 +839,11 @@ bool UBBSBFieldActionComponent::EmitGesture(EBBSBFieldGesture Gesture, int32 Cha
 		const bool Continuation=bGestureChain && Arbiter.State==EBBSBActionState::Attack;
   const auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
   const bool EnemyAnchor=Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent) && Cast<ABBSBInkEnemy>(Buddy->SurfaceComponent->GetOwner());
-  const bool WireRequest=!bGestureChain && Gesture==EBBSBFieldGesture::Beat && Channel==1 && Buddy && (Buddy->bAirHovering || Buddy->bSurfaceViewLocked || EnemyAnchor);
+  const bool WireRequest=!bGestureChain && Gesture==EBBSBFieldGesture::Beat && Channel==1 && Buddy && (Buddy->bAirHovering || Buddy->IsPlainSurfaceAttached() || EnemyAnchor);
   const bool ExistingPlacement=bDodging && bGestureChain && Buddy && (Buddy->bSurfaceAttached || Buddy->bAirHovering);
-  if ((bDodging && !ExistingPlacement) || (Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) && !Continuation && !WireRequest && !ExistingPlacement) || (Combat && !Combat->CanAttack())) return false;
+  const bool RepeatBunniarCommand=!bGestureChain && Gesture==EBBSBFieldGesture::Beat && Channel==0 && Buddy &&
+   Arbiter.State==EBBSBActionState::Attack && Arbiter.Revision==BunniarCommandRevision;
+  if ((bDodging && !ExistingPlacement) || (Arbiter.IsBusy(GetWorld()->GetTimeSeconds()) && !Continuation && !WireRequest && !ExistingPlacement && !RepeatBunniarCommand) || (Combat && !Combat->CanAttack())) return false;
 		if (EquipmentGesture.IsBound() && !EquipmentGesture.Execute(Gesture,Channel,Charge,!bGestureChain)) return false;
 		LastGesture=Gesture; ++GestureCounts[int32(Gesture)]; GestureTimes[int32(Gesture)]=GetWorld()->GetTimeSeconds();
 		OnGesture.Broadcast(Gesture,Channel,Charge);
@@ -838,6 +852,7 @@ bool UBBSBFieldActionComponent::EmitGesture(EBBSBFieldGesture Gesture, int32 Cha
 		{
 			FBBSBWeaponActionRule Rule; Rule.Duration=.18f; Rule.bLockMovement=false; Rule.bOccupyConductor=true;
 			Arbiter.Start(EBBSBActionState::Attack,Rule,Channel,GetWorld()->GetTimeSeconds()); ActiveState=EBBSBActionState::Attack;
+			BunniarCommandRevision=Buddy ? Arbiter.Revision:MAX_uint32;
 			if (GestureAnimations.Num()>0 && GestureAnimations[0]) if (UAnimInstance* Anim=Character->GetMesh()->GetAnimInstance())
 				ActionMontage=Anim->PlaySlotAnimationAsDynamicMontage(GestureAnimations[0],TEXT("DefaultSlot"),.04f,.08f,GestureAnimations[0]->GetPlayLength()/.3f);
 		}
@@ -1195,10 +1210,12 @@ void UBBSBFieldActionComponent::UpdateHover()
  const auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
  UPrimitiveComponent* LockedSurface=nullptr;
  AActor* HighlightBuddy=nullptr;
- if(Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
+ if(Buddy && Buddy->bAirHovering)
+ { Target=const_cast<ABBSBBunniarCompanion*>(Buddy);HighlightBuddy=Target; }
+ else if(Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
  {
   AActor* Attached=Buddy->SurfaceComponent->GetOwner();
-  if(Buddy->bSurfaceViewLocked) { Target=Attached;LockedSurface=Buddy->SurfaceComponent;HighlightBuddy=const_cast<ABBSBBunniarCompanion*>(Buddy); }
+  if(Buddy->IsPlainSurfaceAttached()) { Target=Attached;LockedSurface=Buddy->SurfaceComponent;HighlightBuddy=const_cast<ABBSBBunniarCompanion*>(Buddy); }
   else if(IsEquipmentTarget(Attached)) Target=Attached;
  }
  else
@@ -1211,7 +1228,7 @@ void UBBSBFieldActionComponent::UpdateHover()
  { Target=Combat->FieldLockedTarget;LockedSurface=nullptr;HighlightBuddy=nullptr; }
 	const auto* TargetCombat=Character->FindComponentByClass<UBBSBCombatComponent>();
 	const bool LockedTarget=TargetCombat && TargetCombat->HasTargetLock() && TargetCombat->FieldLockedTarget==Target;
- const bool EquipmentFocus=!LockedTarget && (bWeaponAimLocked || LockedSurface);
+ const bool EquipmentFocus=!LockedTarget && (bWeaponAimLocked || LockedSurface || HighlightBuddy);
 	const int32 BaseHighlightStencil=LockedTarget ? (TargetCombat->IsLockedTargetInAttackRange() ? 3:5):EquipmentFocus ? 4:2;
 	const int32 HighlightStencil=BBSBVisibilityStencil::Focus(BaseHighlightStencil,Target!=nullptr,GetWorld());
 	const int32 BuddyStencil=BBSBVisibilityStencil::Focus(4,true,GetWorld());
@@ -1223,7 +1240,7 @@ void UBBSBFieldActionComponent::UpdateHover()
 	ClearHover(); HoveredActor=Target;HoverLockedSurface=LockedSurface;HoverBuddy=HighlightBuddy;
 	if (!Target) return;
 	TArray<UPrimitiveComponent*> Meshes;
- // A plain wall/floor is only a camera anchor. Highlight the attached companion, not the surface.
+ // Plain-surface attachment keeps the companion highlighted without outlining the wall/floor.
  if(!LockedSurface) { TArray<UMeshComponent*> TargetMeshes;Target->GetComponents<UMeshComponent>(TargetMeshes);for(UMeshComponent* Mesh:TargetMeshes) Meshes.Add(Mesh); }
  if(HighlightBuddy) { TArray<UMeshComponent*> BuddyMeshes;HighlightBuddy->GetComponents<UMeshComponent>(BuddyMeshes);for(UMeshComponent* Mesh:BuddyMeshes) Meshes.AddUnique(Mesh); }
 	for (UPrimitiveComponent* Mesh:Meshes)
@@ -1364,6 +1381,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
  if(const auto* Combat=Pawn->FindComponentByClass<UBBSBCombatComponent>()) Combat->DrawDamageVignette(this,Canvas);
  if(const auto* Hunting=Pawn->FindComponentByClass<UBBSBHuntingComponent>()) { Hunting->DrawFeedback(this,Canvas);if(Hunting->bInventoryOpen)Hunting->DrawLootNames(this,Canvas); }
  if(const auto* I=Pawn->FindComponentByClass<UBBSBInteractionComponent>())I->DrawQuickInteraction(this,Canvas);
+ if(const auto* G=UBBSBGuideSubsystem::Get(this))G->DrawHints(this,Canvas);
 	const float Scale=FMath::Clamp(Canvas->SizeX/1280.f,0.7f,1.35f);
 	const float W=Canvas->SizeX, H=Canvas->SizeY;
 	const float CX=W*0.5f, CY=H*0.5f;
@@ -1603,4 +1621,10 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	const FBBSBWeaponActionRule BeatRule=Actions->GetWeaponRule(EBBSBFieldGesture::Beat);
 	const FString Cancel=BeatRule.bDodgeCancelable ? FString::Printf(TEXT("%.2fs"),BeatRule.Duration*BeatRule.DodgeCancelOpen) : TEXT("locked");
 	DrawText(FString::Printf(TEXT("F6 Weapon: %s  |  Beat %.2fs / dodge %s  |  DMG x%.2f"),BBSBCombatRules::WeaponCommitmentName(Actions->WeaponExperiment),BeatRule.Duration,*Cancel,BeatRule.DamageMultiplier),FLinearColor(0.79f,0.87f,0.94f),X,Y+130*Scale,GEngine->GetSmallFont(),Scale);
+}
+
+void UBBSBFieldActionComponent::ReconcileGuideRelease(bool PrimaryReleased,bool ShortcutReleased)
+{
+ if(ShortcutReleased)QuickBunniarUp();
+ if(PrimaryReleased)PrimaryUp();
 }

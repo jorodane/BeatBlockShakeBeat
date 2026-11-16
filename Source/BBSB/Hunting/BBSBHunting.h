@@ -126,7 +126,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Collection",meta=(ClampMin=".04",Units="s")) float VacuumScanSeconds=.08f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Collection") TSoftObjectPtr<UMaterialInterface> VacuumMaterial;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Collection") TArray<TObjectPtr<USplineMeshComponent>> VacuumRibbons;
- bool TryBeginCollection();
+ bool TryBeginCollection(bool bFromAimFollow=false);
  bool TryBeginQuickCollection(ABBSBLootPickup* Loot);
  bool HasQuickCollectionInput() const { return bQuickCollection || bQuickSuctionPending; }
  UFUNCTION(BlueprintPure,Category="Collection") bool IsQuickSuctionPending() const { return bQuickSuctionPending; }

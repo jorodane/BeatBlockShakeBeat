@@ -83,6 +83,7 @@ public:
  UPROPERTY(Transient) FTransform OpeningRestTransform;
  UFUNCTION(BlueprintCallable) void BeginOpeningRest(FTransform Pose);
  UFUNCTION(BlueprintCallable) void EndOpeningRest();
+ UFUNCTION(BlueprintCallable) void SetOpeningBandaged(bool Visible);
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly) bool bEquipped=false;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float ReturnTravelSeconds=.40f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Presentation",meta=(ClampMin="0.05",Units="s")) float EquipmentTravelSeconds=.32f;
@@ -93,9 +94,13 @@ public:
  void EndGlidePresentation();
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bSurfaceAttached=false;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bAirHovering=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Surface") bool bAimFollowing=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Surface",meta=(ClampMin="1")) float AimFollowInterpSpeed=18.f;
  /** The wire takes ownership of an anchor until arrival, independently of the held mouse button. */
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Surface") bool bWireAnchored=false;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") FVector AirHoverPoint=FVector::ZeroVector;
+ /** Optional camera framing experiment; ordinary attachments keep free look by default. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Surface") bool bEnableSurfaceCameraFocus=false;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bSurfaceViewLocked=false;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Bunniar|Surface", meta=(ClampMin="0.02",ClampMax="0.2")) float SurfaceFocusScreenMargin=.08f;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") float SurfaceCameraRetreat=0;
@@ -111,6 +116,8 @@ public:
  UFUNCTION(BlueprintCallable, Category="Bunniar|Surface") bool AttachFromCursor();
  UFUNCTION(BlueprintCallable, Category="Bunniar|Surface") void ReleaseSurface();
  void ApplySurfaceFocus(float DeltaTime,FMinimalViewInfo& View);
+ /** Physical plain-surface attachment, independent of camera focus ownership. */
+ UFUNCTION(BlueprintPure,Category="Bunniar|Surface") bool IsPlainSurfaceAttached() const;
  /** An attached-point focus waits behind an explicit enemy target lock. */
  UFUNCTION(BlueprintPure,Category="Bunniar|Surface") bool IsSurfaceFocusActive() const;
  // Release only camera ownership; surface and wire attachment remain intact.
@@ -120,6 +127,7 @@ public:
  void HandleSurfaceDrag(FVector2D Delta);
  void RetargetAttachedSurface(UPrimitiveComponent* Component);
 private:
+ FBox RestClearanceBounds() const;
  FTransform SurfaceLocalFrame;
  FTransform SurfaceTransitFrom;
  double SurfaceTransitAt=0;
@@ -131,7 +139,9 @@ private:
  TWeakObjectPtr<APlayerController> SurfaceLookController;
  FRotator SurfaceOrbitOffset=FRotator::ZeroRotator;
  bool CanMaintainSurfaceAttachment() const;
- bool BeginAirHoverFromCursor(APlayerController* Controller);
+ bool BeginAimFollowFromCursor(APlayerController* Controller);
+ void UpdateAimFollowing();
+ bool AttachToHit(FHitResult Hit,APlayerController* Controller);
  bool CanMaintainAirHover() const;
  FQuat AirHoverRotation=FQuat::Identity;
  float SurfaceRetreatGoal=0,SurfaceRetreatVelocity=0;

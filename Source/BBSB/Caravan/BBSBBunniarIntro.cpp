@@ -3,6 +3,8 @@
 #include "Engine/World.h"
 void ABBSBBunniarCompanion::BeginOpeningRest(FTransform Pose)
 { bOpeningRest=true;OpeningRestTransform=Pose;SetActorTransform(Pose);BandageA->SetVisibility(true);BandageB->SetVisibility(true); }
+void ABBSBBunniarCompanion::SetOpeningBandaged(bool Visible)
+{ BandageA->SetVisibility(Visible);BandageB->SetVisibility(Visible); }
 void ABBSBBunniarCompanion::EndOpeningRest()
 {
  if(!bOpeningRest)return;bOpeningRest=false;BandageA->SetVisibility(false);BandageB->SetVisibility(false);

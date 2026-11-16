@@ -287,7 +287,7 @@ void UBBSBWorldMapComponent::EnsurePresentation()
  { auto* PC=Cast<APlayerController>(Player->GetController());MiniWidget=CreateWidget<UBBSBWorldMapWidget>(PC,UBBSBWorldMapWidget::StaticClass());if(MiniWidget) { MiniWidget->Map=this;MiniWidget->SetVisibility(ESlateVisibility::HitTestInvisible);MiniWidget->AddToViewport(10); } }
 }
 bool UBBSBWorldMapComponent::ShouldDrawMinimap() const
-{ return Player && !bMapOpen && !Player->Hunting->bInventoryOpen && !Player->Interaction->bDialogueActive && !Player->Respawn->IsSequenceActive() && !Player->EquipmentGrowth->bConcertoActive && !Player->Combat->bDead; }
+{ return Player && !Player->FieldActions->bStoryPresentationHidden && !bMapOpen && !Player->Hunting->bInventoryOpen && !Player->Interaction->bDialogueActive && !Player->Respawn->IsSequenceActive() && !Player->EquipmentGrowth->bConcertoActive && !Player->Combat->bDead; }
 void UBBSBWorldMapComponent::TickComponent(float DT,ELevelTick Type,FActorComponentTickFunction* Function)
 {
  Super::TickComponent(DT,Type,Function);if(!Player || !Player->IsLocallyControlled())return;EnsurePresentation();InitializeMapMarkers();

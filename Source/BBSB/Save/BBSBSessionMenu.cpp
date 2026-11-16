@@ -3,6 +3,7 @@
 #include "Components/Overlay.h"
 #include "UI/BBSBPaperTheme.h"
 #include "Save/BBSBSession.h"
+#include "UI/BBSBGuides.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -57,7 +58,7 @@ UButton* UBBSBSessionMenu::AddButton(const FString& Label,bool Enabled)
 void UBBSBSessionMenu::Refresh()
 {
  if(!Rows || !Session)return;Rows->ClearChildren();Clicks.Reset();UButton* Focus=nullptr;
- if(auto* Size=Cast<USizeBox>(Rows->GetParent() ? Rows->GetParent()->GetParent():nullptr))Size->SetHeightOverride(bLoadList ? 445.f:Session->bGameStarted ? 340.f:260.f);
+ if(auto* Size=Cast<USizeBox>(Rows->GetParent() ? Rows->GetParent()->GetParent():nullptr))Size->SetHeightOverride(bLoadList ? 445.f:Session->bGameStarted ? 400.f:260.f);
  if(bLoadList)
  {
   int32 Order=0;for(const auto& Entry:Session->Slots)
@@ -72,6 +73,7 @@ void UBBSBSessionMenu::Refresh()
   auto* B=AddButton(TEXT("이어서"),Session->CanContinue());B->OnClicked.AddDynamic(this,&UBBSBSessionMenu::Continue);if(Session->CanContinue())Focus=B;
   B=AddButton(TEXT("처음부터"));B->OnClicked.AddDynamic(this,&UBBSBSessionMenu::NewGame);if(!Focus)Focus=B;
   B=AddButton(TEXT("불러오기"));B->OnClicked.AddDynamic(this,&UBBSBSessionMenu::LoadList);
+  if(Session->bGameStarted) { B=AddButton(TEXT("여행 가이드"));B->OnClicked.AddDynamic(this,&UBBSBSessionMenu::GuideNotes); }
   if(Session->bGameStarted) { B=AddButton(TEXT("지금 저장"));B->OnClicked.AddDynamic(this,&UBBSBSessionMenu::Save); }
  }
  const FString Hint=bLoadList ? TEXT("최근 10개의 기록 · 새 기록이 쌓이면 가장 오래된 기록부터 바뀌어요."):TEXT("");
@@ -81,6 +83,7 @@ void UBBSBSessionMenu::Continue() { if(Session)Session->ContinueGame(); }
 void UBBSBSessionMenu::NewGame() { if(Session)Session->StartNewGame(); }
 void UBBSBSessionMenu::LoadList() { bLoadList=true;if(Session)Session->RefreshSlots();Refresh(); }
 void UBBSBSessionMenu::Back() { bLoadList=false;Refresh(); }
+void UBBSBSessionMenu::GuideNotes() { if(auto* G=UBBSBGuideSubsystem::Get(Session))G->OpenNotes(); }
 void UBBSBSessionMenu::Save() { if(Session) { Session->SaveNow(TEXT("직접 저장"),true);Refresh(); } }
 void UBBSBSessionSlotClick::Click() { if(Session)Session->LoadSlot(Index); }
 FReply UBBSBSessionMenu::NativeOnKeyDown(const FGeometry& G,const FKeyEvent& E)

@@ -233,3 +233,16 @@ void ABBSBStage01Device::RebuildLadderGeometry()
  else Section(LadderGeometry,Start,End,FVector::ZeroVector);
  UpdatePhysicalPresentation();
 }
+
+bool ABBSBStage01Device::DragHint(ABBSBBunniarCompanion* Buddy,FVector2D& ScreenAxis,bool& BothDirections) const
+{
+ ScreenAxis=FVector2D::ZeroVector;BothDirections=Kind==EBBSBStage01Node::CabinDoor;
+ if(!bHeld || !IsDirectDrag() || (bSolved && !BothDirections) || DragMotion.IsNearlyZero())return false;
+ if(const auto* PC=UGameplayStatics::GetPlayerController(this,0))
+ {
+  FVector2D A,B;const FVector Start=Buddy ? Buddy->SurfacePoint-DragMotion*Painted:GetActorLocation();
+  if(PC->ProjectWorldLocationToScreen(Start,A,true) && PC->ProjectWorldLocationToScreen(Start+DragMotion,B,true))ScreenAxis=(B-A).GetSafeNormal();
+ }
+ if(ScreenAxis.IsNearlyZero())ScreenAxis=Kind==EBBSBStage01Node::LowerLadder || Kind==EBBSBStage01Node::CargoLever || Kind==EBBSBStage01Node::LightLever ? FVector2D(0,1):FVector2D(1,0);
+ return true;
+}

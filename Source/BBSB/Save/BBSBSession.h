@@ -71,6 +71,9 @@ public:
  UPROPERTY(SaveGame) bool bBunniarOpeningRest=false;
  UPROPERTY(SaveGame) TArray<FBBSBSessionActor> Actors;
  UPROPERTY(SaveGame) TArray<FBBSBSessionLoot> Loot;
+ UPROPERTY(SaveGame) TSet<FName> SeenGuides;
+ UPROPERTY(SaveGame) bool bLearnedMove=false;
+ UPROPERTY(SaveGame) bool bLearnedLook=false;
  bool IsValidRecord() const;
  FString StateHash() const;
 };
@@ -176,5 +179,6 @@ private:
  UFUNCTION() void LoadList();
  UFUNCTION() void Back();
  UFUNCTION() void Save();
+ UFUNCTION() void GuideNotes();
  UButton* AddButton(const FString& Label,bool Enabled=true);
 };
