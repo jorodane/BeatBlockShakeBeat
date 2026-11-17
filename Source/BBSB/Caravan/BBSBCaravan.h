@@ -96,6 +96,12 @@ public:
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") bool bAirHovering=false;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Surface") bool bAimFollowing=false;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Surface",meta=(ClampMin="1")) float AimFollowInterpSpeed=18.f;
+ /** Speed limits keep a blocked cursor-follow correction independent of target distance. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Surface",meta=(ClampMin="100",Units="cm/s")) float AimFollowMaximumSpeed=1600.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Surface",meta=(ClampMin="100",Units="cm/s")) float AimSurfaceSlideSpeed=700.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Bunniar|Surface",meta=(ClampMin=".5",Units="s")) float InteractionFlightSeconds=3.f;
+ bool IsTargetFlightPending() const { return bSurfaceTargetPending; }
+ float SurfaceTravelSpeed(FVector Goal) const;
  /** The wire takes ownership of an anchor until arrival, independently of the held mouse button. */
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Bunniar|Surface") bool bWireAnchored=false;
  UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Bunniar|Surface") FVector AirHoverPoint=FVector::ZeroVector;
@@ -126,8 +132,24 @@ public:
  bool HandleEquipmentGesture(EBBSBFieldGesture Gesture,int32 Channel,float Charge,bool bInitialPress);
  void HandleSurfaceDrag(FVector2D Delta);
  void RetargetAttachedSurface(UPrimitiveComponent* Component);
+ /** Sweep visible travel from the current rendered pose, also used by loot dispatch. */
+ bool MoveSurfaceTravel(FVector Goal,const FQuat& Rotation,const FVector* FollowTarget=nullptr);
 private:
  FBox RestClearanceBounds() const;
+ bool TraceSurfaceTravel(FVector From,FVector To,float Radius,FHitResult& Hit,const UPrimitiveComponent* Escape=nullptr) const;
+ bool CanApproachFromRest(const FHitResult& Hit) const;
+ bool SurfaceRestReference(FVector Goal,float Radius,FVector& Home) const;
+ bool ClipSurfaceHit(FHitResult& Hit) const;
+ bool HasSurfaceContact(UPrimitiveComponent* Component) const;
+ bool BeginInteractionFlight(const FHitResult& Hit,APlayerController* Controller);
+ void UpdateInteractionFlight(bool Initial=false);
+ void ClearInteractionFlight();
+ bool bSurfaceTargetPending=false;
+ TWeakObjectPtr<UPrimitiveComponent> PendingSurfaceComponent;
+ TWeakObjectPtr<AActor> PendingSurfaceHandler,SurfaceRecipient;
+ FVector PendingLocalPoint,PendingLocalNormal,PendingProgressPosition,PendingHoldOffset;
+ double PendingStartedAt=0,PendingProgressAt=0;
+ float PendingHoldDistance=-1.f;
  FTransform SurfaceLocalFrame;
  FTransform SurfaceTransitFrom;
  double SurfaceTransitAt=0;

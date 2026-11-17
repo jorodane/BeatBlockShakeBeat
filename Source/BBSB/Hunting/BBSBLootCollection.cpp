@@ -28,6 +28,7 @@ bool UBBSBHuntingComponent::TryBeginCollection(bool bFromAimFollow)
  FHitResult Hit;if(!Player->FieldActions->TraceEquipmentAim(Hit))return false;
  auto* Loot=Cast<ABBSBLootPickup>(Hit.GetActor());if(!Loot || !Loot->IsAvailable())return false;
  const auto* Buddy=Cast<ABBSBBunniarCompanion>(Player->FieldActions->BunniarEquipment);
+ if(!Buddy || !LootVisible(Loot,Buddy->Visual->Bounds.Origin))return false;
  const bool FollowingOwnCommand=bFromAimFollow && Buddy && Buddy->bAimFollowing && Player->FieldActions->IsGestureChannelHeld(0) &&
   !Player->FieldActions->bEquipmentInputBlocked && !Player->FieldActions->IsDodging() && !Player->Traversal->IsWireTraversalActive() && !Player->Traversal->IsParkourActive();
  if(Player->Combat->bDead || Player->Combat->IsStageLocked() || (!FollowingOwnCommand && Player->FieldActions->IsEquipmentActionBusy()))return true;
@@ -235,7 +236,8 @@ bool UBBSBHuntingComponent::TickBuddyPresentation(float DT)
   if(QuickTravelSeconds<=0)return false;
   const float T=FMath::Clamp(float((GetWorld()->GetTimeSeconds()-CollectionStartedAt)/QuickTravelSeconds),0.f,1.f),Alpha=1-FMath::Pow(1-T,3.f);
   const FVector Goal=VacuumPoint+FVector::UpVector*55.f;const FQuat Facing=FRotationMatrix::MakeFromXZ((Eye-Goal).GetSafeNormal(),FVector::UpVector).ToQuat()*Model.Inverse();
-  Buddy->SetActorLocation(FMath::Lerp(QuickTravelFrom.GetLocation(),Goal,Alpha));Buddy->SetActorRotation(FQuat::Slerp(QuickTravelFrom.GetRotation(),Facing,Alpha));Buddy->SetActorScale3D(FMath::Lerp(QuickTravelFrom.GetScale3D(),FVector(Scale),Alpha));return true;
+  Buddy->SetActorScale3D(FMath::Lerp(QuickTravelFrom.GetScale3D(),FVector(Scale),Alpha));
+  Buddy->MoveSurfaceTravel(FMath::Lerp(QuickTravelFrom.GetLocation(),Goal,Alpha),FQuat::Slerp(QuickTravelFrom.GetRotation(),Facing,Alpha));return true;
  }
  if(bVacuuming)
  {
@@ -243,8 +245,8 @@ bool UBBSBHuntingComponent::TickBuddyPresentation(float DT)
   const FVector Goal=(bQuickCollection && Player->Combat->HasTargetLock()) ? Player->GetActorLocation()+FVector(FMath::Cos(Phase)*BuddyVacuumOrbitRadius,FMath::Sin(Phase)*BuddyVacuumOrbitRadius,35.f):VacuumPoint+VacuumNormal*78.f;
   const FQuat Facing=FRotationMatrix::MakeFromXZ((Eye-Goal).GetSafeNormal(),FVector::UpVector).ToQuat();
   const FQuat Spin(FVector::ForwardVector,float(GetWorld()->GetTimeSeconds()*5.));
-  Buddy->SetActorLocation(FMath::VInterpTo(Buddy->GetActorLocation(),Goal,DT,14.f));
-  Buddy->SetActorRotation((Facing*Spin*Model.Inverse()).GetNormalized());Buddy->SetActorScale3D(FVector(Scale));
+  Buddy->SetActorScale3D(FVector(Scale));
+  Buddy->MoveSurfaceTravel(FMath::VInterpTo(Buddy->GetActorLocation(),Goal,DT,14.f),(Facing*Spin*Model.Inverse()).GetNormalized());
  }
  else
  {

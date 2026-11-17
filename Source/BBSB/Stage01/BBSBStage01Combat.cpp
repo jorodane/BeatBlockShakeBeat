@@ -46,7 +46,7 @@ void ABBSBStage01Singer::BeginPlay()
 }
 bool ABBSBStage01Singer::IsSongEnabled() const
 {
- if(!Director || bDefeated || bConcertoSuspended || bSilenced || !Director->PlayerCharacter())return false;
+ if(!Director || bDefeated || bConcertoSuspended || bSilenced || IsSpawnWarmingUp() || !Director->PlayerCharacter())return false;
  const auto* P=Director->PlayerCharacter();if(P->Combat->bDead || P->Respawn->IsSequenceActive() || P->Interaction->bDialogueActive || Director->bGrabActive)return false;
  const auto Phase=Director->Phase;
  switch(Voice)
@@ -71,7 +71,7 @@ void ABBSBStage01Singer::Tick(float DT)
  const bool CaptainVisible=Voice!=EBBSBStage01Voice::Captain || (Director && Director->Phase>=EBBSBStage01Phase::ReturnForReady);
  if(Voice==EBBSBStage01Voice::Captain) { SetActorHiddenInGame(!CaptainVisible);SetActorEnableCollision(CaptainVisible && !bDefeated); }
  SingerMesh->SetVisibility(!Carrier && CaptainVisible);
- if(bDefeated) { UpdateSongPresentation();SetActorHiddenInGame(false);if(!bReportedQuiet && Director) { bReportedQuiet=true;if(!Director->Quieted.Contains(SingerId))Director->ReportQuiet(this); }return; }
+ if(bDefeated) { UpdateSongPresentation();SetActorHiddenInGame(false);if(bParticipatesInStory && !bReportedQuiet && Director) { bReportedQuiet=true;if(!Director->Quieted.Contains(SingerId))Director->ReportQuiet(this); }return; }
  UpdateSongPresentation();
  if(!bSongAttached)return;auto* P=Director->PlayerCharacter();if(FVector::DistSquared(GetActorLocation(),P->GetActorLocation())>FMath::Square(HearingRadius))return;
  AlertFieldPlayer(P);
@@ -111,7 +111,7 @@ float ABBSBStage01Singer::TakeDamage(float Amount,const FDamageEvent& Event,ACon
  if(!Director || !Director->HasTool())return 0;
  if((Voice==EBBSBStage01Voice::Utility && Director->Phase<EBBSBStage01Phase::ShopBattle) || (Voice==EBBSBStage01Voice::Trio && Director->Phase!=EBBSBStage01Phase::Trio) || (Voice==EBBSBStage01Voice::Captain && Director->Phase!=EBBSBStage01Phase::Captain))return 0;
  const float Applied=Super::TakeDamage(Amount,Event,C,Causer);
- if(bDefeated && !bReportedQuiet) { bReportedQuiet=true;Director->ReportQuiet(this); }return Applied;
+ if(bParticipatesInStory && bDefeated && !bReportedQuiet) { bReportedQuiet=true;Director->ReportQuiet(this); }return Applied;
 }
 void ABBSBStage01Singer::SilenceFor(float Seconds) { QuietUntil=GetWorld()->GetTimeSeconds()+FMath::Max(0.f,Seconds);bSilenced=true; }
 void ABBSBStage01Singer::Rearm() { bDefeated=bReportedQuiet=false;bSilenced=false;QuietUntil=-100;Health=MaximumHealth;ResetHealthFeedback();GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);LastBeat=MIN_int64; }
@@ -203,13 +203,13 @@ void ABBSBStage01Director::EndGrab()
 void ABBSBStage01Director::ClearEncounterShots()
 {
  for(TActorIterator<ABBSBInkProjectile> It(GetWorld());It;++It)
-  if(auto* S=Cast<ABBSBStage01Singer>(It->Source.Get());S && S->Director==this && AllQuiet(S->Voice))It->Destroy();
+  if(auto* S=Cast<ABBSBStage01Singer>(It->Source.Get());S && S->bParticipatesInStory && S->Director==this && AllQuiet(S->Voice))It->Destroy();
 }
 
 void ABBSBStage01Singer::UpdateSongPresentation()
 {
  auto* SongVisual=Carrier ? Carrier->BunniarMesh.Get():SingerMesh.Get();if(!SongVisual || !SongVisual->GetSkeletalMeshAsset())return;
- const bool Held=Carrier && Carrier->bCarried;const FVector Origin=Carrier ? Carrier->GetActorLocation():GetActorLocation();
+ const bool Held=Carrier && Carrier->HasCarryAttachment();const FVector Origin=Carrier ? Carrier->GetActorLocation():GetActorLocation();
  const double Now=GetWorld()->GetTimeSeconds();
  const float DT=LastSongPoseAt>=0 ? FMath::Max(0.f,float(Now-LastSongPoseAt)):0.f;
  if(LastSongPoseAt==Now)return;
@@ -233,11 +233,22 @@ void ABBSBStage01Singer::UpdateSongPresentation()
  if(SongSurface.IsValid()) { SongSurfacePoint=SongSurface->GetComponentTransform().TransformPosition(SongLocalPoint);SongSurfaceNormal=SongSurface->GetComponentTransform().TransformVectorNoScale(SongLocalNormal).GetSafeNormal(); }
  PreviousSongSurface=SongSurface;PreviousSupportPoint=SongSurfacePoint;
  const bool NearSupport=SongSurface.IsValid() && FVector::DistSquared(Origin,SongSurfacePoint)<FMath::Square(120.f);
- bSongAttached=!Held && !Moving && NearSupport && IsSongEnabled();
+ bSongAttached=!Held && !(Carrier && Carrier->bThrowGliding) && !Moving && NearSupport && IsSongEnabled();
  if(Held)
  {
-  const FTransform BodyFrame=Carrier->GetActorTransform();
-  SongVisual->SetWorldLocationAndRotation(BodyFrame.TransformPosition(FVector(0,0,-40)),BodyFrame.GetRotation());return;
+  const FTransform Frame=Carrier->HeldMeshTransform();
+  SongVisual->SetWorldLocationAndRotation(Frame.GetLocation(),Frame.GetRotation());return;
+ }
+ if(Carrier && Carrier->bThrowGliding)
+ {
+  FVector Forward=Carrier->Body->GetPhysicsLinearVelocity().GetSafeNormal2D();if(Forward.IsNearlyZero())Forward=GetActorForwardVector().GetSafeNormal2D();
+  FRotator Tilt=Forward.Rotation();Tilt.Pitch=8.f;
+  const FQuat Model=FRotationMatrix::MakeFromXZ(FVector::RightVector,FVector::UpVector).ToQuat();
+  const FQuat Q=Tilt.Quaternion()*Model.Inverse();
+  const FVector Center=SongVisual->GetSkeletalMeshAsset()->GetBounds().Origin*SongVisual->GetComponentScale();
+  const FVector Goal=Origin+FVector::UpVector*10.f-Q.RotateVector(Center);
+  const float Blend=Initialized ? 1.f-FMath::Exp(-12.f*DT):1.f;
+  SongVisual->SetWorldLocationAndRotation(FMath::Lerp(SongVisual->GetComponentLocation(),Goal,Blend),FQuat::Slerp(SongVisual->GetComponentQuat(),Q,Blend).GetNormalized());return;
  }
  const FVector N=SongSurfaceNormal.IsNearlyZero() ? FVector::UpVector:SongSurfaceNormal;
  // A loose moving Bunniar follows its actual body every frame. The throttled

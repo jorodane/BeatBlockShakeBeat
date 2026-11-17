@@ -212,7 +212,11 @@ void ABBSBStage01Opening::Finish(bool Completed)
   Player->AimGaze->bEnableHeadGaze=bSavedGaze;Player->FieldActions->bEquipmentInputBlocked=bSavedEquipmentBlock;Player->FieldActions->bStoryPresentationHidden=false;Player->FieldActions->ResetActionState();
   Player->GetCharacterMovement()->StopMovementImmediately();Player->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
  }
- if(Buddy)Buddy->EndOpeningRest();
+ if(Buddy)
+ {
+  if(Completed)Buddy->SetOpeningBandaged(true);
+  Buddy->EndOpeningRest();
+ }
  if(Completed)
  {
   if(Director)Director->Caption.Empty();if(auto* S=UBBSBSessionSubsystem::Get(this))S->RequestAutoSave(TEXT("도입 완료"));

@@ -1092,7 +1092,7 @@ bool UBBSBFieldActionComponent::CanSustainTraversal() const
 bool UBBSBFieldActionComponent::CanMoveWithInputBlock(bool bIgnoreEquipmentInputBlock) const
 {
  if(bEquipmentInputBlocked && !bIgnoreEquipmentInputBlock)return false;
- if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && (P->Traversal->IsWireTraversalActive() || P->Traversal->IsParkourActive())) return false;
+ if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->Traversal && (P->Traversal->IsWireTraversalActive() || P->Traversal->IsParkourActive() || P->Traversal->IsLadderJumpSteeringLocked())) return false;
  if(const auto* Dialogue=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;Dialogue && Dialogue->bDialogueActive) return false;
 	if (bEquipmentWheelOpen) return false;
  if(const auto* P=Cast<ABBSBCharacter>(Character);P && P->EquipmentGrowth && P->EquipmentGrowth->bConcertoActive)return false;
@@ -1215,6 +1215,7 @@ void UBBSBFieldActionComponent::UpdateHover()
  else if(Buddy && Buddy->bSurfaceAttached && IsValid(Buddy->SurfaceComponent))
  {
   AActor* Attached=Buddy->SurfaceComponent->GetOwner();
+  HighlightBuddy=const_cast<ABBSBBunniarCompanion*>(Buddy);
   if(Buddy->IsPlainSurfaceAttached()) { Target=Attached;LockedSurface=Buddy->SurfaceComponent;HighlightBuddy=const_cast<ABBSBBunniarCompanion*>(Buddy); }
   else if(IsEquipmentTarget(Attached)) Target=Attached;
  }

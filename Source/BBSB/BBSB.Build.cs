@@ -25,7 +25,7 @@ public class BBSB : ModuleRules
             "PoseSearch"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "RenderCore", "RHI", "Landscape", "AnimationCore", "Niagara" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "RenderCore", "RHI", "Landscape", "AnimationCore", "Niagara", "PCG" });
 		if (Target.bBuildEditor)
 		{
 			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "AnimGraph", "BlueprintGraph", "PoseSearchEditor", "PythonScriptPlugin", "AssetRegistry" });

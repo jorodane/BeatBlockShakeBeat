@@ -7,6 +7,7 @@
 #include "Components/AudioComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
@@ -277,10 +278,31 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
  FCollisionQueryParams Q(SCENE_QUERY_STAT(BBSBEquipmentAim),true,Character);
  for(AActor* Ignored:{FloatingWeapon.Get(),OtherFloatingWeapon.Get(),ConductorWeapon.Get(),OtherConductorWeapon.Get(),BunniarEquipment.Get()}) Q.AddIgnoredActor(Ignored);
  IgnoreInkProjectiles(Q);
+ FHitResult VisibleCarryHit;bool HasVisibleCarry=false;
+ if(InteractionEquipment()==BunniarEquipment)
+ {
+  TArray<ABBSBCarryObject*> RenderedCarry;
+  for(TActorIterator<ABBSBCarryObject> It(GetWorld());It;++It)
+  {
+   auto* Carry=*It;if(Carry->bCarried || Carry->bBroken || !Carry->Body || !Carry->Body->IsQueryCollisionEnabled())continue;
+   // All carry selection uses its rendered contact surface. A singer's hidden
+   // physics cube must never compete with its actual round visible body.
+   Q.AddIgnoredActor(Carry);if(IsAimPointDepthAllowed(Carry->GetActorLocation()))RenderedCarry.Add(Carry);
+  }
+  const FVector End=Origin+Direction*FMath::Max(2500.f,RayDistance);
+  for(auto* Carry:RenderedCarry)
+  {
+   FHitResult Contact;
+   if(!Carry->TraceCarryAim(Origin,End,Contact) || FVector::DistSquared(Contact.ImpactPoint,Character->GetActorLocation())>FMath::Square(Reach))continue;
+   const float Distance=Contact.Distance;if(HasVisibleCarry && Distance>=VisibleCarryHit.Distance)continue;
+   FHitResult Cover;if(GetWorld()->LineTraceSingleByChannel(Cover,Origin,Contact.ImpactPoint,ECC_Visibility,Q))continue;
+   VisibleCarryHit=Contact;HasVisibleCarry=true;
+  }
+ }
  FHitResult CameraHit;bool Found=false;
  for(int32 Attempt=0;Attempt<32;++Attempt)
  {
-  if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent())return false;
+  if(!GetWorld()->LineTraceSingleByChannel(CameraHit,Origin,Origin+Direction*FMath::Max(2500.f,RayDistance),ECC_Visibility,Q) || !CameraHit.GetComponent())break;
   auto* Target=CameraHit.GetActor();
   const bool HasTargetOrigin=Target && !Target->ActorHasTag(TEXT("BBSBPhysicalInteraction")) && (BBSBBunniarSurface::Resolve(Target) || Target->IsA<APawn>() || Target->IsA<ABBSBLootPickup>() || Target->IsA<ABBSBBreakableProp>() || Target->ActorHasTag(TEXT("BBSBAttackable")));
   // A near-camera target can overlap the clipped ray start with a large capsule.
@@ -288,6 +310,7 @@ bool UBBSBFieldActionComponent::ResolveEquipmentAim(FVector& Point,FHitResult& H
   if(HasTargetOrigin && !IsAimPointDepthAllowed(Target->GetActorLocation())) { Q.AddIgnoredActor(Target);continue; }
   Found=true;break;
  }
+ if(HasVisibleCarry && (!Found || VisibleCarryHit.Distance<CameraHit.Distance)) { CameraHit=VisibleCarryHit;Found=true; }
  if(!Found)return false;
  if(FVector::DistSquared(Character->GetActorLocation(),CameraHit.ImpactPoint)<=FMath::Square(Reach))
  {

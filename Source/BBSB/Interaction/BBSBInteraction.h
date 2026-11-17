@@ -251,10 +251,16 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Impact",meta=(ClampMin="0")) float ImpactDamagePerMeterPerSecond=12;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Impact",meta=(ClampMin="0")) float MinimumImpactSpeed=60;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".05")) float DragCentimetersPerPixel=1.2f;
- /** Maximum held movement speed for both camera-follow orbits and right-button target adjustment. */
+ /** Maximum held movement speed while following the camera aim. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="1",Units="cm/s")) float FollowSpeed=4000.f;
- /** Initial release velocity is inherited from real motion, with this speed ceiling. */
+ /** Keep a nearby held object from whipping around the player during a quick view turn. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="30",Units="deg/s")) float MaximumOrbitSpeed=360.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="0",ClampMax="400",Units="cm")) float FollowObstacleBypass=80.f;
+ /** Smoothly engage the aim constraint after visible pickup; capture depth stays unchanged. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".05",Units="s")) float PickupAlignSeconds=.24f;
+ /** Speed ceiling shared by natural releases and deliberate forward throws. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="0",Units="cm/s")) float MaximumThrowSpeed=1600.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="0",Units="cm/s")) float ForwardThrowSpeed=1200.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin="1",ClampMax="90")) float WheelRotationDegrees=15;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".02",ClampMax=".25")) float VelocitySampleSeconds=.10f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Carry",meta=(ClampMin=".1",ClampMax="1")) float BlockedReleaseFraction=.5f;
@@ -263,8 +269,11 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") bool bCarried=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") bool bManipulating=false;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") bool bCarryBlocked=false;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Carry") TWeakObjectPtr<UPrimitiveComponent> CarryBlockingSurface;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Carry") FVector CarryBlockingNormal=FVector::ZeroVector;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Carry") float CarryPenetrationDepth=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") float BlockedTravel=0;
- /** Camera-to-object distance captured on the initial click or after a gentle right release. */
+ /** Camera-to-grab-point distance captured on the initial click. */
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") float HoldDistance=0;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Carry") FVector CarryVelocity=FVector::ZeroVector;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Carry") FVector CarryGoal=FVector::ZeroVector;
@@ -273,6 +282,11 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Impact") float LastImpactDamage=0;
  UFUNCTION(BlueprintCallable,Category="Object") void ResetObject();
  UFUNCTION(BlueprintPure,Category="Carry") bool CanBeCarriedBy(const ACharacter* Player) const;
+ /** Pointer selection follows the rendered mesh, independently of the physics pose. */
+ virtual UPrimitiveComponent* CarrySurfaceComponent() const;
+ virtual bool TraceCarryAim(FVector From,FVector To,FHitResult& Hit) const;
+ void PreserveCarryClick(float Distance,FVector ViewOffset);
+ bool HasCarryAttachment() const { return AttachedBuddy.IsValid(); }
  const ACharacter* CarryingCharacter() const;
  /** A step crate becomes a solid platform only after its support and motion stay stable. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Step crate",meta=(ClampMin=".1",Units="s")) float StepSettleSeconds=.35f;
@@ -289,6 +303,7 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Puzzle safety") FTransform PuzzleRecoveryAnchor;
  UFUNCTION(BlueprintCallable,Category="Puzzle safety") bool TryRecoverPuzzleObject();
  UFUNCTION(BlueprintPure,Category="Impact") float DamageForSpeed(float CentimetersPerSecond) const;
+ UFUNCTION(BlueprintCallable,Category="Carry") bool ThrowForward();
  bool BeginManipulation();
  void EndManipulation(bool bFlick);
  void MoveFromPointer(FVector2D Delta);
@@ -303,7 +318,13 @@ private:
  FVector CameraForward,CameraRight,PreviousPlayerPosition,PrePhysicsVelocity;
  FVector BlockedPlayerAnchor,BlockedObjectAnchor;
  FVector CameraLocalHoldOffset=FVector::ZeroVector;
+ FVector CarryLocalGrabPoint=FVector::ZeroVector;
  FVector OrbitAxis=FVector::UpVector;
+ TArray<FVector> FollowRoute;
+ FVector FollowRouteGoal;
+ FQuat FollowRouteRotation=FQuat::Identity;
+ double NextFollowRouteAt=0,PickupStartedAt=-100;
+ bool TryFollowRoute(FVector Target,const FHitResult& Hit,float Reach);
  float CarryReachLimit=0;
  ECollisionResponse NormalPawnResponse=ECR_Block,NormalCameraResponse=ECR_Block;
  FRotator FixedView;
@@ -325,8 +346,10 @@ private:
  bool GetCarryView(FVector& Location,FRotator& Rotation) const;
  bool GetCarryAim(FVector& Location,FRotator& Rotation,FVector& Direction) const;
  void CaptureHoldAnchor(bool bKeepPosition);
+ void ReleaseWithVelocity(FVector Velocity);
  void MoveHeld(FVector Desired,float DT);
- FVector OrbitStep(FVector Target,FVector Center,float MaximumDistance);
+ float MoveCarrySwept(FVector Desired,FHitResult* BlockingHit=nullptr);
+ FVector OrbitStep(FVector Target,FVector Center,float MaximumDistance,float MaximumAngle=PI);
  void UpdateCarryObstruction(bool bBlocked,ABBSBCharacter* Player);
  void ReleaseCarryBindings();
  void SampleMotion();

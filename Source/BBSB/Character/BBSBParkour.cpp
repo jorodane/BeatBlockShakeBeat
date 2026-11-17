@@ -149,7 +149,7 @@ bool UBBSBTraversalComponent::TryWireLedge()
 }
 bool UBBSBTraversalComponent::TryAutoLedge()
 {
- if((!bAutoCatchLedges && !bAutoWallSlide) || !Character || IsParkourActive() || IsWireTraversalActive() || bGlideDashing || bAirLiftPending || bAirWeaponHanging || GetWorld()->GetTimeSeconds()<ParkourIgnoreUntil) return false;
+ if((!bAutoCatchLedges && !bAutoWallSlide) || !Character || IsParkourActive() || IsWireTraversalActive() || bGlideDashing || bAirLiftPending || bAirWeaponHanging || GetWorld()->GetTimeSeconds()<ParkourIgnoreUntil || IsLadderJumpAutoCatchBlocked()) return false;
  auto* Move=Character->GetCharacterMovement();const auto* PC=Cast<APlayerController>(Character->GetController());
  auto* Actions=Character->FieldActions.Get();
  if(!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored() || !Actions ||

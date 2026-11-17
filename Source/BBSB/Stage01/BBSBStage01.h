@@ -116,6 +116,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBStage01CarrySinger> Carrier;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") EBBSBStage01Voice Voice=EBBSBStage01Voice::Ambient;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FName SingerId;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") bool bParticipatesInStory=true;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") int32 VoiceIndex=0;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") float SongBPM=88;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") float QuietSecondsAfterCarry=7;
@@ -151,15 +152,30 @@ class BBSB_API ABBSBStage01CarrySinger : public ABBSBCarryObject
  GENERATED_BODY()
 public:
  ABBSBStage01CarrySinger();
+ virtual UPrimitiveComponent* CarrySurfaceComponent() const override;
+ virtual bool TraceCarryAim(FVector From,FVector To,FHitResult& Hit) const override;
  virtual void BeginPlay() override;
  virtual void Tick(float DT) override;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBStage01Singer> Singer;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<USkeletalMeshComponent> BunniarMesh;
+ /** Round interaction surface follows the visible body, independently of its physics carrier. */
+ UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<USphereComponent> GrabSurface;
+ FTransform HeldMeshTransform() const { return HeldMeshLocalFrame*GetActorTransform(); }
  virtual FText BunniarInteractionText_Implementation() const override;
  virtual void BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector P,FVector N) override;
+ virtual void BunniarArrived_Implementation(ABBSBBunniarCompanion* Buddy) override;
  virtual void BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy) override;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Thrown glide") bool bThrowGliding=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Thrown glide",meta=(ClampMin="0.1")) float ThrowGlideDrag=1.7f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Thrown glide",meta=(ClampMin="10",Units="cm/s")) float ThrowGlideFallSpeed=110.f;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Thrown glide",meta=(ClampMin="10",Units="cm/s^2")) float ThrowGlideVerticalAcceleration=420.f;
 private:
+ FTransform HeldMeshLocalFrame;
  FVector SongHome;
+ void BeginThrowGlide();
+ void EndThrowGlide(bool Landed);
+ bool HasGlideSupport() const;
+ void TickThrowGlide(float DT);
 };
 UCLASS(Blueprintable)
 class BBSB_API ABBSBStage01Director : public AActor

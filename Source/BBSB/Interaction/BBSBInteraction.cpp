@@ -18,6 +18,7 @@
 #include "EngineUtils.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Engine/DamageEvents.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -238,11 +239,29 @@ void ABBSBCarryObject::BeginPlay()
 {
  Super::BeginPlay();Home=GetActorTransform();Health=MaximumHealth;if(ActorHasTag(TEXT("BBSBStepCrate")))Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Block);NormalPawnResponse=Body->GetCollisionResponseToChannel(ECC_Pawn);NormalCameraResponse=Body->GetCollisionResponseToChannel(ECC_Camera);Body->SetMassOverrideInKg(NAME_None,MassKg,true);Body->SetSimulatePhysics(true);Body->OnComponentHit.AddDynamic(this,&ABBSBCarryObject::OnBodyHit);InitializeCarrySafety();
 }
+UPrimitiveComponent* ABBSBCarryObject::CarrySurfaceComponent() const { return Body; }
+bool ABBSBCarryObject::TraceCarryAim(FVector From,FVector To,FHitResult& Hit) const
+{
+ if(!Body || !Body->GetStaticMesh())return false;
+ // Use the rendered pose, but keep the box in mesh space so a rotated crate
+ // never gains the empty corners of a world-aligned bounding box.
+ FTransform Frame=Body->GetComponentTransform();
+ const FBox Bounds=Body->GetStaticMesh()->GetBoundingBox();
+ Frame.SetLocation(Body->Bounds.Origin-Frame.TransformVector(Bounds.GetCenter()));
+ FVector Point,Normal;float Time=0;
+ if(!FMath::LineExtentBoxIntersection(Bounds,Frame.InverseTransformPosition(From),Frame.InverseTransformPosition(To),FVector::ZeroVector,Point,Normal,Time))return false;
+ Hit=FHitResult(const_cast<ABBSBCarryObject*>(this),Body,Frame.TransformPosition(Point),Frame.TransformVectorNoScale(Normal).GetSafeNormal());
+ Hit.bBlockingHit=true;Hit.Distance=FVector::Distance(From,Hit.ImpactPoint);return true;
+}
+void ABBSBCarryObject::PreserveCarryClick(float Distance,FVector ViewOffset)
+{
+ HoldDistance=Distance;CameraLocalHoldOffset=ViewOffset;
+}
 float ABBSBCarryObject::DamageForSpeed(float Speed) const { return Speed<MinimumImpactSpeed ? 0.f:FMath::Max(0.f,Speed)*.01f*ImpactDamagePerMeterPerSecond; }
 void ABBSBCarryObject::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal)
 {
  if(bBroken) return;
- AttachedBuddy=Buddy;CaptureHoldAnchor(false);
+ AttachedBuddy=Buddy;CarryLocalGrabPoint=GetActorTransform().InverseTransformPosition(Point);CaptureHoldAnchor(false);
 }
 void ABBSBCarryObject::BunniarArrived_Implementation(ABBSBBunniarCompanion* Buddy)
 {
@@ -250,8 +269,12 @@ void ABBSBCarryObject::BunniarArrived_Implementation(ABBSBBunniarCompanion* Budd
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));if(!Player) return;
  // Recheck arrival: the player can land on the prop during the visible flight.
  if(!CanBeCarriedBy(Player)) { Buddy->ReleaseSurface();return; }
- bCarried=true;bManipulating=bCarryBlocked=false;BlockedTravel=0;CarryOwner=Player;
+ // The target may have moved while Bunniar was flying. Freeze the current
+ // local contact, without replacing the view/depth captured by the click.
+ CarryLocalGrabPoint=GetActorTransform().InverseTransformPosition(Buddy->SurfacePoint);
+ bCarried=true;bManipulating=bCarryBlocked=false;BlockedTravel=0;CarryOwner=Player;PickupStartedAt=GetWorld()->GetTimeSeconds();FollowRoute.Reset();
  Body->SetSimulatePhysics(false);Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Block);Body->SetCollisionResponseToChannel(ECC_Camera,ECR_Ignore);PreviousPlayerPosition=Player->GetActorLocation();
+ HeldMovement->SetUpdatedComponent(Body);
  // The click already captured the distance. Camera movement during Bunniar's flight must not replace it.
  CarryReachLimit=FMath::Max(FVector::Dist(Player->GetActorLocation(),GetActorLocation()),FMath::Max(100.f,Player->FieldActions->WeaponReach-45));
  AddTickPrerequisiteActor(Player);AddTickPrerequisiteComponent(Player->GetCameraBoom());Buddy->AddTickPrerequisiteActor(this);
@@ -283,10 +306,11 @@ void ABBSBCarryObject::CaptureHoldAnchor(bool bKeepPosition)
 {
  FVector Location,Direction;FRotator Rotation;
  if(!GetCarryAim(Location,Rotation,Direction)) return;
- const FVector Anchor=bKeepPosition ? CarryGoal:GetActorLocation();
+ const FVector GrabOffset=GetActorTransform().TransformVector(CarryLocalGrabPoint);
+ const FVector Anchor=(bKeepPosition ? CarryGoal:GetActorLocation())+GrabOffset;
  HoldDistance=FVector::Dist(Anchor,Location);
- CameraLocalHoldOffset=bKeepPosition ? Rotation.UnrotateVector(Anchor-Location-Direction*HoldDistance):FVector::ZeroVector;
- CarryGoal=Anchor;
+ CameraLocalHoldOffset=Rotation.UnrotateVector(Anchor-Location-Direction*HoldDistance);
+ CarryGoal=Anchor-GrabOffset;
  if(!bKeepPosition) OrbitAxis=FVector::UpVector;
 }
 bool ABBSBCarryObject::BeginManipulation()
@@ -317,7 +341,7 @@ void ABBSBCarryObject::MoveFromPointer(FVector2D Delta)
   // Apply movement once in Tick, after the camera updates, so extra pointer samples cannot multiply the speed budget.
  }
 }
-FVector ABBSBCarryObject::OrbitStep(FVector Target,FVector Center,float MaximumDistance)
+FVector ABBSBCarryObject::OrbitStep(FVector Target,FVector Center,float MaximumDistance,float MaximumAngle)
 {
  const FVector Current=GetActorLocation(),From=Current-Center,To=Target-Center;
  const double FromRadius=From.Size2D(),ToRadius=To.Size2D();
@@ -330,42 +354,143 @@ FVector ABBSBCarryObject::OrbitStep(FVector Target,FVector Center,float MaximumD
  OrbitAxis=Angle>=0 ? FVector::UpVector:-FVector::UpVector;
  // Interpolate height separately, so a floor-height half-turn cannot choose an arc through the floor or the player's legs.
  const double PathBound=FMath::Sqrt(FMath::Square(Angle*FMath::Max(FromRadius,ToRadius))+FMath::Square(ToRadius-FromRadius)+FMath::Square(To.Z-From.Z));
- const double Alpha=FMath::Min(1.,MaximumDistance/FMath::Max(PathBound,1.e-6));
+ const double Alpha=FMath::Min3(1.,MaximumDistance/FMath::Max(PathBound,1.e-6),double(FMath::Max(0.f,MaximumAngle))/FMath::Abs(Angle));
  if(Alpha>=1) return Target;
  const FVector Direction=FQuat(FVector::UpVector,Angle*Alpha).RotateVector(FromDirection);
  return Center+Direction*FMath::Lerp(FromRadius,ToRadius,Alpha)+FVector::UpVector*FMath::Lerp(From.Z,To.Z,Alpha);
+}
+bool ABBSBCarryObject::TryFollowRoute(FVector Target,const FHitResult& Hit,float Reach)
+{
+ const double Now=GetWorld()->GetTimeSeconds();if(Now<NextFollowRouteAt || FollowObstacleBypass<=0 || !CarryOwner.IsValid())return false;
+ NextFollowRouteAt=Now+.12;
+ FVector Eye;FRotator View;GetCarryView(Eye,View);
+ const FVector Center=CarryOwner->GetActorLocation();
+ auto Clear=[&](FVector From,FVector To)
+ { return FVector::DistSquared(To,Center)<=FMath::Square(Reach) && BBSBDragMotion::ClearPath(Body,From,To); };
+ if(!BBSBDragMotion::FindFollowRoute(GetActorLocation(),Target,Hit.Normal,Hit.GetComponent() ? Hit.GetComponent()->Bounds.Origin:FVector(Hit.ImpactPoint),
+   FRotationMatrix(View).GetUnitAxis(EAxis::Y),FollowObstacleBypass,Clear,FollowRoute))return false;
+ FollowRouteGoal=Target;FollowRouteRotation=GetActorQuat();return true;
+}
+float ABBSBCarryObject::MoveCarrySwept(FVector Desired,FHitResult* BlockingHit)
+{
+ const FVector Before=GetActorLocation(),Delta=Desired-Before;if(Delta.IsNearlyZero(.0001f))return 1.f;
+ FHitResult Hit;HeldMovement->SafeMoveUpdatedComponent(Delta,GetActorQuat(),true,Hit);
+ // Chaos can report a resting contact at a tiny positive distance but time zero.
+ // Native initial-overlap recovery misses that case. Only when moving along or
+ // away from that contact, resolve a 1.25 mm skin with the native overlap check.
+ // Motion into a wall still blocks, and no obstacle is ignored on the retry.
+ if(Hit.bBlockingHit && !Hit.bStartPenetrating && Hit.Time<=UE_KINDA_SMALL_NUMBER && Hit.Distance<.01f &&
+    FVector::DotProduct(Delta.GetSafeNormal(),Hit.ImpactNormal)>=-UE_KINDA_SMALL_NUMBER)
+ {
+  FHitResult Contact=Hit;Contact.TraceStart=GetActorLocation();Contact.TraceEnd=Desired;
+  Contact.bStartPenetrating=true;Contact.PenetrationDepth=.125f;
+  if(HeldMovement->ResolvePenetration(Contact.ImpactNormal*.125f,Contact,GetActorQuat()))
+   HeldMovement->SafeMoveUpdatedComponent(Desired-GetActorLocation(),GetActorQuat(),true,Hit);
+ }
+ // Native movement owns penetration recovery.
+ // Retain the shared push solver only for a real movable obstacle it found.
+ if(Hit.bBlockingHit && Hit.GetComponent() && Hit.GetComponent()->GetMobility()==EComponentMobility::Movable &&
+    Hit.GetActor()!=CarryOwner.Get())BBSBDragMotion::Move(Body,Desired,&Hit);
+ if(BlockingHit)*BlockingHit=Hit;
+ return FMath::Clamp(float(FVector::DotProduct(GetActorLocation()-Before,Delta)/Delta.SizeSquared()),0.f,1.f);
 }
 void ABBSBCarryObject::MoveHeld(FVector Desired,float DT)
 {
  auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));if(!Player) return;
  const FVector Center=Player->GetActorLocation();const float Reach=FMath::Max(100.f,CarryReachLimit);
  Desired=Center+(Desired-Center).GetClampedToMaxSize(Reach);
- // Keep the original aim/depth/offset goal. Only the object's actual swept path may constrain it.
- bool bBlocked=false;const FVector Target=Desired;
- float Remaining=FMath::Max(0.f,FollowSpeed)*FMath::Max(0.f,DT);
+ // The desired cursor/depth point stays intact. Temporary bypass points only
+ // guide the physical body after it actually touches an obstacle.
+ const FVector Target=Desired;
+ const float PickupAlpha=FMath::Clamp(float((GetWorld()->GetTimeSeconds()-PickupStartedAt)/FMath::Max(.05f,PickupAlignSeconds)),0.f,1.f);
+ const float PickupEase=PickupAlpha*PickupAlpha*(3.f-2.f*PickupAlpha);
+ const float Speed=FMath::Max(0.f,FollowSpeed)*PickupEase;
+ float RemainingAngle=FMath::DegreesToRadians(FMath::Max(30.f,MaximumOrbitSpeed))*FMath::Max(0.f,DT);
+ if(FollowRoute.Num() && (FVector::DistSquared(Target,FollowRouteGoal)>FMath::Square(70.f) || FMath::Abs(GetActorQuat()|FollowRouteRotation)<.996f))FollowRoute.Reset();
+ if(FollowRoute.Num() && BBSBDragMotion::ClearPath(Body,GetActorLocation(),Target))FollowRoute.Reset();
+ if(FollowRoute.Num())
+ {
+  const int32 Last=FollowRoute.Num()-1;
+  if(Last>=0 && !Target.Equals(FollowRouteGoal,1.f))
+  {
+   const FVector From=Last>0 ? FollowRoute[Last-1]:GetActorLocation();
+   if(BBSBDragMotion::ClearPath(Body,From,Target)) { FollowRoute[Last]=FollowRouteGoal=Target; }else FollowRoute.Reset();
+  }
+  if(FollowRoute.Num())
+  {
+   float Budget=FMath::Min(Speed,800.f)*FMath::Max(0.f,DT);
+   while(FollowRoute.Num() && Budget>.001f)
+   {
+    if(FVector::DistSquared(FollowRoute[0],Center)>FMath::Square(Reach)) { FollowRoute.Reset();break; }
+    const FVector Before=GetActorLocation(),Next=OrbitStep(FollowRoute[0],Center,Budget,RemainingAngle);FHitResult Hit;
+    if(Next.Equals(Before,.0001f))break;
+    const float Allowed=MoveCarrySwept(Next,&Hit);Budget-=FVector::Distance(Before,GetActorLocation());
+    const FVector A=(Before-Center).GetSafeNormal2D(),B=(GetActorLocation()-Center).GetSafeNormal2D();
+    if(!A.IsNearlyZero() && !B.IsNearlyZero())RemainingAngle=FMath::Max(0.f,RemainingAngle-float(FMath::Abs(FMath::Atan2(A.X*B.Y-A.Y*B.X,FVector::DotProduct(A,B)))));
+    if(GetActorLocation().Equals(FollowRoute[0],.5f))FollowRoute.RemoveAt(0);
+    if(Allowed<.999f || GetActorLocation().Equals(Before,.001f)) { FollowRoute.Reset();break; }
+   }
+   SampleMotion();UpdateCarryObstruction(!GetActorLocation().Equals(Target,1.f),Player);return;
+  }
+ }
+ bool bBlocked=false;FHitResult LastBlocking;
+ float Remaining=Speed*FMath::Max(0.f,DT);
  for(int32 Segment=0;Segment<64 && Remaining>.001f && !GetActorLocation().Equals(Target,.001f);++Segment)
  {
   // Sweep small chords of the shortest orbit arc, including on long frames, rather than cutting through its centre.
   const float Budget=FMath::Min(Remaining,FMath::Max(1.f,float(FVector::Dist2D(GetActorLocation(),Center))*FMath::DegreesToRadians(5.f)));
   const FVector Before=GetActorLocation();
-  const FVector Next=OrbitStep(Target,Center,Budget);
+  const FVector Next=OrbitStep(Target,Center,Budget,RemainingAngle);
+  if(Next.Equals(Before,.0001f))break;
   const FVector Delta=Next-Before;FHitResult Hit;
-  const float Allowed=BBSBDragMotion::Move(Body,Next,&Hit);
+  const float Allowed=MoveCarrySwept(Next,&Hit);
   if(Allowed<.9999f)
   {
-   bBlocked=true;
+   bBlocked=true;LastBlocking=Hit;
+   CarryBlockingSurface=Hit.GetComponent();CarryBlockingNormal=Hit.Normal;CarryPenetrationDepth=Hit.PenetrationDepth;
+   if(Hit.bStartPenetrating && Hit.PenetrationDepth>0 && Hit.PenetrationDepth<40.f)
+    MoveCarrySwept(GetActorLocation()+Hit.Normal*FMath::Min(Budget,Hit.PenetrationDepth+.5f));
    const FVector Slide=FVector::VectorPlaneProject(Delta*(1.f-Allowed),Hit.Normal);
-   if(!Slide.IsNearlyZero(.001f))BBSBDragMotion::Move(Body,GetActorLocation()+Slide);
+   if(Delta.SizeSquared2D()>.01f && !Slide.IsNearlyZero(.001f))
+   {
+    const FVector OldNormal=Hit.Normal;const float SlideAllowed=MoveCarrySwept(GetActorLocation()+Slide,&Hit);
+    if(SlideAllowed<1.f && Hit.IsValidBlockingHit())
+    {
+     FVector CornerSlide=Slide*(1.f-SlideAllowed);HeldMovement->TwoWallAdjust(CornerSlide,Hit,OldNormal);
+     if(FVector::DotProduct(CornerSlide,Delta)>0.f)MoveCarrySwept(GetActorLocation()+CornerSlide);
+    }
+   }
   }
   Remaining-=Budget;
-  if(GetActorLocation().Equals(Before,.0001f)) break;
+  const FVector A=(Before-Center).GetSafeNormal2D(),B=(GetActorLocation()-Center).GetSafeNormal2D();
+  if(!A.IsNearlyZero() && !B.IsNearlyZero())RemainingAngle=FMath::Max(0.f,RemainingAngle-float(FMath::Abs(FMath::Atan2(A.X*B.Y-A.Y*B.X,FVector::DotProduct(A,B)))));
+  if(GetActorLocation().Equals(Before,.0001f))
+  {
+   // An orbit chord can face into a recess while a direct escape is clear.
+   // Keep the short direct escape for recesses, with the same angular budget
+   // as the orbit. Repeating the blocked orbit chord cannot escape a corner.
+   const FVector From=GetActorLocation(),DirectGoal=From+(Target-From).GetClampedToMaxSize(Budget);
+   float Low=0.f,High=1.f;const FVector FromDirection=(From-Center).GetSafeNormal2D();
+   for(int32 Pass=0;Pass<12;++Pass)
+   {
+    const float Alpha=(Low+High)*.5f;const FVector ToDirection=(FMath::Lerp(From,DirectGoal,Alpha)-Center).GetSafeNormal2D();
+    const float Angle=FromDirection.IsNearlyZero() || ToDirection.IsNearlyZero() ? 0.f:float(FMath::Abs(FMath::Atan2(FromDirection.X*ToDirection.Y-FromDirection.Y*ToDirection.X,FVector::DotProduct(FromDirection,ToDirection))));
+    if(Angle<=RemainingAngle)Low=Alpha;else High=Alpha;
+   }
+   const FVector Direct=FMath::Lerp(From,DirectGoal,Low);
+   MoveCarrySwept(Direct,&LastBlocking);
+   const FVector C=(GetActorLocation()-Center).GetSafeNormal2D();
+   if(!B.IsNearlyZero() && !C.IsNearlyZero())RemainingAngle=FMath::Max(0.f,RemainingAngle-float(FMath::Abs(FMath::Atan2(B.X*C.Y-B.Y*C.X,FVector::DotProduct(B,C)))));
+   if(GetActorLocation().Equals(Before,.0001f))break;
+  }
  }
  // Sliding can shorten the hold distance, but must still respect the player's interaction reach.
  if(FVector::DistSquared(GetActorLocation(),Center)>FMath::Square(Reach+.1f))
  {
   const FVector Limited=Center+(GetActorLocation()-Center).GetClampedToMaxSize(Reach);FHitResult ReachHit;
-  BBSBDragMotion::Move(Body,GetActorLocation()+(Limited-GetActorLocation()).GetClampedToMaxSize(Remaining),&ReachHit);
+  MoveCarrySwept(GetActorLocation()+(Limited-GetActorLocation()).GetClampedToMaxSize(Remaining),&ReachHit);
  }
+ if(bBlocked && FVector::DistSquared(GetActorLocation(),Target)>FMath::Square(8.f))TryFollowRoute(Target,LastBlocking,Reach);
  SampleMotion();UpdateCarryObstruction(bBlocked,Player);
 }
 void ABBSBCarryObject::UpdateCarryObstruction(bool bBlocked,ABBSBCharacter* Player)
@@ -391,6 +516,7 @@ void ABBSBCarryObject::UpdateCarryObstruction(bool bBlocked,ABBSBCharacter* Play
  }
  else BlockedTravel=0;
  bCarryBlocked=bBlocked;
+ if(!bBlocked) { CarryBlockingSurface.Reset();CarryBlockingNormal=FVector::ZeroVector;CarryPenetrationDepth=0; }
  const float Maximum=Player->FieldActions->WeaponReach;
  const bool bTooFar=FVector::Dist(Player->GetActorLocation(),GetActorLocation())>FMath::Max(CarryReachLimit,Maximum+float(Body->Bounds.SphereRadius));
  if(bTooFar || (bCarryBlocked && BlockedTravel>=Maximum*BlockedReleaseFraction))
@@ -400,6 +526,7 @@ void ABBSBCarryObject::UpdateCarryObstruction(bool bBlocked,ABBSBCharacter* Play
 }
 void ABBSBCarryObject::ReleaseCarryBindings()
 {
+ FollowRoute.Reset();NextFollowRouteAt=0;
  if(CarryOwner.IsValid())
  {
   RemoveTickPrerequisiteActor(CarryOwner.Get());RemoveTickPrerequisiteComponent(CarryOwner->GetCameraBoom());
@@ -449,7 +576,7 @@ void ABBSBCarryObject::Tick(float DT)
   else
   {
    FVector Location,Direction;FRotator Rotation;
-   if(GetCarryAim(Location,Rotation,Direction)) CarryGoal=Location+Direction*HoldDistance+Rotation.RotateVector(CameraLocalHoldOffset);
+   if(GetCarryAim(Location,Rotation,Direction)) CarryGoal=Location+Direction*HoldDistance+Rotation.RotateVector(CameraLocalHoldOffset)-GetActorTransform().TransformVector(CarryLocalGrabPoint);
   }
   MoveHeld(CarryGoal,DT);
   PreviousPlayerPosition=Player->GetActorLocation();SampleMotion();
@@ -462,17 +589,36 @@ void ABBSBCarryObject::Tick(float DT)
   TickCarrySafety(DT,Player);
  }
 }
+bool ABBSBCarryObject::ThrowForward()
+{
+ if(!bCarried || bBroken)return false;
+ FVector Eye,Direction;FRotator View;if(!GetCarryAim(Eye,View,Direction))return false;
+ const auto Buddy=AttachedBuddy;
+ ReleaseWithVelocity(Direction.GetSafeNormal()*FMath::Min(FMath::Max(0.f,ForwardThrowSpeed),FMath::Max(0.f,MaximumThrowSpeed)));
+ if(Buddy.IsValid())Buddy->ReleaseSurface();
+ return true;
+}
 void ABBSBCarryObject::Drop()
 {
- if(!bCarried) return;
- const FVector Velocity=ReleaseVelocity();bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryBindings();
+ if(bCarried)ReleaseWithVelocity(ReleaseVelocity());
+}
+void ABBSBCarryObject::ReleaseWithVelocity(FVector Velocity)
+{
+ if(!bCarried)return;
+ Velocity=Velocity.GetClampedToMaxSize(FMath::Max(0.f,MaximumThrowSpeed));
+ bCarried=bManipulating=bCarryBlocked=false;ReleaseCarryBindings();
  LastThrowVelocity=Velocity;
  PrepareStepCrateSimulation();PawnIgnoreUntil=GetWorld()->GetTimeSeconds();RestoreReleasedPawnCollision();
  Body->SetSimulatePhysics(true);Body->SetPhysicsLinearVelocity(Velocity);PrePhysicsVelocity=Velocity;
 }
 void ABBSBCarryObject::BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy)
 {
- if(AttachedBuddy.Get()!=Buddy) return;Drop();AttachedBuddy.Reset();
+ if(AttachedBuddy.Get()!=Buddy) return;
+ // Range/obstruction cancellation while the button is still held is a drop,
+ // not a tangential throw. An explicit right throw already released the body.
+ const auto* Player=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
+ if(bCarried && Player && Player->FieldActions->IsGestureChannelHeld(0))ReleaseWithVelocity(FVector::ZeroVector);else Drop();
+ AttachedBuddy.Reset();
 }
 void ABBSBCarryObject::OnBodyHit(UPrimitiveComponent* Component,AActor* Other,UPrimitiveComponent* OtherComponent,FVector Impulse,const FHitResult& Hit)
 {

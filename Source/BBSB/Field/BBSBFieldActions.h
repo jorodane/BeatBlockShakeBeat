@@ -29,7 +29,7 @@ class UMaterialInterface;
 class UBBSBBladeTrailComponent;
 
 UENUM(BlueprintType)
-enum class EBBSBAimPresentation : uint8 { Hidden, Air, Surface, Interactive };
+enum class EBBSBAimPresentation : uint8 { Hidden, Air, Surface, Interactive, Diamond };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FBBSBFieldGestureEvent, EBBSBFieldGesture, Gesture, int32, MouseChannel, float, Charge);
 DECLARE_DELEGATE_RetVal_FourParams(bool, FBBSBEquipmentGesture, EBBSBFieldGesture, int32, float, bool);
@@ -241,6 +241,7 @@ public:
 	void RecordMoveInput(float Right, float Forward);
  UFUNCTION(BlueprintPure,Category="BBSB|Movement") FVector MovementDashDirection() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Aim") bool IsSurfaceAimLocked() const;
+ UFUNCTION(BlueprintPure,Category="BBSB|Aim") bool IsBunniarPointerHighlighted() const;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") EBBSBAimPresentation AimPresentation=EBBSBAimPresentation::Air;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") FVector AimPresentationPoint;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Aim") FLinearColor AimPresentationColor;

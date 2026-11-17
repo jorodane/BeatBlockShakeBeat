@@ -500,11 +500,14 @@ void ABBSBInkEnemy::BeginPlay()
 	for (UStaticMeshComponent* Part:Parts) if (Part->ComponentHasTag(TEXT("InkEye"))) BBSBCombatVisuals::Tint(Part,FLinearColor(0.02f,0.015f,0.035f));
  if(auto* Pawn=UGameplayStatics::GetPlayerPawn(this,0))if(auto* Growth=Pawn->FindComponentByClass<UBBSBEquipmentGrowthComponent>();Growth && Growth->bConcertoActive)Growth->SuspendConcertoEnemy(this);
 }
+void ABBSBInkEnemy::BeginSpawnWarmup(float Seconds) { SpawnWarmupUntil=GetWorld()->GetTimeSeconds()+FMath::Max(0.f,Seconds); }
+bool ABBSBInkEnemy::IsSpawnWarmingUp() const { return GetWorld() && GetWorld()->GetTimeSeconds()<SpawnWarmupUntil; }
 void ABBSBInkEnemy::Tick(float DT)
 {
 	Super::Tick(DT);RestoreHitVibration();TickHealthFeedback();
  if(bConcertoSuspended && !ConcertoPauseOwner.IsValid())SetConcertoSuspended(false,nullptr);
  if(bConcertoSuspended) { TickHitVibration();return; }
+ if(!bDefeated && IsSpawnWarmingUp()) { GetCharacterMovement()->StopMovementImmediately();ConsumeMovementInputVector();TickHitVibration();return; }
 	if (bDefeated) return;
 	GetCharacterMovement()->MaxWalkSpeed=MoveSpeed;
  if(bFieldBulletHell) TickFieldBulletHell(DT);

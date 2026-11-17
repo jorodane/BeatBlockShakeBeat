@@ -36,6 +36,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/Canvas.h"
 #include "CanvasItem.h"
+#include "UI/BBSBOutlinedPaths.h"
 #include "Engine/Engine.h"
 #include "GameFramework/HUD.h"
 
@@ -123,8 +124,8 @@ void UBBSBGuideSubsystem::TickHints(ABBSBCharacter* P,float DT)
    }
    DragHintText=FText::FromString(Caption);
   }
-  else if(C->GetOwner()->IsA<ABBSBCarryObject>())
-  { Supported=true;bCarryHint=true;bDragBothWays=true;DragHintAxis=FVector2D(1,0);DragHintText=FText::FromString(TEXT("[우클릭 드래그하여 위치 조정]")); }
+  else if(const auto* Object=Cast<ABBSBCarryObject>(C->GetOwner());Object && Object->bCarried)
+  { Supported=true;bCarryHint=true;bDragBothWays=false;DragHintAxis=FVector2D(1,0);DragHintText=FText::FromString(TEXT("[우클릭하여 앞으로 던지기]")); }
  }
  const bool Idle=GetWorld()->GetTimeSeconds()-LastSurfaceMotionAt>=HintIdleSeconds;
  DragHintAlpha=FMath::Lerp(DragHintAlpha,Supported && Idle ? 1.f:0.f,A);
@@ -303,26 +304,21 @@ void UBBSBGuideSubsystem::DrawHints(AHUD* HUD,UCanvas* C) const
   FCanvasTextItem Item(P,FText::FromString(T),GEngine->GetMediumFont(),Color(BBSBPaper::Paper(),A));
   Item.Scale=FVector2D(S*Scale);Item.bOutlined=true;Item.OutlineColor=Color(BBSBPaper::Ink(),A);C->DrawItem(Item);
  };
- auto Line=[&](FVector2D A,FVector2D B,float Opacity,float Width=2.f)
- {
-  HUD->DrawLine(A.X,A.Y,B.X,B.Y,Color(BBSBPaper::Ink(),Opacity),(Width+2)*S);
-  HUD->DrawLine(A.X,A.Y,B.X,B.Y,Color(BBSBPaper::Paper(),Opacity),Width*S);
- };
+ TArray<BBSBOutlinedPaths::FPath> Paths;
+ auto Path=[&](TArray<FVector2D> Points,float Opacity,float Width,bool Closed=false)
+ { BBSBOutlinedPaths::FPath P;P.Points=MoveTemp(Points);P.Color=Color(BBSBPaper::Paper(),Opacity);P.Width=Width*S;P.Border=2.2f*S;P.bClosed=Closed;Paths.Add(MoveTemp(P)); };
+ auto Line=[&](FVector2D A,FVector2D B,float Opacity,float Width=2.f) { Path({A,B},Opacity,Width); };
  auto Keycap=[&](FVector2D P,float A)
  {
-  const FVector2D Size(23*S);Line(P,P+FVector2D(Size.X,0),A,1);Line(P+FVector2D(Size.X,0),P+Size,A,1);
-  Line(P+Size,P+FVector2D(0,Size.Y),A,1);Line(P+FVector2D(0,Size.Y),P,A,1);
+  const FVector2D Size(23*S);Path({P,P+FVector2D(Size.X,0),P+Size,P+FVector2D(0,Size.Y)},A,1.8f,true);
  };
  auto Mouse=[&](FVector2D P,float A,bool Right)
  {
   TArray<FVector2D> Outer;
-  for(int32 I=0;I<=16;++I)
-  {
-   const float Angle=PI+I*2.f*PI/16.f;
-   const FVector2D Unit(FMath::Cos(Angle)*11.5f,FMath::Sin(Angle)*11.5f+(I>8 ? 11.f:0.f));
-   Outer.Add(P+(FVector2D(11.5f,11.5f)+Unit)*S);
-  }
-  for(int32 I=1;I<Outer.Num();++I)Line(Outer[I-1],Outer[I],A,1.5f);
+  // Two continuous semicircles joined by straight sides; no midpoint step.
+  for(int32 I=0;I<=24;++I) { const float T=PI+I*PI/24.f;Outer.Add(P+FVector2D(11.5f+FMath::Cos(T)*11.5f,11.5f+FMath::Sin(T)*11.5f)*S); }
+  for(int32 I=0;I<=24;++I) { const float T=I*PI/24.f;Outer.Add(P+FVector2D(11.5f+FMath::Cos(T)*11.5f,22.5f+FMath::Sin(T)*11.5f)*S); }
+  Path(MoveTemp(Outer),A,2.6f,true);
   const FVector2D Pressed=P+FVector2D(Right ? 16:7,6)*S;
   Line(Pressed,Pressed+FVector2D(0,7)*S,A,3);
   Line(P+FVector2D(11.5f,0)*S,P+FVector2D(11.5f,13)*S,A,1);
@@ -350,10 +346,11 @@ void UBBSBGuideSubsystem::DrawHints(AHUD* HUD,UCanvas* C) const
   At.X=FMath::Clamp(At.X,156*S,W-156*S);At.Y=FMath::Clamp(At.Y+88*S,85*S,H-150*S);
   const FVector2D Centre=At-FVector2D(0,17)*S,Axis=DragHintAxis.GetSafeNormal(),Perp(-Axis.Y,Axis.X);
   auto Arrow=[&](FVector2D D)
-  { const FVector2D Tip=Centre+D*66*S,Tail=Centre+D*26*S;Line(Tail,Tip,DragHintAlpha,3);Line(Tip,Tip-D*11*S+Perp*8*S,DragHintAlpha,3);Line(Tip,Tip-D*11*S-Perp*8*S,DragHintAlpha,3); };
-  Arrow(Axis);if(bDragBothWays)Arrow(-Axis);
-  Mouse(Centre-FVector2D(11.5f,17)*S+Axis*(FMath::Sin(Time*3.4f)*9*S),DragHintAlpha,bCarryHint);
-  const FString Caption=DragHintText.ToString();float TW,TH;HUD->GetTextSize(Caption,TW,TH,GEngine->GetMediumFont(),S*.76f);
-  Text(Caption,FVector2D(At.X-TW*.5f,At.Y+10*S),DragHintAlpha,.76f);
+  { const FVector2D Tip=Centre+D*66*S,Tail=Centre+D*26*S;Line(Tail,Tip,DragHintAlpha,3.5f);Path({Tip-D*12*S+Perp*8*S,Tip,Tip-D*12*S-Perp*8*S},DragHintAlpha,3.5f); };
+  if(!bCarryHint) { Arrow(Axis);if(bDragBothWays)Arrow(-Axis); }
+  Mouse(Centre-FVector2D(11.5f,17)*S+(bCarryHint ? FVector2D::ZeroVector:Axis*(FMath::Sin(Time*3.4f)*9*S)),DragHintAlpha,bCarryHint);
+  const FString Caption=DragHintText.ToString();float TW,TH;HUD->GetTextSize(Caption,TW,TH,GEngine->GetMediumFont(),S*.9f);
+  Text(Caption,FVector2D(At.X-TW*.5f,At.Y+10*S),DragHintAlpha,.9f);
  }
+ BBSBOutlinedPaths::Draw(C,Paths,BBSBPaper::Ink());
 }

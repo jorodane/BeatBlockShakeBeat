@@ -60,17 +60,37 @@ bool UBBSBTraversalComponent::BeginLadder(AActor* Source,FVector Bottom,FVector 
 bool UBBSBTraversalComponent::JumpFromLadder()
 {
  if(!Character || !IsOnLadder() || (Character->Combat && (Character->Combat->bDead || Character->Combat->BlocksMovement())))return false;
- const FVector Out=LadderOut,Input=Character->FieldActions ? Character->FieldActions->MovementIntent():FVector::ZeroVector;
- CancelParkour();Character->StopJumping();
- auto* Move=Character->GetCharacterMovement();Move->ClearAccumulatedForces();
- // This is an ordinary upward jump, not the downward drop used by DropParkour.
- FVector Planar=Input*Move->MaxWalkSpeed;
- if(FVector::DotProduct(Planar,Out)<0)Planar=FVector::VectorPlaneProject(Planar,Out);
- Character->LaunchCharacter(Planar+Out*80.f+FVector::UpVector*Move->JumpZVelocity,true,true);
+ CancelParkour();Character->StopJumping();Character->ConsumeMovementInputVector();
+ auto* Move=Character->GetCharacterMovement();Move->StopMovementImmediately();Move->ClearAccumulatedForces();
+ // Leave the rungs vertically even if a direction or hop was still held.
+ // A short protected ascent prevents immediate steering into the wall gap.
+ LadderJumpUntil=GetWorld()->GetTimeSeconds()+FMath::Max(0.f,LadderJumpVerticalSeconds);
+ bLadderJumpActive=true;bLadderJumpForwardReleased=LadderInput()<=.2f;
+ Character->LaunchCharacter(FVector::UpVector*Move->JumpZVelocity,true,true);
  bAirJumpUsed=false;LastFallSpeed=0;bWasFalling=true;
  ParkourIgnoreUntil=GetWorld()->GetTimeSeconds()+FMath::Max(.25f,ParkourRegrabDelay);
  if(Presentation)SpawnSmoke(Presentation->JumpSmoke,Character->GetActorLocation()-FVector::UpVector*Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(),FVector::UpVector,.7f);
  return true;
+}
+bool UBBSBTraversalComponent::IsLadderJumpSteeringLocked() const
+{
+ return Character && GetWorld() && Character->GetCharacterMovement()->IsFalling() && GetWorld()->GetTimeSeconds()<LadderJumpUntil;
+}
+void UBBSBTraversalComponent::UpdateLadderJump()
+{
+ if(!bLadderJumpActive || !Character)return;
+ const auto* Move=Character->GetCharacterMovement();
+ if(Move->IsMovingOnGround() || IsParkourActive() || IsWireTraversalActive() || IsBunniarTraversalActive() ||
+    (Character->FieldActions && Character->FieldActions->IsDodging()))
+ { bLadderJumpActive=false;return; }
+ if(LadderInput()<=.2f)bLadderJumpForwardReleased=true;
+}
+bool UBBSBTraversalComponent::IsLadderJumpAutoCatchBlocked() const
+{
+ // The old climbing W must not turn the same jump into a top mount. A fresh
+ // direction can request another catch once the character starts descending.
+ return bLadderJumpActive && Character &&
+  (Character->GetCharacterMovement()->Velocity.Z>0.f || !bLadderJumpForwardReleased);
 }
 void UBBSBTraversalComponent::StartLadderStep(bool Hop)
 {

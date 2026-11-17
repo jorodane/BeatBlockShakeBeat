@@ -7,6 +7,7 @@
 #include "Character/BBSBRespawn.h"
 #include "Field/BBSBFieldActions.h"
 #include "Combat/BBSBCombat.h"
+#include "Combat/BBSBSequentialEncounter.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Stage01/BBSBStage01.h"
@@ -66,7 +67,7 @@ UBBSBSessionSave* UBBSBSessionSubsystem::Capture() const
  {
   auto* A=*It;FBBSBSessionActor R;R.Path=ActorKey(A);R.Transform=Rounded(A->GetActorTransform());
   if(auto* D=Cast<ABBSBStage01Device>(A)) { R.Kind=1;R.Value=FMath::GridSnap(D->Painted,.001f);R.bFlag=D->bSolved; }
-  else if(auto* E=Cast<ABBSBInkEnemy>(A)) { R.Kind=2;R.Value=FMath::GridSnap(E->Health,.1f);R.bFlag=E->bDefeated; }
+  else if(auto* E=Cast<ABBSBInkEnemy>(A)) { if(E->SequentialEncounter)continue;R.Kind=2;R.Value=FMath::GridSnap(E->Health,.1f);R.bFlag=E->bDefeated; }
   else if(auto* C=Cast<ABBSBCarryObject>(A))
   {
    R.Kind=3;R.Value=FMath::GridSnap(C->Health,.1f);R.bFlag=C->bBroken;R.bSimulating=C->Body->IsSimulatingPhysics() || C->bCarried;
@@ -79,6 +80,8 @@ UBBSBSessionSave* UBBSBSessionSubsystem::Capture() const
   else continue;
   S->Actors.Add(R);
  }
+ for(TActorIterator<ABBSBSequentialEncounter> It(GetWorld());It;++It)S->Encounters.Add(It->CaptureState());
+ S->Encounters.Sort([](const auto& A,const auto& B){return A.Path<B.Path;});
  if(const auto* G=UBBSBGuideSubsystem::Get(this)) { S->SeenGuides=G->SeenGuides;S->bLearnedMove=G->bLearnedMove;S->bLearnedLook=G->bLearnedLook; }
  S->Actors.Sort([](const auto& A,const auto& B){return A.Path<B.Path;});
  S->Loot.Sort([](const auto& A,const auto& B){const FString X=A.Entry.Item ? A.Entry.Item->GetPathName():FString(),Y=B.Entry.Item ? B.Entry.Item->GetPathName():FString();return X==Y ? A.Location.X<B.Location.X:X<Y;});
@@ -150,6 +153,8 @@ bool UBBSBSessionSubsystem::Restore(UBBSBSessionSave* S)
  }
  T->bAirJumpUsed=S->bAirJumpUsed;T->WireCharges=S->WireCharges;T->WireRechargeProgress=FMath::Clamp(S->WireRecharge,0.f,1.f);T->bWireRechargeArmed=S->bWireRechargeArmed;
  if(!T->IsOnLadder() && !T->IsParkourActive())Move->Velocity=S->Velocity;
+ for(TActorIterator<ABBSBSequentialEncounter> It(GetWorld());It;++It)
+ { const auto* R=S->Encounters.FindByPredicate([&](const auto& E){return E.Path==ActorKey(*It);});if(R)It->RestoreState(*R);else It->ResetEncounter(); }
  if(!Restored) { T->CancelParkour();Move->SetMovementMode(MOVE_Falling);Move->Velocity=S->Velocity;StatusText=TEXT("자세를 유지할 수 없어 안전하게 공중 상태로 돌아왔어요."); }
  return true;
 }

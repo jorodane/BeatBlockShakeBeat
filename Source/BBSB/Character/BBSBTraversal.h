@@ -109,6 +109,8 @@ public:
  FVector LedgeHand(bool Left) const;
  UFUNCTION(BlueprintCallable,Category="BBSB|Ladder") bool BeginLadder(AActor* Source,FVector Bottom,FVector Top,FVector Exit,FVector Normal);
  UFUNCTION(BlueprintPure,Category="BBSB|Ladder") bool IsOnLadder() const { return ParkourMode==EBBSBParkourMode::Ladder; }
+ UFUNCTION(BlueprintPure,Category="BBSB|Ladder") bool IsLadderJumpSteeringLocked() const;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="0",ClampMax="0.5",Units="s")) float LadderJumpVerticalSeconds=.22f;
  UFUNCTION(BlueprintCallable,Category="BBSB|Ladder") bool TryLadderHop();
  UFUNCTION(BlueprintPure,Category="BBSB|Ladder") float LadderInput() const;
  void LadderUpPressed() { bLadderUpHeld=true; }
@@ -341,7 +343,10 @@ private:
  FVector LedgeTopNormal=FVector::UpVector;
  FVector LadderBottom,LadderTop,LadderExit,LadderOut,LadderAxis,LadderMountFrom,LadderMountTo;
  float LadderLength=0,LadderStepFrom=0,LadderStepTo=0,LadderMotionSeconds=0;
- double LadderStepAt=0,LadderMountAt=0;
+ double LadderStepAt=0,LadderMountAt=0,LadderJumpUntil=-100;
+ bool bLadderJumpActive=false,bLadderJumpForwardReleased=false;
+ void UpdateLadderJump();
+ bool IsLadderJumpAutoCatchBlocked() const;
  bool bLadderMounting=false,bLadderExiting=false;
  bool bLadderUpHeld=false,bLadderDownHeld=false,bLadderHopHeld=false;
  double DashWallRecoveryUntil=-100;

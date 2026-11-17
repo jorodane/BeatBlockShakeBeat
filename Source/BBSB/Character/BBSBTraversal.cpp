@@ -265,7 +265,7 @@ void UBBSBTraversalComponent::TickComponent(float DT,ELevelTick Type,FActorCompo
  if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())bLadderUpHeld=bLadderDownHeld=bLadderHopHeld=false;
  RestoreParkourRunExit();TickWallJumpMovement();auto* Move=Character->GetCharacterMovement();
  TickWireMovement(DT);TickWireRecharge(DT);UpdateWirePresentation();
- TickParkour(DT);
+ UpdateLadderJump();TickParkour(DT);
  TickMovementEffects(DT);
  ParkourPoseAlpha=FMath::FInterpConstantTo(ParkourPoseAlpha,IsParkourActive() ? 1.f:0.f,DT,IsParkourActive() ? 16.f:10.f);
  if(WallJumpAge>=0) { WallJumpAge=GetWorld()->GetTimeSeconds()-WallJumpStartedAt;if(WallJumpAge>.5f) WallJumpAge=-1; }

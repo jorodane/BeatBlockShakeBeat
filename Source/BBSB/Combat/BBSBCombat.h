@@ -17,6 +17,7 @@ class USkeletalMeshComponent;
 class USceneComponent;
 class UInstancedStaticMeshComponent;
 class USplineMeshComponent;
+class ABBSBSequentialEncounter;
 class UCameraShakeBase;
 class UTextRenderComponent;
 class USpringArmComponent;
@@ -369,6 +370,10 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") bool bFieldRecovering=false;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field pattern") FVector FieldCommittedAim=FVector::ZeroVector;
  UFUNCTION(CallInEditor,BlueprintCallable,Category="BBSB|Field pattern") void RebuildFieldAppearance();
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") TObjectPtr<ABBSBSequentialEncounter> SequentialEncounter;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") double SpawnWarmupUntil=-100;
+ UFUNCTION(BlueprintCallable,Category="BBSB|Field bullets") void BeginSpawnWarmup(float Seconds);
+ UFUNCTION(BlueprintPure,Category="BBSB|Field bullets") bool IsSpawnWarmingUp() const;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") bool bFieldAggro=false;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldVolleysFired=0;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="BBSB|Field bullets") int32 FieldShotsFired=0;

@@ -5,6 +5,7 @@
 #include "GameFramework/SaveGame.h"
 #include "UI/BBSBPaperWidget.h"
 #include "Hunting/BBSBItem.h"
+#include "Combat/BBSBSequentialEncounterData.h"
 #include "BBSBSession.generated.h"
 
 class ABBSBCharacter;class UBBSBSessionMenu;class UInputComponent;class UButton;class UVerticalBox;class UTextBlock;
@@ -70,6 +71,7 @@ public:
  UPROPERTY(SaveGame) bool bTutorialLoadoutEnforced=true;
  UPROPERTY(SaveGame) bool bBunniarOpeningRest=false;
  UPROPERTY(SaveGame) TArray<FBBSBSessionActor> Actors;
+ UPROPERTY(SaveGame) TArray<FBBSBEncounterSave> Encounters;
  UPROPERTY(SaveGame) TArray<FBBSBSessionLoot> Loot;
  UPROPERTY(SaveGame) TSet<FName> SeenGuides;
  UPROPERTY(SaveGame) bool bLearnedMove=false;

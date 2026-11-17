@@ -10,7 +10,9 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SphereComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/World.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
@@ -167,17 +169,85 @@ ABBSBStage01CarrySinger::ABBSBStage01CarrySinger()
  BunniarMesh=CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CarriedSongBunniar"));BunniarMesh->SetupAttachment(Body);
  BunniarMesh->SetSkeletalMeshAsset(LoadObject<USkeletalMesh>(nullptr,TEXT("/Game/Meshes/Characters/Bunniar/Bunniar_Normal.Bunniar_Normal")));
  BunniarMesh->SetAnimInstanceClass(UBBSBBunniarAnimInstance::StaticClass());BunniarMesh->SetRelativeScale3D(FVector(.55));BunniarMesh->SetRelativeLocation(FVector(0,0,-40));BunniarMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+ GrabSurface=CreateDefaultSubobject<USphereComponent>(TEXT("BunniarGrabSurface"));GrabSurface->SetupAttachment(BunniarMesh);
+ GrabSurface->InitSphereRadius(54.f);GrabSurface->SetRelativeLocation(FVector(0,0,75));
+ GrabSurface->SetCollisionEnabled(ECollisionEnabled::QueryOnly);GrabSurface->SetCollisionResponseToAllChannels(ECR_Ignore);GrabSurface->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);GrabSurface->SetGenerateOverlapEvents(false);
  Body->SetHiddenInGame(true,false);
  Body->SetCollisionResponseToChannel(ECC_Pawn,ECR_Ignore);
 }
 void ABBSBStage01CarrySinger::BeginPlay() { Super::BeginPlay();SongHome=GetActorLocation(); }
-FText ABBSBStage01CarrySinger::BunniarInteractionText_Implementation() const { return FText::FromString(TEXT("버니아 집기 · 유지: 운반 · 우클릭: 조작/던지기")); }
-void ABBSBStage01CarrySinger::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector P,FVector N) { Super::BunniarAttached_Implementation(Buddy,P,N);if(Singer)Singer->SilenceFor(100000); }
-void ABBSBStage01CarrySinger::BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy) { Super::BunniarReleased_Implementation(Buddy);if(Singer)Singer->SilenceFor(Singer->QuietSecondsAfterCarry); }
+UPrimitiveComponent* ABBSBStage01CarrySinger::CarrySurfaceComponent() const { return GrabSurface; }
+bool ABBSBStage01CarrySinger::TraceCarryAim(FVector From,FVector To,FHitResult& Hit) const
+{
+ FCollisionQueryParams Query(SCENE_QUERY_STAT(BunniarRoundAim),false);
+ if(!GrabSurface || !GrabSurface->LineTraceComponent(Hit,From,To,Query))return false;
+ Hit.bBlockingHit=true;Hit.Distance=FVector::Distance(From,Hit.ImpactPoint);return true;
+}
+FText ABBSBStage01CarrySinger::BunniarInteractionText_Implementation() const { return FText::FromString(TEXT("버니아 집기 · 좌클릭 유지: 운반 · 우클릭: 던지기")); }
+void ABBSBStage01CarrySinger::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector P,FVector N)
+{
+ HeldMeshLocalFrame=BunniarMesh->GetComponentTransform().GetRelativeTransform(GetActorTransform());
+ Super::BunniarAttached_Implementation(Buddy,P,N);if(Singer)Singer->SilenceFor(100000);
+}
+void ABBSBStage01CarrySinger::BunniarArrived_Implementation(ABBSBBunniarCompanion* Buddy)
+{
+ // Keep the visible pose at contact. Resetting it to the hidden body's rest
+ // offset would move the grabbed point sideways at the exact pickup frame.
+ if(!HasCarryAttachment())HeldMeshLocalFrame=BunniarMesh->GetComponentTransform().GetRelativeTransform(GetActorTransform());
+ Super::BunniarArrived_Implementation(Buddy);
+}
+void ABBSBStage01CarrySinger::BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy)
+{
+ Super::BunniarReleased_Implementation(Buddy);
+ if(!bCarried && !bBroken && Body->IsSimulatingPhysics())BeginThrowGlide();
+ if(Singer)Singer->SilenceFor(Singer->QuietSecondsAfterCarry);
+}
+void ABBSBStage01CarrySinger::BeginThrowGlide()
+{
+ bThrowGliding=true;Body->SetEnableGravity(false);Body->SetPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+ if(Singer)Singer->bSongAttached=false;
+}
+void ABBSBStage01CarrySinger::EndThrowGlide(bool Landed)
+{
+ bThrowGliding=false;Body->SetEnableGravity(true);
+ // A valid landing can be below the old perch. It becomes the new rest point
+ // instead of triggering the old six-metre recovery teleport on the next tick.
+ if(Landed)SongHome=GetActorLocation();
+}
+bool ABBSBStage01CarrySinger::HasGlideSupport() const
+{
+ FCollisionQueryParams Query(SCENE_QUERY_STAT(BunniarGlideLanding),false,this);Query.AddIgnoredActor(Singer);
+ if(const auto* Player=UGameplayStatics::GetPlayerCharacter(this,0))Query.AddIgnoredActor(Player);
+ const FVector From=Body->Bounds.Origin,To=From-FVector::UpVector*(Body->Bounds.BoxExtent.Z+4.f);
+ for(int32 Attempt=0;Attempt<8;++Attempt)
+ {
+  FHitResult Hit;if(!GetWorld()->LineTraceSingleByChannel(Hit,From,To,ECC_Visibility,Query))return false;
+  const auto* C=Hit.GetComponent();
+  if(C && C->GetCollisionEnabled()==ECollisionEnabled::QueryAndPhysics && C->GetCollisionResponseToChannel(Body->GetCollisionObjectType())==ECR_Block)
+   return Hit.ImpactNormal.Z>.45f;
+  if(C)Query.AddIgnoredComponent(C);else return false;
+ }
+ return false;
+}
+void ABBSBStage01CarrySinger::TickThrowGlide(float DT)
+{
+ if(bCarried || bBroken || !Body->IsSimulatingPhysics()) { if(bThrowGliding)EndThrowGlide(false);return; }
+ FVector Velocity=Body->GetPhysicsLinearVelocity();
+ // Resume natural free flight after loading an airborne body as well.
+ if(!bThrowGliding && (FMath::Abs(Velocity.Z)>50.f || Velocity.SizeSquared2D()>FMath::Square(150.f)) && !HasGlideSupport())BeginThrowGlide();
+ if(!bThrowGliding)return;
+ if(Velocity.Z<=0.f && HasGlideSupport()) { EndThrowGlide(true);return; }
+ const float Drag=FMath::Exp(-FMath::Max(.1f,ThrowGlideDrag)*FMath::Max(0.f,DT));Velocity.X*=Drag;Velocity.Y*=Drag;
+ // An upward throw loses its excess speed just like a horizontal throw.
+ // Keep the existing gentle terminal descent instead of damping it to a hover.
+ if(Velocity.Z>0.f)Velocity.Z*=Drag;
+ Velocity.Z=FMath::FInterpConstantTo(Velocity.Z,-FMath::Max(10.f,ThrowGlideFallSpeed),DT,FMath::Max(10.f,ThrowGlideVerticalAcceleration));
+ Body->SetPhysicsLinearVelocity(Velocity);
+}
 void ABBSBStage01CarrySinger::Tick(float DT)
 {
- Super::Tick(DT);Body->SetHiddenInGame(true,false);
- if(!bCarried && (GetActorLocation().Z<SongHome.Z-600 || FVector::DistSquared2D(GetActorLocation(),SongHome)>FMath::Square(3000.f))) { ResetObject();Body->SetPhysicsLinearVelocity(FVector::ZeroVector);Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector); }
+ TickThrowGlide(DT);Super::Tick(DT);Body->SetHiddenInGame(true,false);
+ if(!bCarried && !bThrowGliding && (GetActorLocation().Z<SongHome.Z-600 || FVector::DistSquared2D(GetActorLocation(),SongHome)>FMath::Square(3000.f))) { ResetObject();Body->SetPhysicsLinearVelocity(FVector::ZeroVector);Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector); }
  if(Body->GetCollisionObjectType()!=ECC_Pawn)Body->SetCollisionObjectType(ECC_Pawn);
 }
 

@@ -143,7 +143,7 @@ void ABBSBBunniarCompanion::Tick(float DT)
    SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;ReturnTransitSeconds=EquipmentTravelSeconds;bSurfaceReturning=true;
   }
  }
- if(bAimFollowing)UpdateAimFollowing();
+ if(bSurfaceTargetPending)UpdateInteractionFlight();else if(bAimFollowing)UpdateAimFollowing();
  if(const auto* P=Cast<ABBSBCharacter>(GetOwner());P && P->Hunting && P->Hunting->TickBuddyPresentation(DT))return;
  const float SmallScale=AnimationSet ? AnimationSet->CompanionScale:.12f;
  const float NormalScale=!bFollowing ? 1.f:bEquipped ? (AnimationSet ? AnimationSet->EquippedScale:.175f):SmallScale;
@@ -157,7 +157,8 @@ void ABBSBBunniarCompanion::Tick(float DT)
   else
   {
    SurfaceArrivalAlpha=Transit;
-   SetActorLocation(bAimFollowing && Transit>=1.f ? FMath::VInterpTo(GetActorLocation(),AirHoverPoint,DT,AimFollowInterpSpeed):FMath::Lerp(SurfaceTransitFrom.GetLocation(),AirHoverPoint,Ease));
+   const FVector Goal=bAimFollowing && Transit>=1.f ? FMath::VInterpTo(GetActorLocation(),AirHoverPoint,DT,AimFollowInterpSpeed):FMath::Lerp(SurfaceTransitFrom.GetLocation(),AirHoverPoint,Ease);
+   if(!MoveSurfaceTravel(Goal,GetActorQuat(),bAimFollowing ? &AirHoverPoint:nullptr)) { AirHoverPoint=GetActorLocation();SurfacePoint=AirHoverPoint;SurfaceArrivalAlpha=0; }
    const auto* P=Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
    const FVector Face=AnimationSet ? AnimationSet->FaceDirection.GetSafeNormal():FVector::RightVector;
    const FQuat ModelFrame=FRotationMatrix::MakeFromXZ(Visual->GetRelativeTransform().TransformVectorNoScale(Face),Visual->GetRelativeTransform().TransformVectorNoScale(FVector::UpVector)).ToQuat();
@@ -189,12 +190,36 @@ void ABBSBBunniarCompanion::Tick(float DT)
    SurfaceArrivalAlpha=Transit;
    if(auto* Object=Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner());Object && Object->bManipulating && !P->FieldActions->IsGestureChannelHeld(1)) { Object->EndManipulation(false);P->FieldActions->SetEquipmentPointerCapture(false); }
    const FVector Goal=SurfacePoint-Q.RotateVector(Contact)+SurfaceNormal*(AnimationSet ? AnimationSet->SurfaceGap:2);
-   SetActorRotation(bAimFollowing && Transit>=1.f ? FMath::QInterpTo(GetActorQuat(),Q,DT,AimFollowInterpSpeed):FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Q,Ease));
-   SetActorLocation(bAimFollowing && Transit>=1.f ? FMath::VInterpTo(GetActorLocation(),Goal,DT,AimFollowInterpSpeed):FMath::Lerp(SurfaceTransitFrom.GetLocation(),Goal,Ease));
-   if(!bAimFollowing && !bSurfaceArrived && Transit>=1)
+   auto* Carry=Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner());
+   const bool CarryFlight=Carry && !bSurfaceArrived;
+   const bool Following=bAimFollowing || bSurfaceTargetPending || CarryFlight;
+   const FQuat Rotation=(CarryFlight || (Following && Transit>=1.f)) ? FMath::QInterpTo(GetActorQuat(),Q,DT,AimFollowInterpSpeed):FQuat::Slerp(SurfaceTransitFrom.GetRotation(),Q,Ease);
+   // Pursue a falling body from the current pose. Replaying the original launch
+   // interpolation can put the body through Bunniar between physics frames.
+   const FVector Next=CarryFlight ? GetActorLocation()+(Goal-GetActorLocation()).GetClampedToMaxSize(FMath::Max(100.f,SurfaceTravelSpeed(Goal))*FMath::Max(0.f,DT)):
+    Following && Transit>=1.f ? FMath::VInterpTo(GetActorLocation(),Goal,DT,AimFollowInterpSpeed):FMath::Lerp(SurfaceTransitFrom.GetLocation(),Goal,Ease);
+   const bool Reached=MoveSurfaceTravel(Next,Rotation,Following ? &Goal:nullptr);
+   const bool CarryContact=CarryFlight && !bSurfaceTargetPending && Transit>=.25f && HasSurfaceContact(SurfaceComponent);
+   if(CarryFlight && !CarryContact && T-SurfaceTransitAt>FMath::Max(.5f,InteractionFlightSeconds)) { ReleaseSurface();return; }
+   if(!Reached)
+   {
+    const auto* Prop=Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner());
+    const bool Holding=Prop && Prop->bCarried;
+    SurfaceArrivalAlpha=Holding ? 1.f:0.f;
+    // Clamp the companion against scenery without dropping an already-held
+    // object. Release/throw and the existing range leash own that decision.
+    if(!Following && !Holding)ReleaseSurface();
+    if(!CarryContact)return;
+   }
+   if(!bAimFollowing && !bSurfaceTargetPending && !bSurfaceArrived && (CarryContact || (Transit>=1 && (!CarryFlight || GetActorLocation().Equals(Goal,2.f)))))
    {
     bSurfaceArrived=true;
     if(AActor* SurfaceOwner=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner());SurfaceOwner) IBBSBBunniarSurface::Execute_BunniarArrived(SurfaceOwner,this);
+    if(CarryContact && Carry->bCarried)
+    {
+     // Stop the body on actual touch; ease the small visual contact correction.
+     SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=T;
+    }
    }
    return;
   }

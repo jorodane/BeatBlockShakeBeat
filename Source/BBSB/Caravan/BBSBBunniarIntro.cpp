@@ -7,6 +7,8 @@ void ABBSBBunniarCompanion::SetOpeningBandaged(bool Visible)
 { BandageA->SetVisibility(Visible);BandageB->SetVisibility(Visible); }
 void ABBSBBunniarCompanion::EndOpeningRest()
 {
- if(!bOpeningRest)return;bOpeningRest=false;BandageA->SetVisibility(false);BandageB->SetVisibility(false);
+ // Leaving the desk changes the pose, not the mouth-bandage story state.
+ // The opening explicitly clears it at the start of each new playthrough.
+ if(!bOpeningRest)return;bOpeningRest=false;
  SurfaceTransitFrom=GetActorTransform();SurfaceTransitAt=GetWorld()->GetTimeSeconds();ReturnTransitSeconds=.5f;bSurfaceReturning=true;
 }

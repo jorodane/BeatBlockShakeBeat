@@ -9,6 +9,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "UI/BBSBOutlinedPaths.h"
 
 FVector UBBSBFieldActionComponent::MovementDashDirection() const
 {
@@ -29,6 +30,9 @@ bool UBBSBFieldActionComponent::IsSurfaceAimLocked() const
  return Buddy && Buddy->IsSurfaceFocusActive();
 }
 
+bool UBBSBFieldActionComponent::IsBunniarPointerHighlighted() const
+{ return HoverBuddy.IsValid(); }
+
 void UBBSBFieldActionComponent::UpdateAimPresentation()
 {
  AimPresentation=EBBSBAimPresentation::Hidden;AimPresentationActor=nullptr;
@@ -37,24 +41,24 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
  const auto* Interaction=Character ? Character->FindComponentByClass<UBBSBInteractionComponent>():nullptr;
  const auto* Combat=Character ? Character->FindComponentByClass<UBBSBCombatComponent>():nullptr;
  const auto* BuddyAnchor=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
- const bool BuddyFocus=PC && PC->IsLocalController() && !bEquipmentWheelOpen && BuddyAnchor && (BuddyAnchor->IsPlainSurfaceAttached() || BuddyAnchor->bAirHovering) && !(Interaction && Interaction->bDialogueActive) && !(Combat && (Combat->bDead || Combat->HasTargetLock()));
+ const bool BuddyFocus=PC && PC->IsLocalController() && !bEquipmentWheelOpen && BuddyAnchor && IsBunniarPointerHighlighted() && !(Interaction && Interaction->bDialogueActive) && !(Combat && (Combat->bDead || Combat->HasTargetLock()));
  if(Camera && (BuddyFocus || BuddyOutlineMID))
  {
   if(!BuddyOutlineMID) if(auto* Material=BuddyOutlineMaterial.LoadSynchronous()) BuddyOutlineMID=UMaterialInstanceDynamic::Create(Material,this);
   if(BuddyOutlineMID) Camera->AddOrUpdateBlendable(BuddyOutlineMID,BuddyFocus ? 1.f:0.f);
  }
- if(!PC || !PC->IsLocalController() || (Combat && Combat->HasTargetLock()) || bEquipmentWheelOpen || IsSurfaceAimLocked() || (Interaction && Interaction->bDialogueActive) || (Combat && Combat->bDead)) return;
- AimPresentation=EBBSBAimPresentation::Air;AimPresentationColor=AirAimColor;
+ if(!PC || !PC->IsLocalController() || (Combat && Combat->HasTargetLock()) || bEquipmentWheelOpen || IsSurfaceAimLocked() || BuddyFocus || (Interaction && Interaction->bDialogueActive) || (Combat && Combat->bDead)) return;
+ AimPresentation=BuddyAnchor ? EBBSBAimPresentation::Diamond:EBBSBAimPresentation::Air;AimPresentationColor=AirAimColor;
  FHitResult Hit;
  if(!TraceEquipmentAim(Hit)) { FVector Point;ResolveEquipmentAim(Point,Hit);AimPresentationPoint=Point;return; }
  AimPresentationPoint=Hit.ImpactPoint;AimPresentationActor=Hit.GetActor();
  if(IsEquipmentTarget(Hit.GetActor()))
  {
-  AimPresentation=EBBSBAimPresentation::Interactive;
+  AimPresentation=BuddyAnchor ? EBBSBAimPresentation::Diamond:EBBSBAimPresentation::Interactive;
   AimPresentationColor=Cast<ABBSBInteractionNPC>(Hit.GetActor()) ? NPCAimColor:Cast<ABBSBCarryObject>(Hit.GetActor()) ? CarryAimColor:Cast<ABBSBInkEnemy>(Hit.GetActor()) ? AttackAimColor:FieldEquipment ? DeviceAimColor:AttackAimColor;
   return;
  }
- AimPresentation=EBBSBAimPresentation::Surface;AimPresentationColor=SurfaceAimColor;
+ AimPresentation=BuddyAnchor ? EBBSBAimPresentation::Diamond:EBBSBAimPresentation::Surface;AimPresentationColor=SurfaceAimColor;
  const auto* Buddy=Cast<ABBSBBunniarCompanion>(InteractionEquipment());
  if(!Buddy || Buddy->bSurfaceAttached || Buddy->bAirHovering || Buddy->bGliding) return;
  if(!SurfaceAimDecal)
@@ -83,19 +87,16 @@ void UBBSBFieldActionComponent::DrawContextAim(AHUD* HUD,UCanvas* Canvas) const
  if(PC->bShowMouseCursor) PC->GetMousePosition(X,Y);
  const float S=FMath::Clamp(Canvas->SizeX/1280.f,.7f,1.4f);
  const FLinearColor Shade(.055f,.04f,.075f,.98f);
- auto Line=[&](FVector2D A,FVector2D B)
- {
-  HUD->DrawLine(A.X,A.Y,B.X,B.Y,Shade,3.8f*S);
-  HUD->DrawLine(A.X,A.Y,B.X,B.Y,AimPresentationColor,2.f*S);
- };
+ TArray<BBSBOutlinedPaths::FPath> Paths;
+ auto Path=[&](TArray<FVector2D> Points,bool Closed=false)
+ { BBSBOutlinedPaths::FPath P;P.Points=MoveTemp(Points);P.Color=AimPresentationColor;P.Width=2.5f*S;P.Border=2.f*S;P.bClosed=Closed;Paths.Add(MoveTemp(P)); };
+ auto Line=[&](FVector2D A,FVector2D B) { Path({A,B}); };
  const FVector2D Center(X,Y);
- if(AimPresentation==EBBSBAimPresentation::Interactive)
+ if(AimPresentation==EBBSBAimPresentation::Diamond)
+ { const float R=8.f*S;Path({Center+FVector2D(0,-R),Center+FVector2D(R,0),Center+FVector2D(0,R),Center+FVector2D(-R,0)},true); }
+ else if(AimPresentation==EBBSBAimPresentation::Interactive)
  {
-  for(int32 I=0;I<40;++I)
-  {
-   const float A=2*PI*I/40.f,B=2*PI*(I+1)/40.f;
-   Line(Center+FVector2D(FMath::Cos(A),FMath::Sin(A))*8.f*S,Center+FVector2D(FMath::Cos(B),FMath::Sin(B))*8.f*S);
-  }
+  TArray<FVector2D> Ring;for(int32 I=0;I<48;++I) { const float A=2*PI*I/48.f;Ring.Add(Center+FVector2D(FMath::Cos(A),FMath::Sin(A))*8.f*S); }Path(MoveTemp(Ring),true);
  }
  else
  {
@@ -104,4 +105,5 @@ void UBBSBFieldActionComponent::DrawContextAim(AHUD* HUD,UCanvas* Canvas) const
   Line(Center+FVector2D(-End,0),Center+FVector2D(-Gap,0));Line(Center+FVector2D(Gap,0),Center+FVector2D(End,0));
   Line(Center+FVector2D(0,-End),Center+FVector2D(0,-Gap));Line(Center+FVector2D(0,Gap),Center+FVector2D(0,End));
  }
+ BBSBOutlinedPaths::Draw(Canvas,Paths,Shade);
 }
