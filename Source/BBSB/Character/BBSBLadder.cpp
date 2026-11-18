@@ -13,7 +13,9 @@
 
 bool UBBSBTraversalComponent::TryAutoLadder(const FVector& Direction)
 {
- if(!Character || !Character->FieldActions || (!Character->GetCharacterMovement()->IsFalling() && !Character->FieldActions->IsDodging()))return false;
+ if(!Character || !Character->FieldActions)return false;
+ const auto* Move=Character->GetCharacterMovement();const bool Grounded=Move->IsMovingOnGround();
+ if(!Move->IsFalling() && !Grounded && !Character->FieldActions->IsDodging())return false;
  const FVector Position=Character->GetActorLocation();const float Reach=Character->GetCapsuleComponent()->GetScaledCapsuleRadius()+65.f;
  for(TActorIterator<ABBSBStage01Device> It(GetWorld());It;++It)
  {
@@ -50,6 +52,9 @@ bool UBBSBTraversalComponent::BeginLadder(AActor* Source,FVector Bottom,FVector 
  if(IsParkourActive())CancelParkour();
  if(!Character->FieldActions->CanStartLadder())return false;
  BeginParkour(EBBSBParkourMode::Ladder);
+ // Gripping the rungs stops the incoming motion. A later top mantle must not
+ // launch with the dash velocity from before this attachment.
+ ParkourEntryVelocity=FVector::ZeroVector;
  LadderSource=Source;LadderBottom=Bottom;LadderTop=Top;LadderExit=Exit;LadderAxis=Axis;LadderLength=Length;LadderOut=Normal.GetSafeNormal2D();
  if(LadderOut.IsNearlyZero())LadderOut=-(Exit-Bottom).GetSafeNormal2D();if(LadderOut.IsNearlyZero())LadderOut=-Character->GetActorForwardVector();
  LedgeNormal=LadderOut;LedgePoint=Goal;LadderDistance=Distance;LadderStepFrom=LadderStepTo=Distance;
@@ -65,10 +70,12 @@ bool UBBSBTraversalComponent::JumpFromLadder()
  // Leave the rungs vertically even if a direction or hop was still held.
  // A short protected ascent prevents immediate steering into the wall gap.
  LadderJumpUntil=GetWorld()->GetTimeSeconds()+FMath::Max(0.f,LadderJumpVerticalSeconds);
- bLadderJumpActive=true;bLadderJumpForwardReleased=LadderInput()<=.2f;
+ bLadderJumpActive=true;
  Character->LaunchCharacter(FVector::UpVector*Move->JumpZVelocity,true,true);
  bAirJumpUsed=false;LastFallSpeed=0;bWasFalling=true;
- ParkourIgnoreUntil=GetWorld()->GetTimeSeconds()+FMath::Max(.25f,ParkourRegrabDelay);
+ // Only protect the takeoff. Continuing to hold forward must still re-catch
+ // the ladder once the vertical launch has cleared its starting rungs.
+ ParkourIgnoreUntil=FMath::Max(LadderJumpUntil,GetWorld()->GetTimeSeconds()+.05f);
  if(Presentation)SpawnSmoke(Presentation->JumpSmoke,Character->GetActorLocation()-FVector::UpVector*Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight(),FVector::UpVector,.7f);
  return true;
 }
@@ -79,18 +86,21 @@ bool UBBSBTraversalComponent::IsLadderJumpSteeringLocked() const
 void UBBSBTraversalComponent::UpdateLadderJump()
 {
  if(!bLadderJumpActive || !Character)return;
+ if(Character->FieldActions && Character->FieldActions->IsDodging())
+ {
+  // The dash owns movement now. Keeping the ladder jump's no-catch window
+  // would let this pre-physics dash step cross the collision-free rungs.
+  bLadderJumpActive=false;LadderJumpUntil=-100;
+  ParkourIgnoreUntil=FMath::Min(ParkourIgnoreUntil,GetWorld()->GetTimeSeconds());
+  return;
+ }
  const auto* Move=Character->GetCharacterMovement();
- if(Move->IsMovingOnGround() || IsParkourActive() || IsWireTraversalActive() || IsBunniarTraversalActive() ||
-    (Character->FieldActions && Character->FieldActions->IsDodging()))
+ if(Move->IsMovingOnGround() || IsParkourActive() || IsWireTraversalActive() || IsBunniarTraversalActive())
  { bLadderJumpActive=false;return; }
- if(LadderInput()<=.2f)bLadderJumpForwardReleased=true;
 }
 bool UBBSBTraversalComponent::IsLadderJumpAutoCatchBlocked() const
 {
- // The old climbing W must not turn the same jump into a top mount. A fresh
- // direction can request another catch once the character starts descending.
- return bLadderJumpActive && Character &&
-  (Character->GetCharacterMovement()->Velocity.Z>0.f || !bLadderJumpForwardReleased);
+ return bLadderJumpActive && IsLadderJumpSteeringLocked();
 }
 void UBBSBTraversalComponent::StartLadderStep(bool Hop)
 {
@@ -106,11 +116,7 @@ bool UBBSBTraversalComponent::TryLadderHop()
 }
 void UBBSBTraversalComponent::ExitLadderTop()
 {
- if(bLadderExiting)return;
- const FVector From=Character->GetActorLocation();const float Apex=FMath::Max(float(From.Z),float(LadderExit.Z))+65.f;
- if(!PathClear(From,LadderExit,Apex))return;
- LadderMountFrom=From;LadderMountTo=LadderExit;LadderMountAt=GetWorld()->GetTimeSeconds();LadderMotionSeconds=.42f;
- bLadderExiting=true;bLadderStepping=false;bLadderHopping=true;LadderStepPhase=0;
+ if(!bLadderExiting)BeginLadderTopClimb();
 }
 void UBBSBTraversalComponent::TickLadder(float DT)
 {
@@ -142,7 +148,8 @@ void UBBSBTraversalComponent::TickLadder(float DT)
   else
   {
    const bool HopHeld=bLadderHopHeld || PC->IsInputKeyDown(EKeys::LeftShift) || PC->IsInputKeyDown(EKeys::RightShift);
-   if(!bLadderStepping && (Input>.2f || HopHeld) && LadderDistance<LadderLength-.1f)StartLadderStep(HopHeld);
+   const float TopCatchDistance=LadderLength-FMath::Max(20.f,LadderRungSpacing)*3.f-1.f;
+   if(!bLadderStepping && (Input>.2f || HopHeld) && LadderDistance<TopCatchDistance)StartLadderStep(HopHeld);
    if(bLadderStepping)
    {
     LadderStepPhase=FMath::Clamp(float((Now-LadderStepAt)/LadderMotionSeconds),0.f,1.f);
@@ -161,7 +168,11 @@ void UBBSBTraversalComponent::TickLadder(float DT)
     else LadderDistance=FMath::Lerp(LadderStepFrom,LadderStepTo,FMath::SmoothStep(0.f,1.f,LadderStepPhase));
     if(LadderStepPhase>=1)bLadderStepping=bLadderHopping=false;
    }
-   if(!bLadderStepping && LadderDistance>=LadderLength-.1f && (Input>.2f || HopHeld))ExitLadderTop();
+   if(!bLadderStepping && LadderDistance>=TopCatchDistance && (Input>.2f || HopHeld))
+   {
+    ExitLadderTop();
+    if(!IsOnLadder())return;
+   }
   }
   Goal=LadderBottom+LadderAxis*LadderDistance;
   if(bLadderHopping && bLadderStepping)

@@ -344,9 +344,10 @@ private:
  FVector LadderBottom,LadderTop,LadderExit,LadderOut,LadderAxis,LadderMountFrom,LadderMountTo;
  float LadderLength=0,LadderStepFrom=0,LadderStepTo=0,LadderMotionSeconds=0;
  double LadderStepAt=0,LadderMountAt=0,LadderJumpUntil=-100;
- bool bLadderJumpActive=false,bLadderJumpForwardReleased=false;
+ bool bLadderJumpActive=false;
  void UpdateLadderJump();
  bool IsLadderJumpAutoCatchBlocked() const;
+ bool BeginLadderTopClimb();
  bool bLadderMounting=false,bLadderExiting=false;
  bool bLadderUpHeld=false,bLadderDownHeld=false,bLadderHopHeld=false;
  double DashWallRecoveryUntil=-100;

@@ -268,7 +268,10 @@ bool ABBSBStage01Device::MountLadder()
 {
  if(!Director || (Kind==EBBSBStage01Node::LowerLadder && (!bSolved || Painted<.98f)))return false;
  auto* P=Director->PlayerCharacter();if(!P || !P->Traversal || !P->Traversal->BeginLadder(this,LadderBottomPoint(),LadderTopPoint(),Destination,LadderNormal()))return false;
- P->Traversal->LadderRungSpacing=FMath::Clamp(RungSpacing,20.f,50.f);return true;
+ P->Traversal->LadderRungSpacing=FMath::Clamp(RungSpacing,20.f,50.f);
+ // This is a new interaction/automatic grab. Session restoration uses
+ // BeginLadder directly and retains the saved attached pose until new input.
+ P->Traversal->TryLedgeClimb();return true;
 }
 
 float ABBSBStage01Device::LadderRetractDistance() const

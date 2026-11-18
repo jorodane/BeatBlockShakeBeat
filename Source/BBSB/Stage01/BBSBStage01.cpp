@@ -66,8 +66,31 @@ void ABBSBStage01Director::EndPlay(const EEndPlayReason::Type Reason)
  if(CaptainAudio)CaptainAudio->DestroyComponent();Super::EndPlay(Reason);
 }
 void ABBSBStage01Director::Say(const FString& Text,float Seconds) { Caption=Text;CaptionUntil=GetWorld()->GetTimeSeconds()+Seconds; }
+bool ABBSBStage01Director::HasCompletedObjective(EBBSBStage01Node Kind) const
+{
+ // Older saves used the story phase as the only proof of these completions.
+ if(Kind==EBBSBStage01Node::ToolCache && Phase>=EBBSBStage01Phase::ReturnToMerchant)return true;
+ if(Kind==EBBSBStage01Node::LightLever && Phase>=EBBSBStage01Phase::ReturnForReady)return true;
+ const auto* D=FindNode(Kind);return D && Solved.Contains(D->NodeId);
+}
+EBBSBStage01Phase ABBSBStage01Director::ResolveObjectivePhase(EBBSBStage01Phase Requested) const
+{
+ // Accepting an objective must first consume any completion already recorded in the world.
+ if(Requested==EBBSBStage01Phase::FindTools && HasTool())return EBBSBStage01Phase::ReturnToMerchant;
+ if(Requested==EBBSBStage01Phase::FindLight && HasCompletedObjective(EBBSBStage01Node::LightLever))return EBBSBStage01Phase::ReturnForReady;
+ return Requested;
+}
+void ABBSBStage01Director::CompleteObjective(ABBSBStage01Device* D)
+{
+ if(!D)return;
+ Solved.Add(D->NodeId);D->SetSolved(true);
+ const auto Next=ResolveObjectivePhase(Phase);
+ if(Next!=Phase)Advance(Next);
+ else { UpdateTutorialGate();SaveProgress(); }
+}
 void ABBSBStage01Director::Advance(EBBSBStage01Phase Next)
 {
+ Next=ResolveObjectivePhase(Next);
  if(Next==Phase)return;
  if((Next==EBBSBStage01Phase::Trio || Next==EBBSBStage01Phase::Captain) && UBBSBSessionSubsystem::Owns(GetWorld()))
   UBBSBSessionSubsystem::Get(GetWorld())->SaveNow(Next==EBBSBStage01Phase::Trio ? TEXT("중간보스 전"):TEXT("보스 전"),true);
@@ -103,6 +126,7 @@ ABBSBStage01Device* ABBSBStage01Director::FindNode(EBBSBStage01Node Kind) const 
 bool ABBSBStage01Director::AllQuiet(EBBSBStage01Voice Voice) const { bool Found=false;for(ABBSBStage01Singer* S:Singers)if(S && S->Voice==Voice) { Found=true;if(!S->bDefeated)return false; }return Found; }
 void ABBSBStage01Director::ApplyProgress()
 {
+ Phase=ResolveObjectivePhase(Phase);
  for(ABBSBStage01Device* D:Devices)if(D)
  {
   bool Open=Solved.Contains(D->NodeId);
@@ -112,7 +136,7 @@ void ABBSBStage01Director::ApplyProgress()
   if(D->Kind!=EBBSBStage01Node::CabinDoor || !D->HasActorBegunPlay())D->SetSolved(Open);
   else D->bSolved=Open;
  }
- if(CaptainLight)if(auto* L=CaptainLight->FindComponentByClass<ULightComponent>())L->SetVisibility(Phase>=EBBSBStage01Phase::ReturnForReady);
+ if(CaptainLight)if(auto* L=CaptainLight->FindComponentByClass<ULightComponent>())L->SetVisibility(HasCompletedObjective(EBBSBStage01Node::LightLever));
  for(ABBSBStage01Singer* S:Singers)if(S && Quieted.Contains(S->SingerId)) { S->bDefeated=true;S->Health=0;S->SetActorEnableCollision(false); }
 }
 void ABBSBStage01Director::Tick(float DT)
@@ -166,7 +190,26 @@ void ABBSBStage01Director::TalkTo(ABBSBStage01NPC* NPC)
  auto Buddy=[&](const TCHAR* Text,EBBSBDialogueExpression Expression=EBBSBDialogueExpression::Warm) { Turn(EBBSBDialogueSpeaker::Bunniar,Text,Expression); };
  if(NPC->CarNumber==6)
  {
-  if(Phase<=EBBSBStage01Phase::Outside)
+  if(Phase<=EBBSBStage01Phase::ReturnToMerchant && HasTool())
+  {
+   const bool PreparedEarly=Phase<EBBSBStage01Phase::FindTools;
+   Advance(EBBSBStage01Phase::ShopBattle);
+   if(PreparedEarly)
+   {
+    Partner(TEXT("벌써 나무 판과 고무 망치를 챙겼구나! 안쪽에서 삑사리가 나서 문을 잠가뒀어."));
+    Hero(TEXT("오는 길에 가져왔어요. 문만 열어주세요."),EBBSBDialogueExpression::Annoyed);
+    Buddy(TEXT("도구 찾기는 끝! 바로 들어가자!"));
+    Partner(TEXT("좋아, 뒤쪽 문을 열어줄게."));
+   }
+   else
+   {
+    Partner(TEXT("찾았구나! 뒤쪽 문을 열어줄게."));
+    Hero(TEXT("이제 도구도 찾았으니... 빨리 끝내죠."),EBBSBDialogueExpression::Annoyed);
+   }
+   Partner(TEXT("모두 같은 박자에 쏴. 한곳에 서 있지 말고, 쏘고 난 틈을 노려."));
+   Buddy(TEXT("박자가 비는 틈에 움직이자, 레파라도!"));
+  }
+  else if(Phase<=EBBSBStage01Phase::Outside)
   {
    Advance(EBBSBStage01Phase::FindTools);
    Partner(TEXT("안쪽에서 다 같이 삑사리를 내고 있어. 문을 잠가뒀지."));
@@ -175,17 +218,10 @@ void ABBSBStage01Director::TalkTo(ABBSBStage01NPC* NPC)
    Buddy(TEXT("저 위라면, 상자랑 사다리부터 살펴보자!"),EBBSBDialogueExpression::Surprised);
    Partner(TEXT("밖의 상자와 사다리를 써봐. 도구를 찾으면 돌아와."));
   }
-  else if(Phase==EBBSBStage01Phase::ReturnToMerchant)
-  {
-   Advance(EBBSBStage01Phase::ShopBattle);
-   Partner(TEXT("찾았구나! 뒤쪽 문을 열어줄게."));
-   Hero(TEXT("이제 도구도 찾았으니... 빨리 끝내죠."),EBBSBDialogueExpression::Annoyed);
-   Partner(TEXT("모두 같은 박자에 쏴. 한곳에 서 있지 말고, 쏘고 난 틈을 노려."));
-   Buddy(TEXT("박자가 비는 틈에 움직이자, 레파라도!"));
-  }
   else
   {
-   Partner(Phase<EBBSBStage01Phase::Cargo ? TEXT("도구를 되찾고 나면, 저 뒤 문으로 들어가줘."):TEXT("한결 조용하네. 화물차 안의 장치로 위쪽 길을 열 수 있을 거야."));
+   if(Phase==EBBSBStage01Phase::FindTools)Partner(TEXT("밖의 상자와 사다리를 써봐. 도구를 찾으면 돌아와."));
+   else Partner(Phase<EBBSBStage01Phase::Cargo ? TEXT("뒤쪽 문은 열어뒀어. 안쪽 버니아들을 진정시켜줘."):TEXT("한결 조용하네. 화물차 안의 장치로 위쪽 길을 열 수 있을 거야."));
    Hero(TEXT("알겠어요. 길을 확인해볼게요."));
   }
  }
@@ -193,12 +229,22 @@ void ABBSBStage01Director::TalkTo(ABBSBStage01NPC* NPC)
  {
   if(Phase==EBBSBStage01Phase::Restock)
   {
+   const bool PreparedEarly=HasCompletedObjective(EBBSBStage01Node::LightLever);
    Advance(EBBSBStage01Phase::FindLight);
    Partner(TEXT("트리오가 남긴 공명 조각은 옆 교환대에서 구슬로 바꿀 수 있어."));
    Hero(TEXT("잠깐 정비하고 가죠. 다음은 어디예요?"));
    Partner(TEXT("표식에서는 회복 차를 채울 수 있어. 차는 R로 마셔."));
-   Partner(TEXT("상단장님이 혼자 연주 중이야. 1호차에서 조명 레버를 켜줄래?"));
-   Buddy(TEXT("조명은 맡겨줘! 준비되면 1호차로 가자."));
+   if(PreparedEarly)
+   {
+    Partner(TEXT("1호차 조명도 벌써 켜줬구나. 상단장님이 혼자 연주하고 계셔."));
+    Hero(TEXT("오는 길에 켜뒀어요. 준비되면 바로 무대로 갈게요."));
+    Buddy(TEXT("조명도 준비 끝! 보급하고 무대 쪽 문을 열자."));
+   }
+   else
+   {
+    Partner(TEXT("상단장님이 혼자 연주 중이야. 1호차에서 조명 레버를 켜줄래?"));
+    Buddy(TEXT("조명은 맡겨줘! 준비되면 1호차로 가자."));
+   }
   }
   else if(Phase==EBBSBStage01Phase::ReturnForReady)
   {
@@ -224,9 +270,9 @@ bool ABBSBStage01Director::UseDevice(ABBSBStage01Device* D)
  case EBBSBStage01Node::LowerLadder:case EBBSBStage01Node::ClimbLadder:
   if(D->bSolved || D->Kind==EBBSBStage01Node::ClimbLadder)return D->MountLadder();break;
  case EBBSBStage01Node::ToolCache:
-  if(Phase>=EBBSBStage01Phase::ReturnToMerchant) { Say(TEXT("나무 판과 고무 망치는 이미 챙겼다."));break; }
-  if(Phase<EBBSBStage01Phase::FindTools) { Say(TEXT("압수 물품... 6호차 상인에게 먼저 물어보자."));return false; }
-  if(!GiveRepairTool())return false;Advance(EBBSBStage01Phase::ReturnToMerchant);Say(TEXT("나무 판과 고무 망치를 되찾았다!\n좌클릭: 빠른 한 방 · 우클릭 유지 + 좌클릭: 판을 대고 세 번"),7);break;
+  if(HasTool()) { Say(TEXT("나무 판과 고무 망치는 이미 챙겼다."));return true; }
+  if(!GiveRepairTool())return false;
+  CompleteObjective(D);Say(TEXT("나무 판과 고무 망치를 되찾았다!\n좌클릭: 빠른 한 방 · 우클릭 유지 + 좌클릭: 판을 대고 세 번"),7);return true;
  case EBBSBStage01Node::UtilityDoor: if(Phase<EBBSBStage01Phase::ShopBattle) { Say(TEXT("6호차 상인이 문을 잠갔다. 먼저 말을 걸어보자."));return false; }break;
  case EBBSBStage01Node::CargoButton: if(Phase<EBBSBStage01Phase::Cargo)return false;break;
  case EBBSBStage01Node::CargoLever:
@@ -241,9 +287,12 @@ bool ABBSBStage01Director::UseDevice(ABBSBStage01Device* D)
  case EBBSBStage01Node::TrioExit: if(Phase<EBBSBStage01Phase::Restock) { Say(TEXT("삑사리가 문 장치까지 울리고 있다. 트리오를 진정시키자."));return false; }break;
  case EBBSBStage01Node::CaptainNote:Say(TEXT("상단장의 쪽지: 어제까진 괜찮았는데, 오늘은 한 음도 마음대로 나가지 않는다.\n한 번만 더. 이번에는 제대로 연주할 수 있겠지."),8);break;
  case EBBSBStage01Node::LightLever:
-  if(Phase<EBBSBStage01Phase::FindLight) { Say(TEXT("아직 조명 요청을 받지 않았다. 2호차로 가보자."));return false; }
-  if(Phase==EBBSBStage01Phase::FindLight) { Advance(EBBSBStage01Phase::ReturnForReady);BeginReveal(); }
-  Say(TEXT("스포트라이트 아래, 상단장이 홀로 연주하고 있다.\n2호차로 돌아가 준비를 마치자."),7);break;
+ {
+  const bool AlreadyComplete=HasCompletedObjective(EBBSBStage01Node::LightLever);
+  CompleteObjective(D);ApplyProgress();
+  if(!AlreadyComplete)BeginReveal();
+  Say(TEXT("스포트라이트 아래, 상단장이 홀로 연주하고 있다.\n2호차로 돌아가 준비를 마치자."),7);return true;
+ }
  case EBBSBStage01Node::BuyTea:
   if(Tea>=3) { Say(TEXT("회복 차가 가득 찼어요. 표식에서도 리필할 수 있어요."));return false; }
   if(!Player->Hunting->SpendNotes(10)) { Say(TEXT("노트가 10개 필요해요."));return false; }++Tea;SaveProgress();Say(TEXT("회복 차 +1 · R로 마시기"));return true;
@@ -267,7 +316,7 @@ bool ABBSBStage01Director::UseDevice(ABBSBStage01Device* D)
  case EBBSBStage01Node::Departure:
   if(Phase!=EBBSBStage01Phase::Complete) { Say(TEXT("아직 상단장과의 연주가 끝나지 않았다."));return false; }Say(TEXT("상단의 소동을 해결했어요. 주변을 자유롭게 둘러볼 수 있어요."));return true;
  }
- Solved.Add(D->NodeId);D->SetSolved(true);SaveProgress();return true;
+ CompleteObjective(D);return true;
 }
 void ABBSBStage01Director::ReportQuiet(ABBSBStage01Singer* S)
 {

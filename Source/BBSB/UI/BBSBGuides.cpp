@@ -125,7 +125,7 @@ void UBBSBGuideSubsystem::TickHints(ABBSBCharacter* P,float DT)
    DragHintText=FText::FromString(Caption);
   }
   else if(const auto* Object=Cast<ABBSBCarryObject>(C->GetOwner());Object && Object->bCarried)
-  { Supported=true;bCarryHint=true;bDragBothWays=false;DragHintAxis=FVector2D(1,0);DragHintText=FText::FromString(TEXT("[우클릭하여 앞으로 던지기]")); }
+  { Supported=true;bCarryHint=true;bDragBothWays=false;DragHintAxis=FVector2D(1,0);DragHintText=FText::FromString(TEXT("[앞으로 던지기]")); }
  }
  const bool Idle=GetWorld()->GetTimeSeconds()-LastSurfaceMotionAt>=HintIdleSeconds;
  DragHintAlpha=FMath::Lerp(DragHintAlpha,Supported && Idle ? 1.f:0.f,A);

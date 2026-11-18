@@ -159,7 +159,8 @@ bool UBBSBTraversalComponent::TryAutoLedge()
  // Check ladders before the held-gesture restrictions for ledges and vaults.
  const FVector Direction=(Dash ? Move->Velocity:(!Intent.IsNearlyZero() ? Intent:Move->Velocity)).GetSafeNormal2D();
  if(Direction.IsNearlyZero())return false;
- if((Move->IsFalling() || (Move->IsMovingOnGround() && Dash)) && Actions->CanStartLadder() && TryAutoLadder(Direction))return true;
+ const bool GroundApproach=Move->IsMovingOnGround() && (Dash || !Intent.IsNearlyZero());
+ if((Move->IsFalling() || GroundApproach) && Actions->CanStartLadder() && TryAutoLadder(Direction))return true;
  if(!Move->IsFalling() || Actions->IsGestureCaptured() || (!AirDash && !Actions->CanStartJump()))return false;
  if(AirDash && (Actions->bEquipmentWheelOpen || (Character->Interaction && Character->Interaction->bDialogueActive) ||
     (Character->Combat && (Character->Combat->bDead || Character->Combat->BlocksMovement()))))return false;
@@ -304,6 +305,13 @@ bool UBBSBTraversalComponent::TryLowVault()
 }
 bool UBBSBTraversalComponent::TryLedgeClimb()
 {
+ if(IsOnLadder())
+ {
+  // A fresh grab in the final three rungs goes straight over the lip. Downward
+  // input keeps the ladder mount available for descending from a platform.
+  const float TopCatchDistance=LadderLength-FMath::Max(20.f,LadderRungSpacing)*3.f-1.f;
+  return LadderInput()>=-.2f && LadderDistance>=TopCatchDistance && BeginLadderTopClimb();
+ }
  if(ParkourMode!=EBBSBParkourMode::LedgeHang || !ParkourSurface.IsValid()) return false;
  if(GetWorld()->GetTimeSeconds()-ParkourStartedAt<.12f) { bClimbQueued=true;return true; }
  const FVector From=Character->GetActorLocation(),Dip=From-FVector(0,0,2.f);float Apex,Seconds;
@@ -311,6 +319,42 @@ bool UBBSBTraversalComponent::TryLedgeClimb()
  ClimbStartPelvisZ=Character->GetMesh()->GetSocketLocation(TEXT("pelvis")).Z-From.Z;
  ParkourEntryVelocity=Character->GetVelocity();ParkourFrom=From;ParkourJumpStart=Dip;ParkourApex=Apex;ParkourJumpSeconds=Seconds;ParkourJumpPreparation=FMath::Max(0.f,LedgePopPreparationSeconds);ParkourDuration=ParkourJumpPreparation+Seconds;
  ParkourMode=ParkourVisualMode=EBBSBParkourMode::Mantle;ParkourAge=0;ParkourStartedAt=GetWorld()->GetTimeSeconds();bParkourJumpPlanned=true;bParkourJumping=false;return true;
+}
+bool UBBSBTraversalComponent::BeginLadderTopClimb()
+{
+ if(!Character || !IsOnLadder())return false;
+ const FVector From=Character->GetActorLocation(),Normal=LadderOut,EntryVelocity=ParkourEntryVelocity;
+ const auto* Capsule=Character->GetCapsuleComponent();const float Half=Capsule->GetScaledCapsuleHalfHeight(),Radius=Capsule->GetScaledCapsuleRadius();
+ const auto Query=ParkourQuery(Character);FHitResult Floor;
+ // The authored exit supplies the landing area. Resolve its actual floor so
+ // a sloping landing uses the same clearance and gravity arc as other mantles.
+ if(!GetWorld()->LineTraceSingleByChannel(Floor,LadderExit+FVector::UpVector*20.f,LadderExit-FVector::UpVector*(Half+80.f),ECC_Visibility,Query) ||
+    !ValidParkourSurface(Floor.GetComponent()) || Floor.ImpactNormal.Z<Character->GetCharacterMovement()->GetWalkableFloorZ())return false;
+ const FVector To=Floor.ImpactPoint+FVector::UpVector*(Half+Radius*(1.f/FMath::Max(.1f,float(Floor.ImpactNormal.Z))-1.f)+3.f);
+ float Apex=0,Seconds=0;FVector Start=From;bool Planned=false;
+ // A rung can meet the landing at the capsule's resting contact. Give the
+ // planted arm a small swept lift before testing the inflated airborne path.
+ // Raising the whole arc cannot resolve an overlap at its starting point.
+ for(float Lift:{0.f,2.f,4.f,8.f})
+ {
+  Start=From+FVector::UpVector*Lift;
+  if(CapsulePathClear(From,Start) && PlanParkourJump(Start,To,Normal,FMath::Max(float(Start.Z),float(To.Z))+ParkourJumpClearance,Apex,Seconds)) { Planned=true;break; }
+ }
+ if(!Planned)return false;
+ FHitResult Lip;const FVector LipStart(LadderTop.X,LadderTop.Y,Floor.ImpactPoint.Z-8.f);
+ FVector Edge=Floor.ImpactPoint+Normal*(Radius+22.f);
+ if(GetWorld()->LineTraceSingleByChannel(Lip,LipStart,Floor.ImpactPoint-FVector::UpVector*8.f,ECC_Visibility,Query) && FMath::Abs(Lip.ImpactNormal.Z)<.35f)
+  Edge=FVector(Lip.ImpactPoint.X,Lip.ImpactPoint.Y,Floor.ImpactPoint.Z);
+ const float PelvisZ=Character->GetMesh()->GetSocketLocation(TEXT("pelvis")).Z-From.Z;
+ // Restore the ladder's saved movement before the mantle captures its own.
+ // Otherwise the temporary flying/zero-air-control settings would leak out.
+ CancelParkour();BeginParkour(EBBSBParkourMode::Mantle);
+ ParkourSurface=Floor.GetComponent();LedgePoint=Edge;LedgeNormal=Normal;LedgeTopNormal=Floor.ImpactNormal.GetSafeNormal();ClimbStartPelvisZ=PelvisZ;
+ ParkourEntryVelocity=EntryVelocity;ParkourFrom=From;ParkourJumpStart=Start;ParkourTo=To;ParkourApex=Apex;ParkourJumpSeconds=Seconds;
+ ParkourJumpPreparation=FMath::Max(0.f,LedgePopPreparationSeconds);ParkourDuration=ParkourJumpPreparation+Seconds;
+ bParkourJumpPlanned=true;bParkourJumping=false;ParkourHandAlpha=1.f;Character->SetActorRotation((-Normal).Rotation());
+ if(Presentation)SpawnSmoke(Presentation->JumpSmoke,From-FVector::UpVector*Half,FVector::UpVector,.6f);
+ return true;
 }
 FVector UBBSBTraversalComponent::ParkourJumpPoint(const FVector& From,const FVector& To,const FVector& Normal,float Apex,float Gravity,float Seconds,float Age) const
 {
@@ -360,8 +404,12 @@ void UBBSBTraversalComponent::TickParkourJump(float DT)
  {
   const float T=FMath::Clamp(ParkourAge/FMath::Max(.001f,ParkourJumpPreparation),0.f,1.f);
   const FVector Goal=FMath::Lerp(ParkourFrom,ParkourJumpStart,Ease(T));FHitResult Hit;
-  Move->GravityScale=0;Move->Velocity=FVector::ZeroVector;Character->SetActorLocation(Goal,true,&Hit,ETeleportType::None);ParkourHandAlpha=1.f;
-  if(Hit.bBlockingHit) { CancelParkour();return; }
+  Move->GravityScale=0;Move->Velocity=FVector::ZeroVector;
+  if(!Goal.Equals(Character->GetActorLocation(),.001f))Move->SafeMoveUpdatedComponent(Goal-Character->GetActorLocation(),Character->GetActorQuat(),true,Hit);
+  ParkourHandAlpha=1.f;
+  // A planted pose may already touch the floor. A contact at the reached pose
+  // is not an obstruction to the climb; a genuinely blocked lift still cancels.
+  if(Hit.bBlockingHit && FVector::DistSquared(Character->GetActorLocation(),Goal)>1.f) { CancelParkour();return; }
   if(ParkourAge>=ParkourJumpPreparation) StartParkourJump();
   return;
  }

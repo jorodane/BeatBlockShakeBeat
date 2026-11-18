@@ -239,7 +239,9 @@ public:
  UFUNCTION(BlueprintPure) uint8 GrabMask(int32 Index) const;
  UFUNCTION(BlueprintPure) float GrabNoteSeconds(int32 Index) const;
  UFUNCTION(BlueprintPure) ABBSBCharacter* PlayerCharacter() const { return Player; }
- UFUNCTION(BlueprintPure) bool HasTool() const { return Phase>=EBBSBStage01Phase::ReturnToMerchant; }
+ /** Completed world objectives are independent of whether their quest has been introduced. */
+ UFUNCTION(BlueprintPure) bool HasCompletedObjective(EBBSBStage01Node Kind) const;
+ UFUNCTION(BlueprintPure) bool HasTool() const { return HasCompletedObjective(EBBSBStage01Node::ToolCache); }
  void ReportQuiet(ABBSBStage01Singer* Singer);
  void Say(const FString& Text,float Seconds=5);
  bool MoveAlongLadder(FVector Destination,float Seconds=1.2f,float Clearance=60,FVector Access=FVector::ZeroVector);
@@ -260,6 +262,8 @@ private:
  TWeakObjectPtr<AActor> RevealPrevious;double RevealUntil=0,LastRewardTry=-100;
  void BeginReveal();void TickReveal();void FinishReveal();void TryGrantReward();
  void BindPlayer();
+ EBBSBStage01Phase ResolveObjectivePhase(EBBSBStage01Phase Requested) const;
+ void CompleteObjective(ABBSBStage01Device* Device);
  void Advance(EBBSBStage01Phase NewPhase);
  void SaveProgress();
  void ApplyProgress();
