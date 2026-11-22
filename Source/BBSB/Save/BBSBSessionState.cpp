@@ -1,4 +1,5 @@
 #include "Save/BBSBSession.h"
+#include "World/BBSBPlacement.h"
 #include "UI/BBSBGuides.h"
 #include "BBSBCharacter.h"
 #include "Hunting/BBSBHunting.h"
@@ -9,6 +10,7 @@
 #include "Combat/BBSBCombat.h"
 #include "Combat/BBSBSequentialEncounter.h"
 #include "Interaction/BBSBInteraction.h"
+#include "Interaction/BBSBClimbable.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Stage01/BBSBStage01.h"
 #include "Components/CapsuleComponent.h"
@@ -124,7 +126,7 @@ bool UBBSBSessionSubsystem::Restore(UBBSBSessionSave* S)
  for(TActorIterator<ABBSBLootPickup> It(GetWorld());It;++It)It->Destroy();
  for(const auto& R:S->Loot)if(R.Entry.Item && R.Entry.Quantity>0 && !R.Location.ContainsNaN())
  {
-  const FTransform TF(R.Location);auto* L=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(ABBSBLootPickup::StaticClass(),TF,nullptr,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+  const FTransform TF(R.Location);auto* L=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBLootPickup::StaticClass()),TF,nullptr,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
   if(L) { L->Item=R.Entry.Item;L->Quantity=R.Entry.Quantity;L->WeaponPayload=R.Entry;L->bConcertoReward=R.bConcertoReward;L->FinishSpawning(TF); }
  }
  Move->StopMovementImmediately();Move->ClearAccumulatedForces();P->Combat->Health=FMath::Clamp(S->Health,1.f,P->Combat->MaximumHealth);
@@ -138,7 +140,16 @@ bool UBBSBSessionSubsystem::Restore(UBBSBSessionSave* S)
  else if(S->Movement==EBBSBSavedMovement::Ladder)
  {
   auto* Source=ResolveActor(GetWorld(),S->SurfaceActor);T->LadderRungSpacing=FMath::Clamp(S->LadderRungSpacing,20.f,50.f);
-  Restored=T->BeginLadder(Source,S->LadderBottom,S->LadderTop,S->LadderExit,S->SurfaceNormal);
+  FVector Bottom=S->LadderBottom,Top=S->LadderTop,Exit=S->LadderExit,Normal=S->SurfaceNormal;
+  if (const auto* Climbable = IsValid(Source) ? Source->FindComponentByClass<UBBSBClimbable>() : nullptr)
+  {
+   const FVector OldAxis=S->LadderTop-S->LadderBottom;
+   const float Along=OldAxis.IsNearlyZero() ? 0.f:FMath::Clamp(float(FVector::DotProduct(P->GetActorLocation()-S->LadderBottom,OldAxis)/OldAxis.SizeSquared()),0.f,1.f);
+   const auto Frame = Climbable->WorldFrame();
+   Bottom = Frame.Bottom; Top = Frame.Top; Exit = Frame.Exit; Normal = Frame.Outward;
+   if(!Bottom.Equals(S->LadderBottom,1.f) || !Top.Equals(S->LadderTop,1.f))P->SetActorLocation(FMath::Lerp(Bottom,Top,Along),false,nullptr,ETeleportType::TeleportPhysics);
+  }
+  Restored=T->BeginLadder(Source,Bottom,Top,Exit,Normal);
   if(Restored) { T->bLadderMounting=T->bLadderExiting=T->bLadderStepping=T->bLadderHopping=false;T->LadderStepFrom=T->LadderStepTo=T->LadderDistance;T->ParkourHandAlpha=1;T->ParkourPoseAlpha=1;T->ParkourIgnoreUntil=0; }
  }
  else if(S->Movement==EBBSBSavedMovement::WallSlide || S->Movement==EBBSBSavedMovement::LedgeHang)

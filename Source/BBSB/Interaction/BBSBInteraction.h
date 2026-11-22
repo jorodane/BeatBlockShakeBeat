@@ -20,6 +20,8 @@ class UCapsuleComponent;
 class UStaticMeshComponent;
 class UAnimSequence;
 class UTexture2D;
+class UBBSBClimbable;
+class UBBSBGrabbable;
 
 UENUM(BlueprintType)
 enum class EBBSBDialogueSpeaker : uint8
@@ -130,12 +132,17 @@ public:
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") TObjectPtr<AActor> QuickFocusActor;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") FText QuickFocusText;
  UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Quick interaction") FText QuickFocusName;
+ UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="Quick interaction") TObjectPtr<UTexture2D> QuickFocusIcon;
+ UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category="Quick interaction") bool bQuickFocusAvailable = false;
  UFUNCTION(BlueprintPure,Category="Quick interaction") bool IsQuickInteractable(AActor* Actor) const;
  UFUNCTION(BlueprintPure,Category="Quick interaction") FText QuickInteractionText(AActor* Actor) const;
  UFUNCTION(BlueprintPure,Category="Quick interaction") FText QuickInteractionName(AActor* Actor) const;
  UFUNCTION(BlueprintCallable,Category="Quick interaction") bool FindQuickInteraction(FHitResult& Hit) const;
  void UpdateQuickInteraction();
  void RegisterInteractionCandidate(AActor* Actor);
+ const TSet<TWeakObjectPtr<UBBSBClimbable>>& GetClimbableCandidates() const { return ClimbableCandidates; }
+ /** True when the current F target can also be used with a direct primary click. */
+ UFUNCTION(BlueprintPure, Category="Quick interaction") bool CanUsePrimaryOnQuickFocus() const;
  void DrawQuickInteraction(AHUD* HUD,UCanvas* Canvas) const;
 private:
  UPROPERTY(Transient) TObjectPtr<ABBSBCharacter> Player;
@@ -144,6 +151,7 @@ private:
  TWeakObjectPtr<AActor> PreviousViewTarget;
  bool bOwnMoveIgnore=false,bOwnLookIgnore=false,bCameraReturning=false;
  TSet<TWeakObjectPtr<AActor>> InteractionCandidates;
+ TSet<TWeakObjectPtr<UBBSBClimbable>> ClimbableCandidates;
  FDelegateHandle SpawnedHandle;
  double NextQuickScan=0;
  FVector CameraPlayerAnchor=FVector::ZeroVector,CameraPartnerAnchor=FVector::ZeroVector;
@@ -243,6 +251,7 @@ public:
  virtual void EndPlay(const EEndPlayReason::Type Reason) override;
  virtual float TakeDamage(float Amount,const FDamageEvent& Event,AController* Controller,AActor* Causer) override;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> Body;
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Grab") TObjectPtr<UBBSBGrabbable> Grabbable;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Object") FVector Size=FVector(32);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Object") FLinearColor Color=FLinearColor(.65f,.4f,.45f);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Object",meta=(ClampMin=".1")) float MassKg=2;
@@ -304,6 +313,7 @@ public:
  UFUNCTION(BlueprintCallable,Category="Puzzle safety") bool TryRecoverPuzzleObject();
  UFUNCTION(BlueprintPure,Category="Impact") float DamageForSpeed(float CentimetersPerSecond) const;
  UFUNCTION(BlueprintCallable,Category="Carry") bool ThrowForward();
+ UFUNCTION(BlueprintPure, Category="Carry") TArray<FVector> ForwardThrowPreviewPath() const;
  bool BeginManipulation();
  void EndManipulation(bool bFlick);
  void MoveFromPointer(FVector2D Delta);
@@ -311,6 +321,8 @@ public:
  virtual void BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector Point,FVector Normal) override;
  virtual void BunniarArrived_Implementation(ABBSBBunniarCompanion* Buddy) override;
  virtual void BunniarReleased_Implementation(ABBSBBunniarCompanion* Buddy) override;
+protected:
+ virtual FVector AdvanceThrowVelocity(FVector Velocity, float DeltaSeconds) const;
 private:
  UPROPERTY(Transient) TObjectPtr<UBBSBCarryMovementComponent> HeldMovement;
  TWeakObjectPtr<ABBSBBunniarCompanion> AttachedBuddy;
@@ -345,6 +357,7 @@ private:
  bool PuzzleVisibleToPlayer(const ABBSBCharacter* Player) const;
  bool GetCarryView(FVector& Location,FRotator& Rotation) const;
  bool GetCarryAim(FVector& Location,FRotator& Rotation,FVector& Direction) const;
+ bool GetForwardThrowVelocity(FVector& Velocity) const;
  void CaptureHoldAnchor(bool bKeepPosition);
  void ReleaseWithVelocity(FVector Velocity);
  void MoveHeld(FVector Desired,float DT);

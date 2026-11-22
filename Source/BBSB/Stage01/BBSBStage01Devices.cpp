@@ -1,6 +1,9 @@
 #include "Stage01/BBSBStage01.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
+#include "Interaction/BBSBClimbable.h"
+#include "Interaction/BBSBConditions.h"
+#include "Interaction/BBSBDraggable.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Caravan/BBSBBunniarAnimation.h"
 #include "Combat/BBSBCombatVisuals.h"
@@ -13,6 +16,7 @@
 #include "Components/SphereComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
@@ -20,6 +24,12 @@
 ABBSBStage01Device::ABBSBStage01Device()
 {
  PrimaryActorTick.bCanEverTick=true;SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("DeviceOrigin")));
+ Interaction = CreateDefaultSubobject<UBBSBDraggable>(TEXT("Interaction"));
+ Interaction->bExternalMotion = true;
+ Interaction->InteractType = NAME_None;
+ Climbable = CreateDefaultSubobject<UBBSBClimbable>(TEXT("Climbable"));
+ Climbable->bPrimaryInteraction = false;
+ Conditions = CreateDefaultSubobject<UBBSBConditionReceiver>(TEXT("Conditions"));
  // Preserve the subobject name for existing maps; it no longer represents an abstract cube handle.
  Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BrassHandle"));Body->SetupAttachment(RootComponent);Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
  Label=CreateDefaultSubobject<UTextRenderComponent>(TEXT("ActionLabel"));Label->SetupAttachment(RootComponent);Label->SetRelativeLocation(FVector(0,0,65));Label->SetWorldSize(18);Label->SetHorizontalAlignment(EHTA_Center);Label->SetTextRenderColor(FColor(239,225,200));Label->SetHiddenInGame(true);
@@ -38,31 +48,46 @@ ABBSBStage01Device::ABBSBStage01Device()
  }
  Tags.Add(TEXT("BBSBInteractable"));Tags.Add(TEXT("BBSBPhysicalInteraction"));
 }
+#if WITH_EDITOR
+void ABBSBStage01Device::PostDuplicate(EDuplicateMode::Type Mode)
+{
+ Super::PostDuplicate(Mode);if(Mode!=EDuplicateMode::PIE && !IsTemplate()) { bAutomaticNodeId=true;NodeId=GetFName(); }
+}
+void ABBSBStage01Device::PostEditImport()
+{ Super::PostEditImport();if(!IsTemplate()) { bAutomaticNodeId=true;NodeId=GetFName(); } }
+#endif
 void ABBSBStage01Device::OnConstruction(const FTransform& T)
-{ Super::OnConstruction(T);Label->SetText(Title);RebuildPhysicalPresentation(); }
+{ Super::OnConstruction(T);if(bAutomaticNodeId && GetWorld() && !GetWorld()->IsGameWorld())NodeId=GetFName();Label->SetText(Title);RebuildPhysicalPresentation(); }
 void ABBSBStage01Device::BeginPlay()
 {
- Super::BeginPlay();Closed.Reset();
- for(AActor* Target:Targets)
- {
-  Closed.Add(Target ? Target->GetActorTransform():FTransform::Identity);
-  if(Target)if(auto* C=Target->GetRootComponent())C->SetMobility(EComponentMobility::Movable);
- }
- RebuildPhysicalPresentation();RegisterPhysicalSurfaces();Label->SetText(Title);
+ Super::BeginPlay();
+ if(NodeId.IsNone())NodeId=GetFName();
+ if(!Director)for(TActorIterator<ABBSBStage01Director> It(GetWorld());It;++It) { Director=*It;break; }
+ RebuildPhysicalPresentation();CaptureSurfaceHomes();RegisterPhysicalSurfaces();Label->SetText(Title);
+ if(Director)Director->RegisterDevice(this);
 }
 bool ABBSBStage01Device::IsDirectDrag() const
 {
  return Kind==EBBSBStage01Node::CabinDoor || Kind==EBBSBStage01Node::LowerLadder || Kind==EBBSBStage01Node::Trapdoor ||
   Kind==EBBSBStage01Node::CargoLever || Kind==EBBSBStage01Node::LightLever || Kind==EBBSBStage01Node::ReadyGate;
 }
-void ABBSBStage01Device::SetSolved(bool Value) { bSolved=Value;Progress=Value ? 1.f:0.f; }
+void ABBSBStage01Device::SetSolved(bool Value)
+{
+ bSolved = Value;
+ Progress = Value ? 1.f : 0.f;
+ UpdateClimbAvailability();
+}
 void ABBSBStage01Device::Tick(float DT)
 {
  Super::Tick(DT);const float PreviousPainted=Painted;
  const float Goal=Kind==EBBSBStage01Node::CabinDoor ? Progress:bSolved ? 1.f:Progress;
  Painted=IsDirectDrag() ? FMath::FInterpTo(Painted,Goal,DT,24.f):FMath::FInterpConstantTo(Painted,Goal,DT,1.f/FMath::Max(.05f,MotionSeconds));
  if(FMath::Abs(Painted-Goal)<.0001f)Painted=Goal;
+ const float AttemptedProgress = Painted;
  UpdatePhysicalPresentation(true,PreviousPainted);if(!bSurfacesRegistered)RegisterPhysicalSurfaces();
+ UpdateClimbAvailability();
+ Interaction->SetExternalDrag(IsDirectDrag() && (!bSolved || Kind == EBBSBStage01Node::CabinDoor), Painted,
+   GetActorTransform().InverseTransformVector(DragMotion * Painted), !FMath::IsNearlyEqual(AttemptedProgress, Painted));
  // Record completion only after the actual geometry reaches the end of its track.
  if(IsDirectDrag() && !bSolved && Progress>=.9999f && Painted>=.9999f && !Use()) { Progress=0;bHeld=false; }
  if(auto* Cam=UGameplayStatics::GetPlayerCameraManager(this,0))Label->SetWorldRotation((Cam->GetCameraLocation()-Label->GetComponentLocation()).Rotation());
@@ -110,7 +135,9 @@ void ABBSBStage01Device::BunniarAttached_Implementation(ABBSBBunniarCompanion* B
   const float Sign=Buddy && Buddy->SurfaceComponent==DoorLeft ? -1.f:1.f;DragMotion=DoorAxis*DoorTravel*Sign;
  }
  else if(Kind==EBBSBStage01Node::CargoLever || Kind==EBBSBStage01Node::LightLever)DragMotion=-FVector::UpVector*90.f;
- else DragMotion=OpenOffset;
+ else DragMotion=MotionOffset();
+ Interaction->SetExternalDrag(IsDirectDrag() && (!bSolved || Kind == EBBSBStage01Node::CabinDoor), Painted,
+   GetActorTransform().InverseTransformVector(DragMotion * Painted));
  switch(Kind)
  {
  case EBBSBStage01Node::ToolCache:case EBBSBStage01Node::UtilityDoor:case EBBSBStage01Node::CargoButton:case EBBSBStage01Node::CargoLift:case EBBSBStage01Node::TrioExit:case EBBSBStage01Node::CaptainNote:case EBBSBStage01Node::BuyTea:case EBBSBStage01Node::BuyParts:case EBBSBStage01Node::TuneReward:case EBBSBStage01Node::Departure:Use();break;
@@ -119,31 +146,10 @@ void ABBSBStage01Device::BunniarAttached_Implementation(ABBSBBunniarCompanion* B
 }
 float ABBSBStage01Device::ProjectedDragProgress(ABBSBBunniarCompanion* Buddy,FVector2D Delta,FVector2D Total) const
 {
- const auto* PC=Cast<APlayerController>(UGameplayStatics::GetPlayerController(this,0));
- if(Buddy && PC && !DragMotion.IsNearlyZero())
- {
-  const FVector P0=Buddy->SurfacePoint-DragMotion*Painted,P1=P0+DragMotion,Goal=P0+DragMotion*Progress;
-  FVector2D A,B,G;FVector Eye;FRotator View;PC->GetPlayerViewPoint(Eye,View);
-  const float ZA=FVector::DotProduct(P0-Eye,View.Vector()),ZB=FVector::DotProduct(P1-Eye,View.Vector());
-  if(ZA>1.f && ZB>1.f && PC->ProjectWorldLocationToScreen(P0,A,true) && PC->ProjectWorldLocationToScreen(P1,B,true) && PC->ProjectWorldLocationToScreen(Goal,G,true) && (B-A).SizeSquared()>24.f*24.f)
-  {
-   int32 Width=0,Height=0;PC->GetViewportSize(Width,Height);
-   const float MaximumStroke=FMath::Max(RequiredDrag,FMath::Min(Width,Height)*.55f);
-   const FVector2D Stroke=B-A;
-   // A ladder lowered toward the camera can project far beyond the viewport.
-   // Keep that drag usable without requiring several screen lengths of motion.
-   if(Stroke.Size()>MaximumStroke)
-    return FMath::Clamp(Progress+float(FVector2D::DotProduct(Delta,Stroke.GetSafeNormal()))/FMath::Max(20.f,MaximumStroke),0.f,1.f);
-   const float U=FMath::Clamp(float(FVector2D::DotProduct(G+Delta-A,B-A)/(B-A).SizeSquared()),0.f,1.f);
-   // Perspective-correct progress makes the grabbed point follow the pointer on screen.
-   return FMath::Clamp(U*ZA/FMath::Max(1.f,ZB*(1.f-U)+U*ZA),0.f,1.f);
-  }
- }
+ const auto* PC = UGameplayStatics::GetPlayerController(this, 0);
  const bool Horizontal=Kind==EBBSBStage01Node::CabinDoor || Kind==EBBSBStage01Node::Trapdoor || Kind==EBBSBStage01Node::ReadyGate;
- FVector Eye;FRotator View;if(PC)PC->GetPlayerViewPoint(Eye,View);
- const float Projection=FVector::DotProduct(DragMotion,View.RotateVector(Horizontal ? FVector::RightVector:-FVector::UpVector));
- const float Sign=Projection<0.f ? -1.f:1.f;
- return FMath::Clamp(Progress+Sign*(Horizontal ? float(Delta.X):float(Delta.Y))/FMath::Max(20.f,RequiredDrag),0.f,1.f);
+ const FVector PointAtZero = (Buddy ? Buddy->SurfacePoint : GetActorLocation()) - DragMotion * Painted;
+ return UBBSBDraggable::ProjectLinearDrag(PC, PointAtZero, DragMotion, Progress, Delta, RequiredDrag, Horizontal);
 }
 void ABBSBStage01Device::BunniarDragged_Implementation(ABBSBBunniarCompanion* Buddy,FVector2D Delta,FVector2D Total)
 {
@@ -157,9 +163,17 @@ void ABBSBStage01Device::BunniarReleased_Implementation(ABBSBBunniarCompanion* B
 { bHeld=false; /* A partly opened prop stays where it was released; another grab resumes it. */ }
 bool ABBSBStage01Device::Use()
 {
- if(!Director)return false;
- if(Kind==EBBSBStage01Node::Trapdoor && bSolved && Painted>.98f)return Director->MoveAlongLadder(Destination,1.5f,60,GetActorLocation());
+ if(!Director)
+ {
+  if(Kind==EBBSBStage01Node::ClimbLadder || (Kind==EBBSBStage01Node::LowerLadder && bSolved))return MountLadder();
+  SetSolved(true);return true;
+ }
+ if(Kind==EBBSBStage01Node::Trapdoor && bSolved && Painted>.98f)return Director->MoveAlongLadder(DestinationPoint(),1.5f,60,GetActorLocation());
  return Director->UseDevice(this);
+}
+void ABBSBStage01NPC::BeginPlay()
+{
+ Super::BeginPlay();if(!Director)for(TActorIterator<ABBSBStage01Director> It(GetWorld());It;++It) { Director=*It;break; }
 }
 bool ABBSBStage01NPC::BunniarQuickUse_Implementation(ABBSBBunniarCompanion* Buddy) { if(Director)Director->TalkTo(this);return true; }
 void ABBSBStage01NPC::BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector P,FVector N) { if(Director)Director->TalkTo(this);Super::BunniarAttached_Implementation(Buddy,P,N); }
@@ -237,12 +251,16 @@ void ABBSBStage01CarrySinger::TickThrowGlide(float DT)
  if(!bThrowGliding && (FMath::Abs(Velocity.Z)>50.f || Velocity.SizeSquared2D()>FMath::Square(150.f)) && !HasGlideSupport())BeginThrowGlide();
  if(!bThrowGliding)return;
  if(Velocity.Z<=0.f && HasGlideSupport()) { EndThrowGlide(true);return; }
+ Body->SetPhysicsLinearVelocity(AdvanceThrowVelocity(Velocity, DT));
+}
+FVector ABBSBStage01CarrySinger::AdvanceThrowVelocity(FVector Velocity, float DT) const
+{
  const float Drag=FMath::Exp(-FMath::Max(.1f,ThrowGlideDrag)*FMath::Max(0.f,DT));Velocity.X*=Drag;Velocity.Y*=Drag;
  // An upward throw loses its excess speed just like a horizontal throw.
  // Keep the existing gentle terminal descent instead of damping it to a hover.
  if(Velocity.Z>0.f)Velocity.Z*=Drag;
  Velocity.Z=FMath::FInterpConstantTo(Velocity.Z,-FMath::Max(10.f,ThrowGlideFallSpeed),DT,FMath::Max(10.f,ThrowGlideVerticalAcceleration));
- Body->SetPhysicsLinearVelocity(Velocity);
+ return Velocity;
 }
 void ABBSBStage01CarrySinger::Tick(float DT)
 {
@@ -253,25 +271,41 @@ void ABBSBStage01CarrySinger::Tick(float DT)
 
 FVector ABBSBStage01Device::LadderNormal() const
 {
- const FVector N=LadderOutward.IsNearlyZero() ? (GetActorLocation()-Destination).GetSafeNormal2D():LadderOutward.GetSafeNormal2D();
+ const FVector N=LadderOutward.IsNearlyZero() ? (GetActorLocation()-DestinationPoint()).GetSafeNormal2D():(bLocalPlacement ? GetActorTransform().TransformVectorNoScale(LadderOutward):LadderOutward).GetSafeNormal2D();
  return N.IsNearlyZero() ? -GetActorForwardVector():N;
 }
 FVector ABBSBStage01Device::LadderBottomPoint() const
 {
- return LadderBottom.IsNearlyZero() ? GetActorLocation()+LadderNormal()*50.f-FVector::UpVector*55.f:LadderBottom;
+ return LadderBottom.IsNearlyZero() ? GetActorLocation()+LadderNormal()*50.f-FVector::UpVector*55.f:bLocalPlacement ? GetActorTransform().TransformPosition(LadderBottom):LadderBottom;
 }
 FVector ABBSBStage01Device::LadderTopPoint() const
 {
- return LadderTop.IsNearlyZero() ? Destination+LadderNormal()*120.f:LadderTop;
+ return LadderTop.IsNearlyZero() ? DestinationPoint()+LadderNormal()*120.f:bLocalPlacement ? GetActorTransform().TransformPosition(LadderTop):LadderTop;
 }
 bool ABBSBStage01Device::MountLadder()
 {
- if(!Director || (Kind==EBBSBStage01Node::LowerLadder && (!bSolved || Painted<.98f)))return false;
- auto* P=Director->PlayerCharacter();if(!P || !P->Traversal || !P->Traversal->BeginLadder(this,LadderBottomPoint(),LadderTopPoint(),Destination,LadderNormal()))return false;
- P->Traversal->LadderRungSpacing=FMath::Clamp(RungSpacing,20.f,50.f);
- // This is a new interaction/automatic grab. Session restoration uses
- // BeginLadder directly and retains the saved attached pose until new input.
- P->Traversal->TryLedgeClimb();return true;
+ auto* P=Director ? Director->PlayerCharacter():Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0));
+ SyncClimbableFrame();
+ return Climbable->TryMount(P);
+}
+
+void ABBSBStage01Device::UpdateClimbAvailability()
+{
+ const bool bReady = Kind == EBBSBStage01Node::ClimbLadder || (Kind == EBBSBStage01Node::LowerLadder && bSolved && Painted >= .98f);
+ Climbable->SetRouteReady(bReady);
+}
+
+void ABBSBStage01Device::SyncClimbableFrame()
+{
+ UpdateClimbAvailability();
+ if (Kind != EBBSBStage01Node::ClimbLadder && Kind != EBBSBStage01Node::LowerLadder) return;
+ const auto Frame = GetActorTransform();
+ Climbable->LocalFrame.Bottom = Frame.InverseTransformPosition(LadderBottomPoint());
+ Climbable->LocalFrame.Top = Frame.InverseTransformPosition(LadderTopPoint());
+ Climbable->LocalFrame.Exit = Frame.InverseTransformPosition(DestinationPoint());
+ Climbable->LocalFrame.Outward = Frame.InverseTransformVectorNoScale(LadderNormal());
+ Climbable->RungSpacing = RungSpacing;
+ Climbable->GripDepth = Kind == EBBSBStage01Node::LowerLadder ? 29.f : 32.f;
 }
 
 float ABBSBStage01Device::LadderRetractDistance() const
@@ -290,20 +324,20 @@ void ABBSBStage01Device::RebuildLadderGeometry()
  LadderGeometry->SetVisibility(Ladder);LadderExtension->SetVisibility(Ladder && Kind==EBBSBStage01Node::LowerLadder);
  LadderGeometry->SetCollisionEnabled(Ladder ? ECollisionEnabled::QueryOnly:ECollisionEnabled::NoCollision);
  LadderExtension->SetCollisionEnabled(Ladder && Kind==EBBSBStage01Node::LowerLadder ? ECollisionEnabled::QueryOnly:ECollisionEnabled::NoCollision);
+ SyncClimbableFrame();
  if(!Ladder)return;
- const FVector B=LadderBottomPoint(),T=LadderTopPoint(),N=LadderNormal(),Axis=(T-B).GetSafeNormal();
- const FVector Side=FVector::CrossProduct(FVector::UpVector,-N).GetSafeNormal();const float Spacing=FMath::Clamp(RungSpacing,20.f,50.f);
- const FQuat Frame=FRotationMatrix::MakeFromYZ(Side,Axis).ToQuat();const float Length=FVector::Distance(B,T),Start=-96.f,End=Length-20.f,Joint=(Start+End)*.5f;
- const FVector Grip=B-N*32.f+FVector::UpVector*20.f;
- auto Section=[&](UInstancedStaticMeshComponent* C,float From,float To,FVector Layer)
- {
-  for(float Sign:{-1.f,1.f})C->AddInstance(FTransform(Frame,Grip+Axis*((From+To)*.5f)+Side*(Sign*26.f)+Layer,FVector(.08f,.08f,(To-From)/100.f)),true);
-  for(float D=FMath::CeilToFloat(From/Spacing)*Spacing;D<=To;D+=Spacing)C->AddInstance(FTransform(Frame,Grip+Axis*D+Layer,FVector(.10f,.60f,.08f)),true);
-  C->SetMaterial(0,LoadObject<UMaterialInterface>(nullptr,TEXT("/Game/BBSB/Stage01/Materials/MI_Brass.MI_Brass")));
- };
+ const auto Frame = Climbable->WorldFrame();
+ const float Spacing = FMath::Clamp(RungSpacing, 20.f, 50.f);
+ const float Start = -96.f, End = FVector::Distance(Frame.Bottom, Frame.Top) - 20.f, Joint = (Start + End) * .5f;
+ auto* Material = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/BBSB/Stage01/Materials/MI_Brass.MI_Brass"));
+ LadderGeometry->SetMaterial(0, Material);
  if(Kind==EBBSBStage01Node::LowerLadder)
- { Section(LadderGeometry,Joint-Spacing,End,FVector::ZeroVector);Section(LadderExtension,Start,Joint+Spacing,N*3.f); }
- else Section(LadderGeometry,Start,End,FVector::ZeroVector);
+ {
+  UBBSBClimbable::AddRungs(LadderGeometry, Frame, Spacing, Joint - Spacing, End);
+  UBBSBClimbable::AddRungs(LadderExtension, Frame, Spacing, Start, Joint + Spacing, Frame.Outward * 3.f);
+  LadderExtension->SetMaterial(0, Material);
+ }
+ else UBBSBClimbable::AddRungs(LadderGeometry, Frame, Spacing, Start, End);
  UpdatePhysicalPresentation();
 }
 

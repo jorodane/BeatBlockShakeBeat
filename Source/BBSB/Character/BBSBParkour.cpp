@@ -1,4 +1,5 @@
 #include "Character/BBSBTraversal.h"
+#include "Interaction/BBSBClimbable.h"
 #include "BBSBCharacter.h"
 #include "Caravan/BBSBCaravan.h"
 #include "Caravan/BBSBBunniarSurface.h"
@@ -348,7 +349,7 @@ bool UBBSBTraversalComponent::BeginLadderTopClimb()
  const float PelvisZ=Character->GetMesh()->GetSocketLocation(TEXT("pelvis")).Z-From.Z;
  // Restore the ladder's saved movement before the mantle captures its own.
  // Otherwise the temporary flying/zero-air-control settings would leak out.
- CancelParkour();BeginParkour(EBBSBParkourMode::Mantle);
+ CancelParkour(true);BeginParkour(EBBSBParkourMode::Mantle);
  ParkourSurface=Floor.GetComponent();LedgePoint=Edge;LedgeNormal=Normal;LedgeTopNormal=Floor.ImpactNormal.GetSafeNormal();ClimbStartPelvisZ=PelvisZ;
  ParkourEntryVelocity=EntryVelocity;ParkourFrom=From;ParkourJumpStart=Start;ParkourTo=To;ParkourApex=Apex;ParkourJumpSeconds=Seconds;
  ParkourJumpPreparation=FMath::Max(0.f,LedgePopPreparationSeconds);ParkourDuration=ParkourJumpPreparation+Seconds;
@@ -445,6 +446,7 @@ void UBBSBTraversalComponent::FinishParkourJump()
   Character->AddMovementInput(Intent.GetSafeNormal2D(),Intent.Size());
  }
  bAirJumpUsed=false;LastFallSpeed=0;bWasFalling=false;ParkourIgnoreUntil=GetWorld()->GetTimeSeconds()+.2f;
+ EndClimb(true);
 }
 void UBBSBTraversalComponent::RestoreParkourRunExit()
 {
@@ -458,9 +460,10 @@ void UBBSBTraversalComponent::RestoreParkourMovement(bool Grounded)
  Move->BrakingDecelerationFalling=ParkourSavedFallingBraking;Move->FallingLateralFriction=ParkourSavedFallingFriction;
  Move->GravityScale=BaseGravityScale;Move->SetMovementMode(Grounded ? MOVE_Walking:MOVE_Falling);
 }
-void UBBSBTraversalComponent::CancelParkour()
+void UBBSBTraversalComponent::CancelParkour(bool bKeepClimb)
 {
  if(!IsParkourActive()) return;LadderSource=nullptr;bLadderStepping=bLadderHopping=bLadderSliding=bLadderMounting=bLadderExiting=false;bParkourJumpPlanned=bParkourJumping=false;ParkourMode=EBBSBParkourMode::None;ParkourHandAlpha=ClimbFootAlpha=0;bClimbQueued=false;RestoreParkourMovement(false);ParkourSurface.Reset();ParkourIgnoreUntil=GetWorld()->GetTimeSeconds()+ParkourRegrabDelay;
+ if (!bKeepClimb) EndClimb(false);
 }
 bool UBBSBTraversalComponent::DropParkour()
 {
@@ -534,7 +537,12 @@ void UBBSBTraversalComponent::TickParkour(float DT)
  if(!IsDashWallRecoveryActive() && !Intent.IsNearlyZero() && FVector::DotProduct(Intent,LedgeNormal)>.35f) { DropParkour();return; }
  ParkourAge=GetWorld()->GetTimeSeconds()-ParkourStartedAt;
  if(ParkourMode==EBBSBParkourMode::WallSlide) { Character->ConsumeMovementInputVector();TickWallSlide(DT);return; }
- if(bParkourJumpPlanned) { TickParkourJump(DT);return; }
+ if (bParkourJumpPlanned)
+ {
+  TickParkourJump(DT);
+  if (auto* Climbable = ActiveClimbable.Get()) Climbable->NotifyClimbStay(Character, 1.f, EBBSBClimbMotion::Mantle);
+  return;
+ }
  if(ParkourMode!=EBBSBParkourMode::LedgeHang) { CancelParkour();return; }
  auto* Move=Character->GetCharacterMovement();Move->GravityScale=0;Move->Velocity=FVector::ZeroVector;Character->ConsumeMovementInputVector();
  const FTransform Frame=ParkourSurface->GetComponentTransform();LedgePoint=Frame.TransformPosition(LedgeLocalPoint);LedgeNormal=Frame.TransformVectorNoScale(LedgeLocalNormal).GetSafeNormal2D();ParkourTo=Frame.TransformPosition(LedgeLocalStand);LedgeTopNormal=Frame.TransformVectorNoScale(LedgeLocalTopNormal).GetSafeNormal();

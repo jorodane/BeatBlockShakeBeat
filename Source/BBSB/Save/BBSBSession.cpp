@@ -1,4 +1,5 @@
 #include "Save/BBSBSession.h"
+#include "World/BBSBPlacement.h"
 #include "UI/BBSBGuides.h"
 #include "Stage01/BBSBOpening.h"
 #include "BBSBCharacter.h"
@@ -56,7 +57,7 @@ bool UBBSBSessionSubsystem::BindPlayer()
  {
   bNewGamePending=false;bLoading=false;bGameStarted=true;LastStateHash.Empty();SaveNow(TEXT("처음부터"),true);
   for(TActorIterator<ABBSBStage01Director> It(W);It;++It)
-  { auto* Scene=W->SpawnActor<ABBSBStage01Opening>();if(!Scene->Start(*It,P))Scene->Destroy();break; }
+  { auto* Scene=W->SpawnActor<ABBSBStage01Opening>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBStage01Opening::StaticClass()));if(!Scene->Start(*It,P))Scene->Destroy();break; }
  }
  else if(!bGameStarted)OpenMenu();
  return true;

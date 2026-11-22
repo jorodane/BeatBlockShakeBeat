@@ -6,7 +6,8 @@
 #include "UI/BBSBPaperWidget.h"
 #include "BBSBGuides.generated.h"
 class AHUD;class UCanvas;class UPrimitiveComponent;class ABBSBCharacter;
-class UButton;class UVerticalBox;class UTextBlock;class UImage;class UTexture2D;class APlayerController;
+class UVerticalBox;class UTextBlock;class UImage;class UTexture2D;class APlayerController;
+class USizeBox;class UScrollBox;
 
 USTRUCT(BlueprintType)
 struct FBBSBGuideStep
@@ -24,7 +25,7 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite) FText Title;
  UPROPERTY(EditAnywhere,BlueprintReadWrite) FText Category;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,meta=(MultiLine=true)) FText Description;
- /** Optional replacement for the native illustrated example. */
+ /** Tutorial artwork shown above the instructions. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite) TObjectPtr<UTexture2D> Illustration;
  UPROPERTY(EditAnywhere,BlueprintReadWrite) TArray<FBBSBGuideStep> Steps;
 };
@@ -85,15 +86,6 @@ private:
 };
 
 UCLASS()
-class BBSB_API UBBSBGuideIllustration : public UUserWidget
-{
- GENERATED_BODY()
-public:
- FName GuideId;
-protected:
- virtual int32 NativePaint(const FPaintArgs& Args,const FGeometry& G,const FSlateRect& Culling,FSlateWindowElementList& E,int32 Layer,const FWidgetStyle& Style,bool Enabled) const override;
-};
-UCLASS()
 class BBSB_API UBBSBGuideClick : public UObject
 {
  GENERATED_BODY()
@@ -109,21 +101,25 @@ class BBSB_API UBBSBGuideNotebook : public UBBSBPaperWidget
 public:
  UPROPERTY() TObjectPtr<UBBSBGuideSubsystem> Guides;
  void Refresh();
+ void SetNotesMode(bool bOpenAsNotes) { bNotesMode = bOpenAsNotes; }
+ bool IsNotesMode() const { return bNotesMode; }
 protected:
  virtual TSharedRef<SWidget> RebuildWidget() override;
- virtual FReply NativeOnKeyDown(const FGeometry& G,const FKeyEvent& E) override;
+ virtual FReply NativeOnPreviewKeyDown(const FGeometry& G,const FKeyEvent& E) override;
  virtual FReply NativeOnKeyUp(const FGeometry& G,const FKeyEvent& E) override;
  virtual FReply NativeOnMouseButtonUp(const FGeometry& G,const FPointerEvent& E) override;
 private:
+ UPROPERTY() TObjectPtr<USizeBox> PanelSize;
+ UPROPERTY() TObjectPtr<USizeBox> JournalNavigation;
+ UPROPERTY() TObjectPtr<UTextBlock> JournalHeader;
  UPROPERTY() TObjectPtr<UVerticalBox> List;
- UPROPERTY() TObjectPtr<UVerticalBox> Steps;
  UPROPERTY() TObjectPtr<UTextBlock> Title;
- UPROPERTY() TObjectPtr<UTextBlock> Category;
- UPROPERTY() TObjectPtr<UTextBlock> Description;
- UPROPERTY() TObjectPtr<UTextBlock> Count;
+ UPROPERTY() TObjectPtr<USizeBox> ArtFrame;
  UPROPERTY() TObjectPtr<UImage> Artwork;
- UPROPERTY() TObjectPtr<UBBSBGuideIllustration> Diagram;
- UPROPERTY() TObjectPtr<UButton> CloseButton;
+ UPROPERTY() TObjectPtr<UScrollBox> DetailScroll;
+ UPROPERTY() TObjectPtr<UTextBlock> Description;
+ UPROPERTY() TObjectPtr<UVerticalBox> Steps;
+ bool bNotesMode = false;
  UPROPERTY() TArray<TObjectPtr<UBBSBGuideClick>> Clicks;
  UFUNCTION() void Dismiss();
 };

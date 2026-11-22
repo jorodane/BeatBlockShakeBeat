@@ -1,4 +1,5 @@
 #include "Caravan/BBSBCaravan.h"
+#include "World/BBSBPlacement.h"
 #include "Engine/SkeletalMesh.h"
 #include "UI/BBSBPaperTheme.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
@@ -8,6 +9,7 @@
 #include "Character/BBSBTraversal.h"
 #include "Character/BBSBRespawn.h"
 #include "Interaction/BBSBInteraction.h"
+#include "Interaction/BBSBDraggable.h"
 #include "BBSB.h"
 #include "Combat/BBSBCombatVisuals.h"
 #include "Components/StaticMeshComponent.h"
@@ -70,7 +72,12 @@ void ABBSBBunniarDevice::Tick(float DT)
  BBSBCombatVisuals::Tint(Body,bPowered ? FLinearColor(.18f,.55f,.46f):bLatched ? Caravan::Cream:Caravan::Gold);
  if (APlayerCameraManager* Cam=UGameplayStatics::GetPlayerCameraManager(this,0)) Label->SetWorldRotation((Cam->GetCameraLocation()-Label->GetComponentLocation()).Rotation());
 }
-bool ABBSBBunniarDevice::Use() { return Director && Director->InteractWith(this); }
+bool ABBSBBunniarDevice::Use()
+{
+ if(!Director)Director=Caravan::Director(GetWorld());
+ if(Director)return Director->InteractWith(this);
+ StartPosition=GetActorLocation();PoweredAt=GetWorld()->GetTimeSeconds();bPowered=true;return true;
+}
 FVector ABBSBBunniarDevice::AttachmentPoint() const { return GetActorLocation()+(Device==EBBSBBunniarDevice::Lift ? FVector(-210,-230,70):FVector(0,0,85)); }
 void ABBSBBunniarDevice::SetFocused(bool bFocused) { Body->SetRenderCustomDepth(bFocused); Body->SetCustomDepthStencilValue(bFocused ? 2:0); }
 
@@ -203,18 +210,19 @@ void ABBSBBunniarCompanion::Tick(float DT)
    if(CarryFlight && !CarryContact && T-SurfaceTransitAt>FMath::Max(.5f,InteractionFlightSeconds)) { ReleaseSurface();return; }
    if(!Reached)
    {
-    const auto* Prop=Cast<ABBSBCarryObject>(SurfaceComponent->GetOwner());
-    const bool Holding=Prop && Prop->bCarried;
+    const auto* Drag=Cast<UBBSBDraggable>(UBBSBInteractable::Find(SurfaceRecipient.Get()));
+    const bool Holding=(Carry && Carry->bCarried) || (bSurfaceArrived && Drag && Drag->IsDragging());
     SurfaceArrivalAlpha=Holding ? 1.f:0.f;
-    // Clamp the companion against scenery without dropping an already-held
-    // object. Release/throw and the existing range leash own that decision.
+    // A blocked sweep clamps the visual pose. Once a drag has arrived, its
+    // input, range and interaction conditions still govern when to release.
     if(!Following && !Holding)ReleaseSurface();
     if(!CarryContact)return;
    }
    if(!bAimFollowing && !bSurfaceTargetPending && !bSurfaceArrived && (CarryContact || (Transit>=1 && (!CarryFlight || GetActorLocation().Equals(Goal,2.f)))))
    {
     bSurfaceArrived=true;
-    if(AActor* SurfaceOwner=BBSBBunniarSurface::Resolve(SurfaceComponent->GetOwner());SurfaceOwner) IBBSBBunniarSurface::Execute_BunniarArrived(SurfaceOwner,this);
+    if(AActor* SurfaceOwner = SurfaceRecipient.Get(); SurfaceOwner && SurfaceOwner->Implements<UBBSBBunniarSurface>())
+     IBBSBBunniarSurface::Execute_BunniarArrived(SurfaceOwner, this);
     if(CarryContact && Carry->bCarried)
     {
      // Stop the body on actual touch; ease the small visual contact correction.
@@ -424,7 +432,8 @@ void ABBSBCaravanStage::BeginPlay()
  if (!Inventory) Inventory=NewObject<UBBSBCaravanSave>(this);
  auto Device=[&](EBBSBBunniarDevice Kind,FVector Location,const TCHAR* Name)
  {
-  auto* D=GetWorld()->SpawnActor<ABBSBBunniarDevice>(P(Location),FRotator::ZeroRotator);
+  const FName Preset(*FString::Printf(TEXT("BunniarDevice_%s"),*StaticEnum<EBBSBBunniarDevice>()->GetNameStringByValue(int64(Kind))));
+  auto* D=GetWorld()->SpawnActor<ABBSBBunniarDevice>(UBBSBPlacementAuthoringTools::ResolvePlacementPreset(Preset,ABBSBBunniarDevice::StaticClass()),P(Location),GetActorRotation());
   D->Device=Kind; D->DeviceLabel=Name; D->Director=this; D->StartPosition=P(Location); D->OnConstruction(D->GetActorTransform()); Devices.Add(D); return D;
  };
  auto* Book=Device(EBBSBBunniarDevice::Bookstand,FVector(4200,180,300),TEXT("책상 기록 / 버니아 부착"));
@@ -435,12 +444,12 @@ void ABBSBCaravanStage::BeginPlay()
  Device(EBBSBBunniarDevice::UtilityShop,FVector(0,150,300),TEXT("6호차 현생단 상점"));
  Device(EBBSBBunniarDevice::CaptainDesk,FVector(10000,150,300),TEXT("상단장의 연습 기록 / 버니아 부착"));
  Device(EBBSBBunniarDevice::Departure,FVector(10400,-400,300),TEXT("상단 운행표 / 버니아 부착"));
- Buddy=GetWorld()->SpawnActor<ABBSBBunniarCompanion>(Book->AttachmentPoint(),FRotator::ZeroRotator); Buddy->Director=this;
+ Buddy=GetWorld()->SpawnActor<ABBSBBunniarCompanion>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBBunniarCompanion::StaticClass()),Book->AttachmentPoint(),FRotator::ZeroRotator); Buddy->Director=this;
  Buddy->BandageA->SetVisibility(true); Buddy->BandageB->SetVisibility(true);
  auto Boss=[&](bool Final)
  {
   FActorSpawnParameters Params; Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-  auto* B=GetWorld()->SpawnActor<ABBSBCaravanPerformer>(P(Final ? FVector(8000,-3200,300):FVector(6000,0,300)),FRotator::ZeroRotator,Params);
+  auto* B=GetWorld()->SpawnActor<ABBSBCaravanPerformer>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBCaravanPerformer::StaticClass()),P(Final ? FVector(8000,-3200,300):FVector(6000,0,300)),FRotator::ZeroRotator,Params);
   B->bCaptain=Final; B->MaximumHealth=B->Health=Final ? 210.f:135.f; B->ShotDamage=Final ? 6.f:4.f;
   B->EncounterID=Final ? 4102:4101; B->EnemyName=Final ? FName(TEXT("상단장 · 임시 모델")):FName(TEXT("삑사리를 즐기는 버니아"));
   B->MainPattern=B->AuthoredPattern=Final ? EBBSBInkPattern::Curve:EBBSBInkPattern::Tap;
@@ -607,7 +616,7 @@ bool ABBSBCaravanStage::StartEncounter(bool Final)
  if (!Player || Player->Combat->IsStageLocked() || OpenShop || Buddy->bSurfaceAttached) return false;
  if (Final ? Step!=EBBSBCaravanStep::SearchCaptain || !bReadCaptainNote : Step!=EBBSBCaravanStep::Rooftops || !bBridgeOpen) return false;
  ABBSBCaravanPerformer* Boss=Final ? Captain.Get():Miniboss.Get(); if (!Boss || Boss->bDefeated) return false;
- auto* S=GetWorld()->SpawnActor<ABBSBCombatStage>(); S->SetExperiment(Final ? 1:0); S->BPM=StageBPM; S->ParryDistance=Final ? 570.f:430.f; S->RingRadius=160;
+ auto* S=GetWorld()->SpawnActor<ABBSBCombatStage>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBCombatStage::StaticClass())); S->SetExperiment(Final ? 1:0); S->BPM=StageBPM; S->ParryDistance=Final ? 570.f:430.f; S->RingRadius=160;
  if (!S->Initialize(Player->Combat,Boss)) { S->Destroy(); return false; }
  Encounter=S; Boss->bEncounterEnabled=true; Player->Combat->AttachStage(S);
  Step=Final ? EBBSBCaravanStep::CaptainDuel:EBBSBCaravanStep::Miniboss;

@@ -44,6 +44,10 @@ class BBSB_API ABBSBRespawnPoint : public AActor,public IBBSBBunniarSurface
  GENERATED_BODY()
 public:
  ABBSBRespawnPoint();
+#if WITH_EDITOR
+ virtual void PostDuplicate(EDuplicateMode::Type Mode) override;
+ virtual void PostEditImport() override;
+#endif
  virtual void BeginPlay() override;
  virtual void Tick(float DT) override;
  virtual void OnConstruction(const FTransform& Transform) override;

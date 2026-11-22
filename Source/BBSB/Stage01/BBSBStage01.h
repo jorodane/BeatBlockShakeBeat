@@ -4,9 +4,13 @@
 #include "Puzzle/BBSBPuzzleField.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Combat/BBSBCombat.h"
+#include "World/BBSBPlacement.h"
 #include "BBSBStage01.generated.h"
 class ABBSBCharacter;class ABBSBStage01Director;class ABBSBStage01Singer;class ABBSBStage01CarrySinger;class ABBSBRespawnPoint;
 class UBBSBItemDefinition;class UAudioComponent;class USoundWaveProcedural;class USpotLightComponent;class ACameraActor;
+class UBBSBClimbable;
+class UBBSBConditionReceiver;
+class UBBSBDraggable;
 UENUM(BlueprintType)
 enum class EBBSBStage01Phase : uint8 { Opening, Outside, FindTools, ReturnToMerchant, ShopBattle, Cargo, Rooftops, Trio, Restock, FindLight, ReturnForReady, ApproachCaptain, Captain, Complete };
 UENUM(BlueprintType)
@@ -32,9 +36,16 @@ class BBSB_API ABBSBStage01Device : public AActor,public IBBSBBunniarSurface
  GENERATED_BODY()
 public:
  ABBSBStage01Device();
+#if WITH_EDITOR
+ virtual void PostDuplicate(EDuplicateMode::Type Mode) override;
+ virtual void PostEditImport() override;
+#endif
  virtual void BeginPlay() override;
  virtual void Tick(float DT) override;
  virtual void OnConstruction(const FTransform& Transform) override;
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction") TObjectPtr<UBBSBDraggable> Interaction;
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Interaction") TObjectPtr<UBBSBClimbable> Climbable;
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Condition") TObjectPtr<UBBSBConditionReceiver> Conditions;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<UStaticMeshComponent> Body;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<class UInstancedStaticMeshComponent> LadderGeometry;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<class UInstancedStaticMeshComponent> LadderExtension;
@@ -49,15 +60,24 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") EBBSBStage01Node Kind=EBBSBStage01Node::CabinDoor;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FName NodeId;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FText Title;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TArray<TObjectPtr<AActor>> Targets;
+ /** Legacy level references are retained until Convert To Local Placement is used. */
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement|Legacy") TArray<TObjectPtr<AActor>> Targets;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement") bool bLocalPlacement=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement") bool bAutomaticNodeId=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement|Geometry") TArray<FBBSBDeviceSurface> SurfaceParts;
+ UPROPERTY(Transient,VisibleAnywhere,BlueprintReadOnly,Category="Placement|Geometry") TArray<TObjectPtr<UStaticMeshComponent>> PlacementSurfaces;
+ UFUNCTION(BlueprintCallable,CallInEditor,Category="Placement") void ConvertToLocalPlacement();
+ UFUNCTION(BlueprintPure,Category="Placement") FVector DestinationPoint() const;
+ UFUNCTION(BlueprintPure,Category="Placement") FVector MotionOffset() const;
+ UFUNCTION(BlueprintPure,Category="Placement") TArray<USceneComponent*> SurfaceFrames() const;
  /** Fixed structure containing the sliding-door pockets. This exception applies
   * only to the door leaves, never to characters or props pushed by the door. */
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01|Collision") TArray<TObjectPtr<AActor>> DoorTrackHousing;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector OpenOffset=FVector(0,400,0);
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector Destination;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FVector Destination;
  /** Capsule-centre endpoints. Zero uses the authored device/destination fallback. */
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder") FVector LadderBottom;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder") FVector LadderTop;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(MakeEditWidget)) FVector LadderBottom;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(MakeEditWidget)) FVector LadderTop;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder") FVector LadderOutward;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="20",ClampMax="50",Units="cm")) float RungSpacing=35.f;
  UFUNCTION(BlueprintCallable) bool MountLadder();
@@ -88,6 +108,11 @@ private:
  bool IsDirectDrag() const;
  void UpdatePhysicalPresentation(bool bSweepMotion=false,float PreviousPainted=0);
  void RegisterPhysicalSurfaces();
+ void BuildPlacementSurfaces();
+ void CaptureSurfaceHomes();
+ void SyncClimbableFrame();
+ void UpdateClimbAvailability();
+ FTransform SurfaceHome(int32 Index) const;
  float LadderRetractDistance() const;
  float ProjectedDragProgress(ABBSBBunniarCompanion* Buddy,FVector2D Delta,FVector2D Total) const;
 };
@@ -98,6 +123,7 @@ class BBSB_API ABBSBStage01NPC : public ABBSBInteractionNPC
 public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBStage01Director> Director;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") int32 CarNumber=6;
+ virtual void BeginPlay() override;
  virtual bool BunniarQuickUse_Implementation(ABBSBBunniarCompanion* Buddy) override;
  virtual void BunniarAttached_Implementation(ABBSBBunniarCompanion* Buddy,FVector P,FVector N) override;
 };
@@ -108,12 +134,19 @@ class BBSB_API ABBSBStage01Singer : public ABBSBInkEnemy
  GENERATED_BODY()
 public:
  ABBSBStage01Singer();
+#if WITH_EDITOR
+ virtual void PostDuplicate(EDuplicateMode::Type Mode) override;
+ virtual void PostEditImport() override;
+#endif
  virtual void BeginPlay() override;
  virtual void Tick(float DT) override;
  virtual float TakeDamage(float Amount,const FDamageEvent& Event,AController* Controller,AActor* Causer) override;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TObjectPtr<USkeletalMeshComponent> SingerMesh;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBStage01Director> Director;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBStage01CarrySinger> Carrier;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement") bool bSpawnCarrierIfMissing=false;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement") TSubclassOf<ABBSBStage01CarrySinger> CarrierClass;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FTransform CarrierOffset=FTransform(FVector(0,0,-25));
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") EBBSBStage01Voice Voice=EBBSBStage01Voice::Ambient;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FName SingerId;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") bool bParticipatesInStory=true;
@@ -128,6 +161,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) int32 SongShots=0;
  UFUNCTION(BlueprintCallable) void SilenceFor(float Seconds);
  UFUNCTION(BlueprintCallable) void Rearm();
+ virtual void EndPlay(EEndPlayReason::Type Reason) override;
  void FireAt(FVector Point,float Speed,float Damage,int32 Count=1,float Spread=0);
  bool IsSongEnabled() const;
  void UpdateSongPresentation();
@@ -135,6 +169,7 @@ public:
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Stage01|Song") FVector SongSurfacePoint=FVector::ZeroVector;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly,Category="Stage01|Song") FVector SongSurfaceNormal=FVector::UpVector;
 private:
+ ABBSBCharacter* SongPlayer() const;
  TWeakObjectPtr<UPrimitiveComponent> SongSurface;
  FVector SongLocalPoint,SongLocalNormal;
  double NextSurfaceProbe=0,LastSongPoseAt=-1;
@@ -176,6 +211,7 @@ private:
  void EndThrowGlide(bool Landed);
  bool HasGlideSupport() const;
  void TickThrowGlide(float DT);
+ FVector AdvanceThrowVelocity(FVector Velocity, float DeltaSeconds) const override;
 };
 UCLASS(Blueprintable)
 class BBSB_API ABBSBStage01Director : public AActor
@@ -204,13 +240,27 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBRespawnPoint> UtilityCheckpoint;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<ABBSBRespawnPoint> ArtCheckpoint;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") TObjectPtr<AActor> CaptainLight;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector TrioCenter;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FVector TrioCenter;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FRotator TrioFrame;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector CaptainCenter;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector RoofEntry;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector TrioEntry;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FVector CargoLanding;
- UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Stage01") FTransform BookstandPose;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FVector CaptainCenter;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FVector RoofEntry;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FVector TrioEntry;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FVector CargoLanding;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement",meta=(MakeEditWidget)) FTransform BookstandPose;
+ UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Placement") bool bLocalPlacement=false;
+ UPROPERTY(EditInstanceOnly,BlueprintReadWrite,Category="Placement|Anchors") TObjectPtr<AActor> OpeningAnchor;
+ UPROPERTY(EditInstanceOnly,BlueprintReadWrite,Category="Placement|Anchors") TObjectPtr<AActor> RoofAnchor;
+ UPROPERTY(EditInstanceOnly,BlueprintReadWrite,Category="Placement|Anchors") TObjectPtr<AActor> TrioAnchor;
+ UPROPERTY(EditInstanceOnly,BlueprintReadWrite,Category="Placement|Anchors") TObjectPtr<AActor> CaptainAnchor;
+ UFUNCTION(BlueprintPure,Category="Placement") FVector WorldRoofEntry() const { return RoofAnchor ? RoofAnchor->GetActorLocation():PlacementPoint(RoofEntry); }
+ UFUNCTION(BlueprintPure,Category="Placement") FVector WorldTrioEntry() const { return PlacementPoint(TrioEntry); }
+ UFUNCTION(BlueprintPure,Category="Placement") FVector WorldTrioCenter() const { return TrioAnchor ? TrioAnchor->GetActorLocation():PlacementPoint(TrioCenter); }
+ UFUNCTION(BlueprintPure,Category="Placement") FVector WorldCaptainCenter() const { return CaptainAnchor ? CaptainAnchor->GetActorLocation():PlacementPoint(CaptainCenter); }
+ UFUNCTION(BlueprintPure,Category="Placement") FRotator WorldTrioFrame() const { return bLocalPlacement ? (GetActorQuat()*TrioFrame.Quaternion()).Rotator():TrioFrame; }
+ UFUNCTION(BlueprintPure,Category="Placement") FTransform WorldBookstandPose() const { return OpeningAnchor ? OpeningAnchor->GetActorTransform():bLocalPlacement ? BookstandPose*GetActorTransform():BookstandPose; }
+ UFUNCTION(BlueprintCallable,CallInEditor,Category="Placement") void ConvertToLocalPlacement();
+ void RegisterDevice(ABBSBStage01Device* Device);
+ void RegisterSinger(ABBSBStage01Singer* Singer);
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) EBBSBStage01Phase Phase=EBBSBStage01Phase::Opening;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TSet<FName> Solved;
  UPROPERTY(VisibleAnywhere,BlueprintReadOnly) TSet<FName> Quieted;
@@ -261,6 +311,7 @@ private:
  UPROPERTY(Transient) TObjectPtr<ACameraActor> RevealCamera;
  TWeakObjectPtr<AActor> RevealPrevious;double RevealUntil=0,LastRewardTry=-100;
  void BeginReveal();void TickReveal();void FinishReveal();void TryGrantReward();
+ FVector PlacementPoint(FVector P) const { return bLocalPlacement ? GetActorTransform().TransformPosition(P):P; }
  void BindPlayer();
  EBBSBStage01Phase ResolveObjectivePhase(EBBSBStage01Phase Requested) const;
  void CompleteObjective(ABBSBStage01Device* Device);

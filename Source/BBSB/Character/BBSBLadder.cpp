@@ -3,26 +3,28 @@
 #include "Combat/BBSBCombat.h"
 #include "Field/BBSBFieldActions.h"
 #include "Interaction/BBSBInteraction.h"
+#include "Interaction/BBSBClimbable.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
-#include "Stage01/BBSBStage01.h"
-#include "EngineUtils.h"
 
 bool UBBSBTraversalComponent::TryAutoLadder(const FVector& Direction)
 {
- if(!Character || !Character->FieldActions)return false;
+ if(!Character || !Character->FieldActions || !Character->Interaction)return false;
  const auto* Move=Character->GetCharacterMovement();const bool Grounded=Move->IsMovingOnGround();
  if(!Move->IsFalling() && !Grounded && !Character->FieldActions->IsDodging())return false;
  const FVector Position=Character->GetActorLocation();const float Reach=Character->GetCapsuleComponent()->GetScaledCapsuleRadius()+65.f;
- for(TActorIterator<ABBSBStage01Device> It(GetWorld());It;++It)
+ for (const auto& Weak : Character->Interaction->GetClimbableCandidates())
  {
-  auto* D=*It;if(D->Kind!=EBBSBStage01Node::ClimbLadder && (D->Kind!=EBBSBStage01Node::LowerLadder || !D->bSolved || D->Painted<.98f))continue;
-  const FVector N=D->LadderNormal(),B=D->LadderBottomPoint(),T=D->LadderTopPoint(),Goal=FMath::ClosestPointOnSegment(Position,B,T);
-  if(FVector::DotProduct(Direction,-N)<.5f || FVector::DotProduct(Position-Goal,N)<-12.f || FVector::DistSquared(Position,Goal)>FMath::Square(Reach))continue;
-  if(D->MountLadder())return true;
+  auto* Climbable = Weak.Get();
+  if (!Climbable || !Climbable->bAutoGrab || !Climbable->IsRouteReady()) continue;
+  const auto Frame = Climbable->WorldFrame();
+  const FVector Goal = FMath::ClosestPointOnSegment(Position, Frame.Bottom, Frame.Top);
+  if (FVector::DotProduct(Direction, -Frame.Outward) < .5f || FVector::DotProduct(Position - Goal, Frame.Outward) < -12.f
+      || FVector::DistSquared(Position, Goal) > FMath::Square(Reach)) continue;
+  if (Climbable->TryMount(Character)) return true;
  }
  return false;
 }
@@ -40,6 +42,8 @@ bool UBBSBTraversalComponent::BeginLadder(AActor* Source,FVector Bottom,FVector 
  if(!Character || !IsValid(Source) || !Character->FieldActions || IsWireTraversalActive() || bGlideDashing || GetWorld()->GetTimeSeconds()<ParkourIgnoreUntil)return false;
  if(Character->Combat && (Character->Combat->bDead || Character->Combat->BlocksMovement()))return false;
  if(Character->Interaction && Character->Interaction->bDialogueActive)return false;
+ auto* Climbable = Source->FindComponentByClass<UBBSBClimbable>();
+ if (Climbable && (!Climbable->CanStartInteraction(Character) || !BBSBBunniarSurface::CanUse(Source, Character))) return false;
  const auto* PC=Cast<APlayerController>(Character->GetController());if(!PC || !PC->IsLocalController() || PC->IsMoveInputIgnored())return false;
  const FVector Line=Top-Bottom;const float Length=Line.Size();if(Length<60.f || Line.Z<40.f)return false;
  const FVector Axis=Line/Length,Position=Character->GetActorLocation();
@@ -60,7 +64,30 @@ bool UBBSBTraversalComponent::BeginLadder(AActor* Source,FVector Bottom,FVector 
  LedgeNormal=LadderOut;LedgePoint=Goal;LadderDistance=Distance;LadderStepFrom=LadderStepTo=Distance;
  bLadderStepping=bLadderHopping=bLadderSliding=bLadderExiting=false;bLadderMounting=true;
  LadderMountFrom=Position;LadderMountTo=Goal;LadderMountAt=GetWorld()->GetTimeSeconds();LadderMotionSeconds=MountRise>0 ? .28f:.16f;
- ParkourHandAlpha=1;Character->SetActorRotation((-LadderOut).Rotation());return true;
+ ParkourHandAlpha=1;Character->SetActorRotation((-LadderOut).Rotation());
+ ActiveClimbable = RecentClimbable = Climbable;
+ if (Climbable)
+ {
+  LadderRungSpacing = FMath::Clamp(Climbable->RungSpacing, 20.f, 50.f);
+  Climbable->NotifyClimbEnter(Character);
+ }
+ return IsOnLadder();
+}
+
+void UBBSBTraversalComponent::EndClimb(bool bReachedTop)
+{
+ auto* Climbable = ActiveClimbable.Get();
+ ActiveClimbable.Reset();
+ if (Climbable) Climbable->NotifyClimbEnd(Character, bReachedTop);
+}
+
+UAnimSequence* UBBSBTraversalComponent::ClimbAnimationOverride(bool bMantling) const
+{
+ const auto* Climbable = bMantling ? ActiveClimbable.Get() : RecentClimbable.Get();
+ if (!Climbable) return nullptr;
+ if (bMantling) return Climbable->AnimationFor(EBBSBClimbMotion::Mantle);
+ const auto Motion = bLadderHopping ? EBBSBClimbMotion::Hop : bLadderSliding ? EBBSBClimbMotion::Slide : bLadderStepping ? EBBSBClimbMotion::Step : EBBSBClimbMotion::Hold;
+ return Climbable->AnimationFor(Motion);
 }
 bool UBBSBTraversalComponent::JumpFromLadder()
 {
@@ -122,6 +149,11 @@ void UBBSBTraversalComponent::TickLadder(float DT)
 {
  auto* Move=Character->GetCharacterMovement();const auto* PC=Cast<APlayerController>(Character->GetController());
  if(!IsValid(LadderSource) || !PC || PC->IsMoveInputIgnored() || (Character->Combat && (Character->Combat->bDead || Character->Combat->BlocksMovement())) || (Character->Interaction && Character->Interaction->bDialogueActive)) { CancelParkour();return; }
+ if (const auto* Climbable = ActiveClimbable.Get(); Climbable && (!Climbable->CanStartInteraction(Character) || !BBSBBunniarSurface::CanUse(LadderSource, Character)))
+ {
+  CancelParkour();
+  return;
+ }
  Move->StopMovementImmediately();Move->GravityScale=0;Character->ConsumeMovementInputVector();ClimbFootAlpha=0;
  if(FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive()) { bLadderUpHeld=bLadderDownHeld=bLadderHopHeld=false;return; }
  const double Now=GetWorld()->GetTimeSeconds();ParkourAge=Now-ParkourStartedAt;
@@ -193,6 +225,12 @@ void UBBSBTraversalComponent::TickLadder(float DT)
  if(FinishExit || (bLadderSliding && LadderDistance<=.01f))
  {
   const FVector Out=LadderOut;CancelParkour();Move->Velocity=FinishExit ? FVector::ZeroVector:Out*70.f;ParkourIgnoreUntil=Now+.35f;
+  return;
+ }
+ if (auto* Climbable = ActiveClimbable.Get())
+ {
+  const auto Motion = bLadderHopping ? EBBSBClimbMotion::Hop : bLadderSliding ? EBBSBClimbMotion::Slide : bLadderStepping ? EBBSBClimbMotion::Step : EBBSBClimbMotion::Hold;
+  Climbable->NotifyClimbStay(Character, LadderDistance / LadderLength, Motion);
  }
 }
 float UBBSBTraversalComponent::LadderClipPhase() const
@@ -211,7 +249,7 @@ float UBBSBTraversalComponent::LadderClipPhase() const
 }
 FVector UBBSBTraversalComponent::LadderHand(bool Left) const
 {
- const auto* Device=Cast<ABBSBStage01Device>(LadderSource);const float Grip=Device && Device->Kind==EBBSBStage01Node::LowerLadder ? 29.f:32.f;
+ const float Grip = RecentClimbable.IsValid() ? RecentClimbable->GripDepth : 32.f;
  const float Spacing=FMath::Max(20.f,LadderRungSpacing);const FVector Side=FVector::CrossProduct(FVector::UpVector,-LadderOut).GetSafeNormal();
  if(bLadderSliding)return Character->GetActorLocation()-LadderOut*Grip+Side*(Left ? -24.f:24.f)+FVector::UpVector*20.f+LadderAxis*40.f;
  auto Rung=[&](float D) { const int32 N=FMath::FloorToInt((D+.01f)/Spacing);return Left ? 2*((N+1)/2):2*(N/2)+1; };
@@ -222,7 +260,7 @@ FVector UBBSBTraversalComponent::LadderHand(bool Left) const
 }
 FVector UBBSBTraversalComponent::LadderFoot(bool Left) const
 {
- const auto* Device=Cast<ABBSBStage01Device>(LadderSource);const float Grip=Device && Device->Kind==EBBSBStage01Node::LowerLadder ? 29.f:32.f;
+ const float Grip = RecentClimbable.IsValid() ? RecentClimbable->GripDepth : 32.f;
  const float Spacing=FMath::Max(20.f,LadderRungSpacing);const FVector Side=FVector::CrossProduct(FVector::UpVector,-LadderOut).GetSafeNormal();
  auto Rung=[&](float D) { const int32 N=FMath::FloorToInt((D+.01f)/Spacing);return Left ? 2*(N/2):2*((N+1)/2)-1; };
  const float T=bLadderStepping ? (bLadderHopping ? FMath::SmoothStep(.35f,.84f,LadderStepPhase):FMath::SmoothStep(.12f,1.f,LadderStepPhase)):1.f;

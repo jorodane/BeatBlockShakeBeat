@@ -1,5 +1,10 @@
 #include "Field/BBSBFieldActions.h"
 #include "Caravan/BBSBCaravan.h"
+#include "BBSBCharacter.h"
+#include "Character/BBSBTraversal.h"
+#include "CanvasItem.h"
+#include "Framework/Application/SlateApplication.h"
+#include "RenderUtils.h"
 #include "Interaction/BBSBInteraction.h"
 #include "Combat/BBSBCombat.h"
 #include "Camera/CameraComponent.h"
@@ -75,6 +80,88 @@ void UBBSBFieldActionComponent::UpdateAimPresentation()
  SurfaceAimDecal->DecalSize=FVector(4.f,Radius,Radius);
  SurfaceAimDecal->SetWorldLocationAndRotation(Hit.ImpactPoint+Hit.ImpactNormal*.3f,Hit.ImpactNormal.Rotation());
  SurfaceAimDecal->SetVisibility(true);
+}
+
+ABBSBCarryObject* UBBSBFieldActionComponent::HeldBunniarCarry() const
+{
+ const auto* Buddy = Cast<ABBSBBunniarCompanion>(InteractionEquipment());
+ if (!Buddy || !Buddy->bSurfaceAttached || !IsValid(Buddy->SurfaceComponent)) return nullptr;
+ auto* Object = Cast<ABBSBCarryObject>(Buddy->SurfaceComponent->GetOwner());
+ return IsValid(Object) && Object->bCarried && !Object->bBroken && Object->CarryingCharacter() == Character ? Object : nullptr;
+}
+
+ABBSBCarryObject* UBBSBFieldActionComponent::PreparedCarryThrow() const
+{
+ auto* Object = CarryThrowTarget.Get();
+ const auto* Player = Cast<ABBSBCharacter>(Character);
+ if (!Object || !Player || !IsGestureChannelHeld(0) || bEquipmentInputBlocked || bEquipmentWheelOpen ||
+     bDeathEquipmentFrozen || bStoryPresentationHidden || bDodging || !GetWorld() || GetWorld()->IsPaused() ||
+     (FSlateApplication::IsInitialized() && !FSlateApplication::Get().IsActive())) return nullptr;
+ if ((Player->Combat && (!Player->Combat->CanAttack() || Player->Combat->IsStageLocked())) ||
+     (Player->Traversal && (Player->Traversal->IsWireTraversalActive() || Player->Traversal->IsParkourActive())) ||
+     (Player->Interaction && Player->Interaction->bDialogueActive)) return nullptr;
+ return HeldBunniarCarry() == Object ? Object : nullptr;
+}
+
+void UBBSBFieldActionComponent::CancelCarryThrow(const ABBSBCarryObject* Object)
+{
+ if (CarryThrowTarget.Get() == Object) CarryThrowTarget.Reset();
+}
+
+bool UBBSBFieldActionComponent::IsCarryThrowPreviewActive() const
+{
+ return PreparedCarryThrow() != nullptr;
+}
+
+void UBBSBFieldActionComponent::DrawCarryThrowPreview(AHUD* HUD, UCanvas* Canvas) const
+{
+ const auto* Object = PreparedCarryThrow();
+ const auto* PC = HUD ? HUD->GetOwningPlayerController() : nullptr;
+ if (!Object || !PC || !Canvas) return;
+
+ const TArray<FVector> Path = Object->ForwardThrowPreviewPath();
+ TArray<FVector2D, TInlineAllocator<16>> Screen;
+ for (const FVector& WorldPoint : Path)
+ {
+  FVector2D Point;
+  if (!PC->ProjectWorldLocationToScreen(WorldPoint, Point, true)) break;
+  if (Screen.IsEmpty() || FVector2D::DistSquared(Screen.Last(), Point) > .16) Screen.Add(Point);
+ }
+ if (Screen.Num() < 2) return;
+
+ struct FEdge { FVector2D Left, Right; FLinearColor Color; };
+ const float Scale = FMath::Clamp(Canvas->SizeX / 1280.f, .7f, 1.5f);
+ const FLinearColor StartColor(1.f, .29f, .46f, .98f);
+ const FLinearColor EndColor(1.f, .76f, .70f, 0.f);
+ auto Edge = [&](int32 Index)
+ {
+  const float T = float(Index) / (Screen.Num() - 1);
+  const FVector2D Direction = (Screen[FMath::Min(Index + 1, Screen.Num() - 1)] - Screen[FMath::Max(0, Index - 1)]).GetSafeNormal();
+  const FVector2D Side(-Direction.Y, Direction.X);
+  const float HalfWidth = FMath::Lerp(3.2f, .35f, T) * Scale;
+  return FEdge{Screen[Index] - Side * HalfWidth, Screen[Index] + Side * HalfWidth,
+               FMath::Lerp(StartColor, EndColor, FMath::SmoothStep(.12f, 1.f, T))};
+ };
+ TArray<FCanvasUVTri> Triangles;
+ Triangles.Reserve((Screen.Num() - 1) * 2);
+ auto AddTriangle = [&](FVector2D A, FVector2D B, FVector2D C, FLinearColor ColorA, FLinearColor ColorB, FLinearColor ColorC)
+ {
+  FCanvasUVTri& Tri = Triangles.AddDefaulted_GetRef();
+  Tri.V0_Pos = A; Tri.V1_Pos = B; Tri.V2_Pos = C;
+  Tri.V0_UV = Tri.V1_UV = Tri.V2_UV = FVector2D::ZeroVector;
+  Tri.V0_Color = ColorA; Tri.V1_Color = ColorB; Tri.V2_Color = ColorC;
+ };
+ FEdge Previous = Edge(0);
+ for (int32 Index = 1; Index < Screen.Num(); ++Index)
+ {
+  const FEdge Next = Edge(Index);
+  AddTriangle(Previous.Left, Previous.Right, Next.Left, Previous.Color, Previous.Color, Next.Color);
+  AddTriangle(Next.Left, Previous.Right, Next.Right, Next.Color, Previous.Color, Next.Color);
+  Previous = Next;
+ }
+ FCanvasTriangleItem Ribbon(Triangles, GWhiteTexture);
+ Ribbon.BlendMode = SE_BLEND_Translucent;
+ Canvas->DrawItem(Ribbon);
 }
 
 void UBBSBFieldActionComponent::DrawContextAim(AHUD* HUD,UCanvas* Canvas) const

@@ -176,7 +176,7 @@ void ABBSBLootPickup::PlayCollectionFlight(UBBSBHuntingComponent* Collector)
  if(Quantity<=0) { BeginCollectionFlight(Collector);return; }
  // A partial stack stays available in the field. This non-interactive copy is visual only.
  const FTransform Transform=GetActorTransform();
- auto* Flight=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(ABBSBLootPickup::StaticClass(),Transform,GetOwner(),nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+ auto* Flight=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(GetClass(),Transform,GetOwner(),nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
  if(!Flight)return;
  Flight->Item=Item;Flight->Quantity=0;Flight->bCollectionVisualOnly=true;Flight->CollectionFlightSeconds=CollectionFlightSeconds;
  Flight->FinishSpawning(Transform);Flight->BeginCollectionFlight(Collector);

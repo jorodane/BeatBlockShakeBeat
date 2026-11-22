@@ -1,4 +1,5 @@
 #include "BBSBDuelPracticeArea.h"
+#include "World/BBSBPlacement.h"
 #include "BBSBCombatVisuals.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -87,7 +88,7 @@ void ABBSBDuelPracticeArea::SpawnPracticeEnemies()
  {
   FVector Floor;if(!BBSBCombatVisuals::Ground(GetWorld(),GetActorTransform().TransformPosition(DuelPositions[Index]),Floor)) continue;
   const FTransform Pose(GetActorRotation()+FRotator(0,180,0),Floor+FVector(0,0,73));
-  auto* Enemy=GetWorld()->SpawnActorDeferred<ABBSBInkEnemy>(ABBSBInkEnemy::StaticClass(),Pose,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+  auto* Enemy=GetWorld()->SpawnActorDeferred<ABBSBInkEnemy>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBInkEnemy::StaticClass()),Pose,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
   if(!Enemy) continue;
   Enemy->PracticeArea=this;Enemy->EncounterID=EncounterID+Index;Enemy->EnemyName=Names[Index%5];Enemy->MaximumHealth=EnemyHealth;
   Enemy->MainPattern=Patterns[Index%5];Enemy->AttackDirections=Directions[Index%5];

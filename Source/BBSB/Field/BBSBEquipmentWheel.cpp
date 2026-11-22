@@ -1,4 +1,5 @@
 #include "BBSBFieldActions.h"
+#include "World/BBSBPlacement.h"
 #include "Character/BBSBVisibilityStencil.h"
 #include "BBSBCharacter.h"
 #include "Hunting/BBSBHunting.h"
@@ -30,7 +31,7 @@ void UBBSBFieldActionComponent::EnsureBunniarEquipment()
  if (!Buddy)
  {
   FActorSpawnParameters Params; Params.Owner=Character; Params.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-  Buddy=GetWorld()->SpawnActor<ABBSBBunniarCompanion>(Character->GetActorLocation(),FRotator::ZeroRotator,Params);
+  Buddy=GetWorld()->SpawnActor<ABBSBBunniarCompanion>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBBunniarCompanion::StaticClass()),Character->GetActorLocation(),FRotator::ZeroRotator,Params);
  }
  if (Buddy)
  {

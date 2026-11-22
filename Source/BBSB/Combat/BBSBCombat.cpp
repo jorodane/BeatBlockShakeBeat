@@ -1,4 +1,5 @@
 #include "BBSBCombat.h"
+#include "World/BBSBPlacement.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBRespawn.h"
@@ -235,7 +236,7 @@ void UBBSBCombatComponent::EnemyStruck(ABBSBInkEnemy* Enemy)
 			if (!It->bDefeated && It->EncounterID==Enemy->EncounterID && FVector::DistSquared(It->GetActorLocation(),Enemy->GetActorLocation())<FMath::Square(1000.f)) { Living=*It; break; }
 	}
 	if (!Living) return;
-	ABBSBCombatStage* NewStage=GetWorld()->SpawnActor<ABBSBCombatStage>(ABBSBCombatStage::StaticClass(),Living->GetActorLocation(),FRotator::ZeroRotator);
+	ABBSBCombatStage* NewStage=GetWorld()->SpawnActor<ABBSBCombatStage>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBCombatStage::StaticClass()),Living->GetActorLocation(),FRotator::ZeroRotator);
 	if (!NewStage) return;
 	if (!NewStage->Initialize(this,Living)) { NewStage->Destroy(); SetFeedback(TEXT("Find a clearer corridor to form the stage")); return; }
 	AttachStage(NewStage);
@@ -623,7 +624,7 @@ void ABBSBCombatPracticeArea::SpawnPracticeEnemies()
 		FVector Location; if (!Ground(GetWorld(),GetActorTransform().TransformPosition(Offsets[Index]),Location)) continue;
 		Location.Z+=73;
 		const FTransform Transform(GetActorRotation()+FRotator(0,180,0),Location);
-		ABBSBInkEnemy* Enemy=GetWorld()->SpawnActorDeferred<ABBSBInkEnemy>(ABBSBInkEnemy::StaticClass(),Transform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+		ABBSBInkEnemy* Enemy=GetWorld()->SpawnActorDeferred<ABBSBInkEnemy>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBInkEnemy::StaticClass()),Transform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 		if (!Enemy) continue;
 		Enemy->PracticeArea=this; Enemy->bFieldBulletHell=bFieldBulletHell; Enemy->EnemyName=Names[Index]; Enemy->EncounterID=EncounterID; Enemy->MaximumHealth=EnemyHealth;
 		Enemy->MainPattern=Index<2 ? EBBSBInkPattern::Tap : EBBSBInkPattern::Hold;

@@ -1,5 +1,7 @@
 #include "Interaction/BBSBInteraction.h"
 #include "Interaction/BBSBInteractionDoor.h"
+#include "Interaction/BBSBClimbable.h"
+#include "Interaction/BBSBInteractable.h"
 #include "BBSBCharacter.h"
 #include "Field/BBSBFieldActions.h"
 #include "Hunting/BBSBLootPickup.h"
@@ -15,13 +17,17 @@
 #include "Stage01/BBSBStage01.h"
 #include "Character/BBSBRespawn.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/HUD.h"
+#include "UI/BBSBPaperTheme.h"
 
 void UBBSBInteractionComponent::RegisterInteractionCandidate(AActor* Actor)
 {
- if(IsValid(Actor) && (BBSBBunniarSurface::Resolve(Actor) || Actor->IsA<ABBSBLootPickup>()))InteractionCandidates.Add(Actor);
+ if (!IsValid(Actor)) return;
+ if (BBSBBunniarSurface::Resolve(Actor) || Actor->IsA<ABBSBLootPickup>()) InteractionCandidates.Add(Actor);
+ if (auto* Climbable = Actor->FindComponentByClass<UBBSBClimbable>()) ClimbableCandidates.Add(Climbable);
 }
 bool UBBSBInteractionComponent::IsQuickInteractable(AActor* A) const
 {
@@ -33,6 +39,7 @@ bool UBBSBInteractionComponent::IsQuickInteractable(AActor* A) const
 FText UBBSBInteractionComponent::QuickInteractionName(AActor* A) const
 {
  if(!IsQuickInteractable(A))return FText();
+ if (const auto* Interaction = UBBSBInteractable::Find(BBSBBunniarSurface::Resolve(A)); Interaction && !Interaction->DisplayName.IsEmpty()) return Interaction->DisplayName;
  if(const auto* L=Cast<ABBSBLootPickup>(A))return L->Item->DisplayName;
  if(const auto* N=Cast<ABBSBInteractionNPC>(A))return N->DisplayName;
  if(const auto* P=Cast<ABBSBRespawnPoint>(A))return P->PointName;
@@ -50,6 +57,12 @@ FText UBBSBInteractionComponent::QuickInteractionName(AActor* A) const
 FText UBBSBInteractionComponent::QuickInteractionText(AActor* A) const
 {
  if(!IsQuickInteractable(A))return FText();
+ if (const auto* Interaction = UBBSBInteractable::Find(BBSBBunniarSurface::Resolve(A)))
+ {
+  if (!Interaction->CanStartInteraction(Player)) return Interaction->UnavailableText;
+  const auto Prompt = Interaction->GetPrompt();
+  if (!Prompt.ActionText.IsEmpty()) return Prompt.ActionText;
+ }
  if(A->IsA<ABBSBLootPickup>())return FText::FromString(TEXT("줍기"));
  if(A->IsA<ABBSBInteractionNPC>())return FText::FromString(TEXT("대화하기"));
  if(A->IsA<ABBSBRespawnPoint>())return FText::FromString(TEXT("쉬기"));
@@ -158,18 +171,143 @@ bool UBBSBInteractionComponent::FindQuickInteraction(FHitResult& Out) const
 }
 void UBBSBInteractionComponent::UpdateQuickInteraction()
 {
- if(!Player || GetWorld()->GetTimeSeconds()<NextQuickScan)return;NextQuickScan=GetWorld()->GetTimeSeconds()+.06;
- for(auto It=InteractionCandidates.CreateIterator();It;++It)if(!It->IsValid())It.RemoveCurrent();
- FHitResult Hit;QuickFocusActor=FindQuickInteraction(Hit) ? Hit.GetActor():nullptr;QuickFocusText=QuickInteractionText(QuickFocusActor);QuickFocusName=QuickInteractionName(QuickFocusActor);
+ if (!Player || GetWorld()->GetTimeSeconds() < NextQuickScan) return;
+ NextQuickScan = GetWorld()->GetTimeSeconds() + .06;
+ for (auto It = InteractionCandidates.CreateIterator(); It; ++It) if (!It->IsValid()) It.RemoveCurrent();
+ for (auto It = ClimbableCandidates.CreateIterator(); It; ++It) if (!It->IsValid()) It.RemoveCurrent();
+
+ FHitResult Hit;
+ QuickFocusActor = FindQuickInteraction(Hit) ? Hit.GetActor() : nullptr;
+ QuickFocusText = QuickInteractionText(QuickFocusActor);
+ QuickFocusName = QuickInteractionName(QuickFocusActor);
+ const auto* Handler = BBSBBunniarSurface::Resolve(QuickFocusActor);
+ const auto* Interaction = UBBSBInteractable::Find(Handler);
+ bQuickFocusAvailable = QuickFocusActor && (!Interaction || Interaction->CanStartInteraction(Player));
+ QuickFocusIcon = Interaction ? Interaction->GetPrompt().Icon : nullptr;
+ if (!QuickFocusActor || QuickFocusIcon) return;
+
+ const auto* Catalog = UBBSBInteractTypes::DefaultCatalog();
+ if (!Catalog) return;
+ FName Type = TEXT("Use");
+ if (QuickFocusActor->IsA<ABBSBInteractionNPC>()) Type = TEXT("Talk");
+ else if (QuickFocusActor->IsA<ABBSBLootPickup>()) Type = TEXT("Pickup");
+ else if (QuickFocusActor->IsA<ABBSBRespawnPoint>()) Type = TEXT("Rest");
+ else if (QuickFocusActor->IsA<ABBSBCarryObject>()) Type = TEXT("Grab");
+ else if (QuickFocusActor->IsA<ABBSBInteractionDoor>()) Type = TEXT("Switch");
+ else if (const auto* Device = Cast<ABBSBStage01Device>(Handler))
+ {
+  switch (Device->Kind)
+  {
+   case EBBSBStage01Node::CabinDoor:
+   case EBBSBStage01Node::CargoLever:
+   case EBBSBStage01Node::LightLever:
+   case EBBSBStage01Node::Trapdoor:
+   case EBBSBStage01Node::ReadyGate: Type = TEXT("Drag"); break;
+   case EBBSBStage01Node::LowerLadder: Type = Device->bSolved ? TEXT("Climb") : TEXT("Drag"); break;
+   case EBBSBStage01Node::ClimbLadder: Type = TEXT("Climb"); break;
+   default: break;
+  }
+ }
+ const auto* Entry = Catalog->Types.Find(Type);
+ if (!Entry) Entry = Catalog->Types.Find(TEXT("Use"));
+ if (Entry) QuickFocusIcon = Entry->Icon;
 }
-void UBBSBInteractionComponent::DrawQuickInteraction(AHUD* HUD,UCanvas* Canvas) const
+
+bool UBBSBInteractionComponent::CanUsePrimaryOnQuickFocus() const
 {
- if(!HUD || !Canvas || !Player || !QuickFocusActor || QuickFocusText.IsEmpty() || Player->Hunting->bInventoryOpen || bDialogueActive || Player->FieldActions->IsGestureCaptured())return;
- const float S=FMath::Clamp(Canvas->SizeX/1280.f,.65f,1.5f);
- const FString Name=QuickFocusName.ToString(),Action=TEXT("[F] ")+QuickFocusText.ToString();float NW,NH,AW,AH;
- HUD->GetTextSize(Name,NW,NH,GEngine->GetSmallFont(),S);HUD->GetTextSize(Action,AW,AH,GEngine->GetSmallFont(),S);
- const float W=FMath::Max(NW,AW),X=FMath::Clamp(Canvas->SizeX*.5f-W*.5f,16.f,Canvas->SizeX-W-16.f),Y=Canvas->SizeY*.5f+82*S;
- HUD->DrawRect(FLinearColor(.13f,.1f,.16f,.9f),X-10*S,Y-6*S,W+20*S,NH+AH+20*S);
- HUD->DrawText(Name,FLinearColor(.97f,.92f,.84f),X+(W-NW)*.5f,Y,GEngine->GetSmallFont(),S);
- HUD->DrawText(Action,FLinearColor(.92f,.84f,.88f),X+(W-AW)*.5f,Y+NH+6*S,GEngine->GetSmallFont(),S);
+ const auto* Actions = Player ? Player->FieldActions.Get() : nullptr;
+ if (!Actions || !bQuickFocusAvailable || !IsValid(QuickFocusActor) || bDialogueActive ||
+     Actions->bEquipmentInputBlocked || Actions->bEquipmentWheelOpen || Actions->IsGestureCaptured() ||
+     Player->Hunting->bInventoryOpen) return false;
+
+ // This is the hit already used by the reticle, including the exact cursor ray and reach.
+ // F's assisted search can select a nearby actor that primary click never hit.
+ auto* AimedActor = Actions->AimPresentationActor.Get();
+ if (!IsValid(AimedActor)) return false;
+ auto* Handler = BBSBBunniarSurface::Resolve(QuickFocusActor);
+ if (AimedActor != QuickFocusActor && (!Handler || BBSBBunniarSurface::Resolve(AimedActor) != Handler)) return false;
+
+ // PrimaryDown handles a directly aimed checkpoint before equipment input.
+ if (const auto* Point = Cast<ABBSBRespawnPoint>(AimedActor))
+ {
+  return Point->bTravelAvailable && !Player->Respawn->IsSequenceActive() &&
+         FVector::DistSquared(Player->GetActorLocation(), Point->GetActorLocation()) <= FMath::Square(Point->ActivationRange);
+ }
+
+ if (!Actions->IsBunniarControlActive() || !Actions->bBunniarAvailable || Actions->bBunniarShortcutActive ||
+     Actions->PendingEquipmentId != INDEX_NONE || Actions->IsEquipmentActionBusy() || Player->Combat->IsStageLocked() ||
+     Player->Hunting->bCollectionHeld) return false;
+ const auto* Buddy = Cast<ABBSBBunniarCompanion>(Actions->InteractionEquipment());
+ if (!Buddy || Buddy->bAirHovering || Buddy->bSurfaceAttached) return false;
+
+ // Climbing is a body action, whereas an undeployed ladder is a draggable surface.
+ if (const auto* Ladder = Cast<UBBSBClimbable>(UBBSBInteractable::Find(Handler)); Ladder && Ladder->bPrimaryInteraction) return false;
+ if (const auto* Device = Cast<ABBSBStage01Device>(Handler))
+ {
+  if (Device->Kind == EBBSBStage01Node::ClimbLadder ||
+      (Device->Kind == EBBSBStage01Node::LowerLadder && Device->bSolved)) return false;
+ }
+ const auto* Carry = Cast<ABBSBCarryObject>(AimedActor);
+ return !Carry || Carry->CanBeCarriedBy(Player);
 }
+
+void UBBSBInteractionComponent::DrawQuickInteraction(AHUD* HUD, UCanvas* Canvas) const
+{
+ if (!HUD || !Canvas || !Player || !QuickFocusActor || QuickFocusText.IsEmpty() ||
+     Player->Hunting->bInventoryOpen || bDialogueActive || Player->FieldActions->IsGestureCaptured()) return;
+
+ const float Scale = FMath::Clamp(Canvas->SizeX / 1280.f, .65f, 1.5f);
+ const FString Name = QuickFocusName.ToString();
+ const FString Action = QuickFocusText.ToString();
+ auto* ActionFont = GEngine->GetMediumFont();
+ auto* NameFont = GEngine->GetSmallFont();
+ float ActionWidth, ActionHeight, NameWidth, NameHeight;
+ HUD->GetTextSize(Action, ActionWidth, ActionHeight, ActionFont, Scale);
+ HUD->GetTextSize(Name, NameWidth, NameHeight, NameFont, Scale);
+
+ const float GlyphSize = 24 * Scale;
+ const float GlyphSpace = QuickFocusIcon ? GlyphSize + 9 * Scale : 0;
+ const auto* Catalog = bQuickFocusAvailable ? UBBSBInteractTypes::DefaultCatalog() : nullptr;
+ auto* PrimaryIcon = Catalog && CanUsePrimaryOnQuickFocus() ? Catalog->HintIcons.FindRef(TEXT("MouseLeft")).Get() : nullptr;
+ const float MouseOffset = PrimaryIcon ? 30 * Scale : 0;
+ const float KeySpace = bQuickFocusAvailable ? 34 * Scale : 0;
+ const FVector2D CardSize(FMath::Max(147.f * Scale, FMath::Max(ActionWidth, NameWidth) + GlyphSpace + 25 * Scale),
+                          FMath::Max(44.f * Scale, ActionHeight + NameHeight + 12 * Scale));
+ const float RightLimit = Canvas->SizeX - CardSize.X - KeySpace - 14 * Scale;
+ const float RowX = FMath::Max(14.f * Scale + MouseOffset, FMath::Min(Canvas->SizeX * .5f + 53 * Scale, RightLimit));
+ const float RowY = Canvas->SizeY * .5f + 23 * Scale;
+ const FVector2D Card(RowX + KeySpace, RowY);
+ const auto Rim = bQuickFocusAvailable ? BBSBPaper::Paper().CopyWithNewOpacity(.84f) : BBSBPaper::Muted();
+ BBSBPaper::CanvasPolygon(Canvas, BBSBPaper::Shape(Card + FVector2D(3, 4) * Scale, CardSize, Scale), BBSBPaper::Shadow());
+ BBSBPaper::CanvasPolygon(Canvas, BBSBPaper::Shape(Card, CardSize, Scale), Rim);
+ BBSBPaper::CanvasPolygon(Canvas, BBSBPaper::Shape(Card + FVector2D(Scale), CardSize - FVector2D(2 * Scale), Scale),
+                         BBSBPaper::Ink().CopyWithNewOpacity(.93f));
+
+ auto DrawIcon = [&](UTexture2D* Texture, FVector2D Centre, float Size, float Opacity)
+ {
+  if (!Texture) return;
+  const float Aspect = float(Texture->GetSizeX()) / FMath::Max(1, Texture->GetSizeY());
+  const FVector2D Pixels(FMath::Min(1.f, Aspect) * Size, FMath::Min(1.f, 1.f / Aspect) * Size);
+  const FVector2D Position = Centre - Pixels * .5f;
+  HUD->DrawTexture(Texture, Position.X, Position.Y, Pixels.X, Pixels.Y, 0, 0, 1, 1, FLinearColor::White.CopyWithNewOpacity(Opacity));
+ };
+ const float CentreY = Card.Y + CardSize.Y * .5f;
+ if (bQuickFocusAvailable)
+ {
+  const FVector2D Centre(RowX + 12 * Scale, CentreY);
+  auto* Keycap = Catalog ? Catalog->HintIcons.FindRef(TEXT("Keycap")).Get() : nullptr;
+  DrawIcon(Keycap, Centre, 25 * Scale, 1.f);
+  DrawIcon(PrimaryIcon, FVector2D(Centre.X - MouseOffset, CentreY), 28 * Scale, 1.f);
+  float KeyWidth, KeyHeight;
+  HUD->GetTextSize(TEXT("F"), KeyWidth, KeyHeight, ActionFont, Scale);
+  HUD->DrawText(TEXT("F"), Keycap ? BBSBPaper::Ink() : BBSBPaper::Paper(), Centre.X - KeyWidth * .5f,
+                Centre.Y - KeyHeight * .5f, ActionFont, Scale);
+ }
+ DrawIcon(QuickFocusIcon, FVector2D(Card.X + 11 * Scale + GlyphSize * .5f, CentreY), GlyphSize, bQuickFocusAvailable ? 1.f : .55f);
+ const float TextX = Card.X + GlyphSpace + 11 * Scale;
+ const float TextY = CentreY - (ActionHeight + NameHeight) * .5f;
+ const auto ActionColor = bQuickFocusAvailable ? BBSBPaper::Paper() : BBSBPaper::Cell();
+ HUD->DrawText(Action, ActionColor, TextX, TextY, ActionFont, Scale);
+ HUD->DrawText(Name, FLinearColor(.77f, .66f, .69f), TextX, TextY + ActionHeight, NameFont, Scale);
+}
+

@@ -6,6 +6,7 @@
 #include "BBSBBunniarSurface.generated.h"
 
 class ABBSBBunniarCompanion;
+class ACharacter;
 
 /** Optional puzzle callbacks. Ordinary collidable surfaces need no interface to receive Bunniar. */
 UINTERFACE(BlueprintType)
@@ -40,4 +41,6 @@ namespace BBSBBunniarSurface
 {
  BBSB_API AActor* Resolve(AActor* PhysicalActor);
  BBSB_API void Bind(AActor* PhysicalActor,AActor* Handler);
+ BBSB_API bool CanUse(AActor* Handler, ACharacter* Character);
+ BBSB_API bool TryQuickUse(AActor* Handler, ACharacter* Character, ABBSBBunniarCompanion* Bunniar, const FHitResult& Hit);
 }

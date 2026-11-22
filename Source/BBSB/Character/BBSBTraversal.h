@@ -17,6 +17,7 @@ class USplineMeshComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UPrimitiveComponent;
+class UBBSBClimbable;
 struct FMinimalViewInfo;
 
 UENUM(BlueprintType)
@@ -101,7 +102,7 @@ public:
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool TryWallJump();
  bool IsWallJumpSteeringLocked() const;
  UFUNCTION(BlueprintCallable,Category="BBSB|Parkour") bool DropParkour();
- void CancelParkour();
+ void CancelParkour(bool bKeepClimb = false);
  float ParkourMotionPhase() const { return FMath::Clamp(ParkourAge/FMath::Max(.1f,ParkourDuration),0.f,1.f); }
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="6",ClampMax="100",Units="cm")) float ParkourJumpClearance=18.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Parkour",meta=(ClampMin="0",ClampMax="0.3",Units="s")) float LedgePopPreparationSeconds=.04f;
@@ -125,6 +126,7 @@ public:
  FVector LadderHand(bool Left) const;
  FVector LadderFoot(bool Left) const;
  float LadderClipPhase() const;
+ UFUNCTION(BlueprintPure, Category="BBSB|Climb") UAnimSequence* ClimbAnimationOverride(bool bMantling) const;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="20",ClampMax="50",Units="cm")) float LadderRungSpacing=35.f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="0.18",ClampMax="1",Units="s")) float LadderStepSeconds=.25f;
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="Ladder",meta=(ClampMin="2",ClampMax="12")) int32 LadderHopRungs=6;
@@ -342,6 +344,9 @@ private:
  FVector LedgeLocalPoint,LedgeLocalNormal,LedgeLocalStand,LedgeLocalTopNormal;
  FVector LedgeTopNormal=FVector::UpVector;
  FVector LadderBottom,LadderTop,LadderExit,LadderOut,LadderAxis,LadderMountFrom,LadderMountTo;
+ TWeakObjectPtr<UBBSBClimbable> ActiveClimbable;
+ TWeakObjectPtr<UBBSBClimbable> RecentClimbable;
+ void EndClimb(bool bReachedTop);
  float LadderLength=0,LadderStepFrom=0,LadderStepTo=0,LadderMotionSeconds=0;
  double LadderStepAt=0,LadderMountAt=0,LadderJumpUntil=-100;
  bool bLadderJumpActive=false;

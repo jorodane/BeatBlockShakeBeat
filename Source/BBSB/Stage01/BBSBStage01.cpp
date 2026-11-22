@@ -32,12 +32,23 @@ ABBSBStage01Director::ABBSBStage01Director()
 void ABBSBStage01Director::BeginPlay()
 {
  Super::BeginPlay();StartedAt=GetWorld()->GetTimeSeconds();NextGrabAt=StartedAt+8;
- for(TActorIterator<ABBSBStage01Device> It(GetWorld());It;++It)if(It->Director==this)Devices.Add(*It);
- for(TActorIterator<ABBSBStage01Singer> It(GetWorld());It;++It)if(It->Director==this)Singers.Add(*It);
+ for(TActorIterator<ABBSBStage01Device> It(GetWorld());It;++It)if(It->Director==this)Devices.AddUnique(*It);
+ for(TActorIterator<ABBSBStage01Singer> It(GetWorld());It;++It)if(It->Director==this)Singers.AddUnique(*It);
  if(bPersistProgress && !UBBSBSessionSubsystem::Owns(GetWorld()))if(auto* Save=Cast<UBBSBStage01Save>(UGameplayStatics::LoadGameFromSlot(SaveSlotName,0));Save && Save->Version==1)
  { Phase=Save->Phase;Solved=Save->Solved;Quieted=Save->Quieted;bRewardGranted=Save->bRewardGranted;Tea=Save->Tea; }
  for(auto* P:{CabinCheckpoint.Get(),UtilityCheckpoint.Get(),ArtCheckpoint.Get()})if(P)P->OnActivated.AddDynamic(this,&ABBSBStage01Director::RefillAtCheckpoint);
  ApplyProgress();
+}
+void ABBSBStage01Director::RegisterDevice(ABBSBStage01Device* Device)
+{ if(Device) { Devices.AddUnique(Device);if(HasActorBegunPlay())ApplyProgress(); } }
+void ABBSBStage01Director::RegisterSinger(ABBSBStage01Singer* Singer)
+{ if(Singer)Singers.AddUnique(Singer); }
+void ABBSBStage01Director::ConvertToLocalPlacement()
+{
+ if(bLocalPlacement)return;Modify();const auto Frame=GetActorTransform();
+ RoofEntry=Frame.InverseTransformPosition(RoofEntry);TrioEntry=Frame.InverseTransformPosition(TrioEntry);CargoLanding=Frame.InverseTransformPosition(CargoLanding);
+ TrioCenter=Frame.InverseTransformPosition(TrioCenter);CaptainCenter=Frame.InverseTransformPosition(CaptainCenter);TrioFrame=(Frame.GetRotation().Inverse()*TrioFrame.Quaternion()).Rotator();
+ BookstandPose=BookstandPose.GetRelativeTransform(Frame);bLocalPlacement=true;MarkPackageDirty();
 }
 void ABBSBStage01Director::BindPlayer()
 {
@@ -173,10 +184,10 @@ void ABBSBStage01Director::Tick(float DT)
   FHitResult Hit;Player->SetActorLocation(P,true,&Hit,ETeleportType::None);
   if(T>=1 || (Hit.bBlockingHit && T>.2f)) { bLadderMoving=false;Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling);if(bMoveIgnored)if(auto* PC=Cast<APlayerController>(Player->GetController()))PC->SetIgnoreMoveInput(false);bMoveIgnored=false;Player->FieldActions->ResetActionState(); }
  }
- if(Phase==EBBSBStage01Phase::Cargo && Solved.Contains(TEXT("CargoTrapdoor")) && Player->GetActorLocation().Z>RoofEntry.Z-130)Advance(EBBSBStage01Phase::Rooftops);
- if(Phase==EBBSBStage01Phase::Rooftops && FVector::Dist2D(Player->GetActorLocation(),TrioCenter)<1100 && Player->GetActorLocation().Z<TrioCenter.Z+500)
+ if(Phase==EBBSBStage01Phase::Cargo && Solved.Contains(TEXT("CargoTrapdoor")) && Player->GetActorLocation().Z>WorldRoofEntry().Z-130)Advance(EBBSBStage01Phase::Rooftops);
+ if(Phase==EBBSBStage01Phase::Rooftops && FVector::Dist2D(Player->GetActorLocation(),WorldTrioCenter())<1100 && Player->GetActorLocation().Z<WorldTrioCenter().Z+500)
  { Advance(EBBSBStage01Phase::Trio);Say(TEXT("버니아 트리오: 빰!\n레파라도: ...귀찮게 됐네."),4); }
- if(Phase==EBBSBStage01Phase::ApproachCaptain && FVector::Dist2D(Player->GetActorLocation(),CaptainCenter)<1500 && FMath::Abs(Player->GetActorLocation().Z-CaptainCenter.Z)<400)
+ if(Phase==EBBSBStage01Phase::ApproachCaptain && FVector::Dist2D(Player->GetActorLocation(),WorldCaptainCenter())<1500 && FMath::Abs(Player->GetActorLocation().Z-WorldCaptainCenter().Z)<400)
  { Advance(EBBSBStage01Phase::Captain);Say(TEXT("상단장: ...분명 어제까지는 잘 됐는데.\n레파라도: 일단, 그 삑사리부터 멈추죠.")); }
  TickCombat(DT);TickGrab(DT);TickMusic();
 }
@@ -280,7 +291,7 @@ bool ABBSBStage01Director::UseDevice(ABBSBStage01Device* D)
  case EBBSBStage01Node::CargoLift:
   if(!Solved.Contains(TEXT("CargoWinch"))) { Say(TEXT("화물 고정 레버를 먼저 내려주세요."));return false; }
   if(D->bSolved) { Solved.Remove(D->NodeId);D->SetSolved(false);SaveProgress();Say(TEXT("승강 발판을 아래로 부른다."));return true; }
-  if(D->Targets.IsEmpty() || !Player->GetMovementBase() || Player->GetMovementBase()->GetOwner()!=D->Targets[0]) { Say(TEXT("승강 발판 위에 올라선 뒤 작동시켜 주세요."));return false; }
+  if(!Player->GetMovementBase() || !D->SurfaceFrames().Contains(Player->GetMovementBase())) { Say(TEXT("승강 발판 위에 올라선 뒤 작동시켜 주세요."));return false; }
   D->SetSolved(true);Solved.Add(D->NodeId);SaveProgress();Say(TEXT("승강 발판이 올라간다. 위쪽 덮개에 버니아를 붙여 옆으로 밀어 열자."));return true;
  case EBBSBStage01Node::Trapdoor:
   if(!Solved.Contains(TEXT("CargoWinch"))) { Say(TEXT("고정 레버가 잠겨 있다."));return false; }break;
@@ -364,8 +375,8 @@ void ABBSBStage01Director::TickReveal()
 {
  if(!RevealCamera)return;if(GetWorld()->GetTimeSeconds()>=RevealUntil) { FinishReveal();return; }
  const float T=1.f-FMath::Clamp(float((RevealUntil-GetWorld()->GetTimeSeconds())/FMath::Max(.5f,RevealSeconds)),0.f,1.f);
- const FVector P=CaptainCenter+FMath::Lerp(FVector(-650,-1100,380),FVector(-450,-900,270),T);
- RevealCamera->SetActorLocationAndRotation(P,(CaptainCenter+FVector(0,0,80)-P).Rotation());
+ const FVector P=WorldCaptainCenter()+FMath::Lerp(FVector(-650,-1100,380),FVector(-450,-900,270),T);
+ RevealCamera->SetActorLocationAndRotation(P,(WorldCaptainCenter()+FVector(0,0,80)-P).Rotation());
 }
 void ABBSBStage01Director::FinishReveal()
 {
@@ -393,7 +404,7 @@ void ABBSBStage01Director::TickMusic()
   CaptainAudio=NewObject<UAudioComponent>(this,TEXT("CaptainDistantSolo"));CaptainAudio->bAutoActivate=false;CaptainAudio->bIsUISound=true;CaptainAudio->RegisterComponent();
   CaptainMelody=NewObject<USoundWaveProcedural>(this);CaptainMelody->SetSampleRate(24000);CaptainMelody->NumChannels=1;CaptainMelody->Duration=INDEFINITELY_LOOPING_DURATION;CaptainAudio->SetSound(CaptainMelody);
  }
- const float Distance=FVector::Dist(Player->GetActorLocation(),CaptainCenter),Volume=Phase==EBBSBStage01Phase::Complete ? 0.f:FMath::Clamp(1.f-Distance/6500.f,0.f,1.f)*.22f;
+ const float Distance=FVector::Dist(Player->GetActorLocation(),WorldCaptainCenter()),Volume=Phase==EBBSBStage01Phase::Complete ? 0.f:FMath::Clamp(1.f-Distance/6500.f,0.f,1.f)*.22f;
  CaptainAudio->SetVolumeMultiplier(Volume);
  if(Volume>.001 && Now-LastMelodyAt>.64)
  {

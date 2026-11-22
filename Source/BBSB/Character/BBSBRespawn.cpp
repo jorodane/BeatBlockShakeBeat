@@ -53,6 +53,12 @@ ABBSBRespawnPoint::ABBSBRespawnPoint()
  LandingPoint=CreateDefaultSubobject<USceneComponent>(TEXT("LandingPoint"));LandingPoint->SetupAttachment(RootComponent);LandingPoint->SetRelativeLocation(FVector(130,0,0));
  Label=CreateDefaultSubobject<UTextRenderComponent>(TEXT("PointName"));Label->SetupAttachment(RootComponent);Label->SetRelativeLocation(FVector(0,0,105));Label->SetWorldSize(16);Label->SetHorizontalAlignment(EHTA_Center);Label->SetTextRenderColor(FColor(244,221,189));
 }
+#if WITH_EDITOR
+void ABBSBRespawnPoint::PostDuplicate(EDuplicateMode::Type Mode)
+{ Super::PostDuplicate(Mode);if(Mode!=EDuplicateMode::PIE && !IsTemplate())PointId=NAME_None; }
+void ABBSBRespawnPoint::PostEditImport()
+{ Super::PostEditImport();if(!IsTemplate())PointId=NAME_None; }
+#endif
 void ABBSBRespawnPoint::OnConstruction(const FTransform& Transform)
 {
  Super::OnConstruction(Transform);Label->SetText(PointName);

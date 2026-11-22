@@ -198,11 +198,16 @@ struct FHeadGazeProxy final : FAnimInstanceProxy
    {
     const auto Mode=Traversal->ParkourVisualMode;
     MotionClip=Mode==EBBSBParkourMode::LedgeHang ? Library->LedgeHang.Get():Mode==EBBSBParkourMode::Mantle ? Library->LedgeClimb.Get():Mode==EBBSBParkourMode::WallSlide ? (Library->WallSlide ? Library->WallSlide.Get():Library->WireWallLatch.Get()):Library->LowVault.Get();
+    if (Mode == EBBSBParkourMode::Mantle)
+    {
+     if (auto* Clip = Traversal->ClimbAnimationOverride(true)) MotionClip = Clip;
+    }
     MotionTime=MotionClip && Mode!=EBBSBParkourMode::LedgeHang ? Traversal->ParkourMotionPhase()*MotionClip->GetPlayLength():0;
     if(Mode==EBBSBParkourMode::WallSlide && MotionClip) MotionTime=FMath::Clamp(Traversal->ParkourAge,0.f,MotionClip->GetPlayLength());
     if(Mode==EBBSBParkourMode::Ladder)
     {
      MotionClip=Traversal->bLadderHopping ? Library->LadderHop.Get():Traversal->bLadderSliding ? Library->LadderSlide.Get():Traversal->bLadderStepping ? Library->LadderClimb.Get():Library->LadderHold.Get();
+     if (auto* Clip = Traversal->ClimbAnimationOverride(false)) MotionClip = Clip;
      MotionTime=MotionClip ? Traversal->LadderClipPhase()*MotionClip->GetPlayLength():0;
     }
     MotionWeight=ParkourWeight;

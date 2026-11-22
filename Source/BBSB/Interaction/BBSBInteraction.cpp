@@ -1,4 +1,5 @@
 #include "Interaction/BBSBInteraction.h"
+#include "Interaction/BBSBInteractable.h"
 #include "Interaction/BBSBDragMotion.h"
 #include "BBSBCharacter.h"
 #include "Character/BBSBTraversal.h"
@@ -227,6 +228,7 @@ ABBSBCarryObject::ABBSBCarryObject()
 {
  PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.TickGroup=TG_PrePhysics;
  Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CarryBody"));SetRootComponent(Body);Body->SetMobility(EComponentMobility::Movable);Body->SetCollisionProfileName(TEXT("PhysicsActor"));Body->SetNotifyRigidBodyCollision(true);Body->BodyInstance.bUseCCD=true;
+ Grabbable = CreateDefaultSubobject<UBBSBGrabbable>(TEXT("Grabbable"));
  HeldMovement=CreateDefaultSubobject<UBBSBCarryMovementComponent>(TEXT("CarryMovement"));HeldMovement->PrimaryComponentTick.bCanEverTick=false;HeldMovement->SetUpdatedComponent(Body);
  static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));Body->SetStaticMesh(Cube.Object);
  Tags.Add(TEXT("BBSBInteractable"));Tags.Add(TEXT("BBSBAttackable"));
@@ -279,6 +281,7 @@ void ABBSBCarryObject::BunniarArrived_Implementation(ABBSBBunniarCompanion* Budd
  CarryReachLimit=FMath::Max(FVector::Dist(Player->GetActorLocation(),GetActorLocation()),FMath::Max(100.f,Player->FieldActions->WeaponReach-45));
  AddTickPrerequisiteActor(Player);AddTickPrerequisiteComponent(Player->GetCameraBoom());Buddy->AddTickPrerequisiteActor(this);
  Motion.Reset();CarryVelocity=FVector::ZeroVector;SampleMotion();
+ Grabbable->BeginGrab();
 }
 bool ABBSBCarryObject::GetCarryView(FVector& Location,FRotator& Rotation) const
 {
@@ -529,10 +532,12 @@ void ABBSBCarryObject::ReleaseCarryBindings()
  FollowRoute.Reset();NextFollowRouteAt=0;
  if(CarryOwner.IsValid())
  {
+  if (auto* Actions = CarryOwner->FieldActions.Get()) Actions->CancelCarryThrow(this);
   RemoveTickPrerequisiteActor(CarryOwner.Get());RemoveTickPrerequisiteComponent(CarryOwner->GetCameraBoom());
  }
  if(AttachedBuddy.IsValid()) AttachedBuddy->RemoveTickPrerequisiteActor(this);
  CarryOwner.Reset();
+ Grabbable->EndGrab();
 }
 void ABBSBCarryObject::RotateFromWheel(float Steps)
 {
@@ -589,13 +594,67 @@ void ABBSBCarryObject::Tick(float DT)
   TickCarrySafety(DT,Player);
  }
 }
+bool ABBSBCarryObject::GetForwardThrowVelocity(FVector& Velocity) const
+{
+ if (!bCarried || bBroken) return false;
+ FVector Eye, Direction;
+ FRotator View;
+ if (!GetCarryAim(Eye, View, Direction)) return false;
+ Velocity = Direction.GetSafeNormal() * FMath::Clamp(ForwardThrowSpeed, 0.f, FMath::Max(0.f, MaximumThrowSpeed));
+ return true;
+}
+
+FVector ABBSBCarryObject::AdvanceThrowVelocity(FVector Velocity, float DeltaSeconds) const
+{
+ if (Body->IsGravityEnabled()) Velocity.Z += GetWorld()->GetGravityZ() * DeltaSeconds;
+ return Velocity;
+}
+
+TArray<FVector> ABBSBCarryObject::ForwardThrowPreviewPath() const
+{
+ TArray<FVector> Points;
+ FVector Velocity;
+ if (!Body || !GetForwardThrowVelocity(Velocity) || Velocity.IsNearlyZero()) return Points;
+
+ constexpr int32 Segments = 12;
+ constexpr float StepSeconds = .50f / Segments;
+ FComponentQueryParams Query(SCENE_QUERY_STAT(BBSBCarryThrowPreview), this);
+ Query.AddIgnoredActor(CarryOwner.Get());
+ Query.AddIgnoredActor(AttachedBuddy.Get());
+ const FQuat Rotation = Body->GetComponentQuat();
+ FVector Start = Body->GetComponentLocation();
+ const FVector CentreOffset = Body->Bounds.Origin - Start;
+ Points.Reserve(Segments + 1);
+ Points.Add(Start + CentreOffset);
+ TArray<FHitResult> Hits;
+ for (int32 Index = 0; Index < Segments; ++Index)
+ {
+  const FVector NextVelocity = AdvanceThrowVelocity(Velocity, StepSeconds);
+  const FVector Step = (Velocity + NextVelocity) * (.5f * StepSeconds);
+  const FVector End = Start + Step;
+  float HitTime = 1.f;
+  Hits.Reset();
+  GetWorld()->ComponentSweepMulti(Hits, Body, Start, End, Rotation, Query);
+  for (const FHitResult& Hit : Hits)
+  {
+   if (Hit.bBlockingHit && FVector::DotProduct(Step, Hit.Normal) < -UE_KINDA_SMALL_NUMBER)
+    HitTime = FMath::Min(HitTime, Hit.Time);
+  }
+  Points.Add(Start + Step * HitTime + CentreOffset);
+  if (HitTime < 1.f) break;
+  Start = End;
+  Velocity = NextVelocity;
+ }
+ return Points;
+}
+
 bool ABBSBCarryObject::ThrowForward()
 {
- if(!bCarried || bBroken)return false;
- FVector Eye,Direction;FRotator View;if(!GetCarryAim(Eye,View,Direction))return false;
- const auto Buddy=AttachedBuddy;
- ReleaseWithVelocity(Direction.GetSafeNormal()*FMath::Min(FMath::Max(0.f,ForwardThrowSpeed),FMath::Max(0.f,MaximumThrowSpeed)));
- if(Buddy.IsValid())Buddy->ReleaseSurface();
+ FVector Velocity;
+ if (!GetForwardThrowVelocity(Velocity)) return false;
+ const auto Buddy = AttachedBuddy;
+ ReleaseWithVelocity(Velocity);
+ if (Buddy.IsValid()) Buddy->ReleaseSurface();
  return true;
 }
 void ABBSBCarryObject::Drop()

@@ -12,6 +12,7 @@
 #include "BBSBFieldActions.generated.h"
 
 class ACharacter;
+class ABBSBCarryObject;
 struct FCollisionQueryParams;
 class UCameraComponent;
 class UStaticMeshComponent;
@@ -258,6 +259,9 @@ public:
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor DeviceAimColor=FLinearColor(.60f,.92f,.73f,1);
  UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="BBSB|Aim") FLinearColor AttackAimColor=FLinearColor(.98f,.65f,.54f,1);
  void DrawContextAim(AHUD* HUD,UCanvas* Canvas) const;
+ void DrawCarryThrowPreview(AHUD* HUD, UCanvas* Canvas) const;
+ void CancelCarryThrow(const ABBSBCarryObject* Object);
+ UFUNCTION(BlueprintPure, Category="BBSB|Interaction") bool IsCarryThrowPreviewActive() const;
  UFUNCTION(BlueprintPure,Category="BBSB|Dodge") float DodgeCooldownProgress() const { return FMath::Clamp(1.f-GetDodgeCooldownRemaining()/FMath::Max(.01f,DodgeCooldown),0.f,1.f); }
 	void ExerciseGesture(int32 Index);
 	float GetCharge() const;
@@ -300,6 +304,9 @@ private:
  FGuid PresentedWeaponInstance;
  TMap<FGuid,double> LastInstanceBeat;
  FHitResult QuickInteractionHit;FVector QuickInteractionLocalPoint=FVector::ZeroVector;
+ TWeakObjectPtr<ABBSBCarryObject> CarryThrowTarget;
+ ABBSBCarryObject* HeldBunniarCarry() const;
+ ABBSBCarryObject* PreparedCarryThrow() const;
  uint8 BunniarPrimarySources=0;
  FVector2D LastVisiblePointer=FVector2D::ZeroVector;bool bVisiblePointerTracked=false;
  bool BeginBunniarPrimary(uint8 Source);
@@ -473,7 +480,7 @@ private:
 };
 
 /** Small field props use ordinary damage and produce short-lived physical fragments. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBBreakableProp : public AActor
 {
 	GENERATED_BODY()
@@ -496,7 +503,7 @@ private:
 };
 
 /** Place one marker in a field to provide reusable targets without modifying terrain. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBFieldPracticeArea : public AActor
 {
 	GENERATED_BODY()

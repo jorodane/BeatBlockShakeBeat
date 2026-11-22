@@ -1,4 +1,5 @@
 #include "Hunting/BBSBHunting.h"
+#include "World/BBSBPlacement.h"
 #include "Save/BBSBSession.h"
 #include "Hunting/BBSBLootPickup.h"
 #include "Hunting/BBSBLootBurst.h"
@@ -111,7 +112,7 @@ void UBBSBHuntingComponent::GrantEnemyRewards(ABBSBInkEnemy* Enemy)
     BBSBCombatVisuals::GeometryTypes(),FCollisionQueryParams(SCENE_QUERY_STAT(BBSBLootGround),true,Enemy)))Ground=Hit.ImpactPoint;
   else Ground.Z=Origin.Z-Enemy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
   FTransform Transform(FRotator::ZeroRotator,Origin+FVector::UpVector*35);
-  auto* Loot=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(ABBSBLootPickup::StaticClass(),Transform,Enemy,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+  auto* Loot=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBLootPickup::StaticClass()),Transform,Enemy,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
   if(!Loot)continue;
   Loot->Item=Roll.Item;Loot->Quantity=FMath::RandRange(Low,High);
   Loot->bConcertoReward=Roll.Item->IsFieldResource() && Player->EquipmentGrowth && Player->EquipmentGrowth->bConcertoActive;

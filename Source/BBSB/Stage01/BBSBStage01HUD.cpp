@@ -46,11 +46,11 @@ FVector ABBSBStage01Director::ObjectivePoint() const
   if(!Solved.Contains(TEXT("CargoPower")))return Node(EBBSBStage01Node::CargoButton);
   if(!Solved.Contains(TEXT("CargoWinch")))return Node(EBBSBStage01Node::CargoLever);
   return Node(EBBSBStage01Node::Trapdoor);
- case EBBSBStage01Phase::Rooftops:return TrioEntry;
- case EBBSBStage01Phase::Trio:return TrioCenter;
+ case EBBSBStage01Phase::Rooftops:return WorldTrioEntry();
+ case EBBSBStage01Phase::Trio:return WorldTrioCenter();
  case EBBSBStage01Phase::FindLight:return Node(EBBSBStage01Node::LightLever);
  case EBBSBStage01Phase::ReturnForReady:return Node(EBBSBStage01Node::ReadyGate);
- case EBBSBStage01Phase::ApproachCaptain:case EBBSBStage01Phase::Captain:return CaptainCenter;
+ case EBBSBStage01Phase::ApproachCaptain:case EBBSBStage01Phase::Captain:return WorldCaptainCenter();
  default:break;
  }
  const bool Utility=Phase<=EBBSBStage01Phase::ShopBattle;

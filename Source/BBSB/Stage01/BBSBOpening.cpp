@@ -15,6 +15,8 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
+#include "Components/ProgressBar.h"
+#include "Brushes/SlateColorBrush.h"
 #include "UI/BBSBPaperTheme.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Camera/CameraActor.h"
@@ -25,6 +27,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -33,22 +36,48 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundWaveProcedural.h"
 #include "Materials/MaterialInterface.h"
-#include "InputCoreTypes.h"
+#include "UnrealClient.h"
+
+namespace
+{
+ constexpr double SkipHoldSeconds=1.;
+}
 
 TSharedRef<SWidget> UBBSBOpeningSkipPrompt::RebuildWidget()
 {
  SetVisibility(ESlateVisibility::HitTestInvisible);
  auto* Root=WidgetTree->ConstructWidget<UCanvasPanel>();WidgetTree->RootWidget=Root;
- auto* Label=WidgetTree->ConstructWidget<UTextBlock>();Label->SetText(FText::FromString(TEXT("[Enter] 컷씬 건너뛰기")));
+ auto* Label=WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(),TEXT("SkipHoldLabel"));
+ Label->SetText(NSLOCTEXT("BBSBOpening", "SkipPrompt", "건너뛰기 (Space)"));
  FSlateFontInfo Font=FCoreStyle::GetDefaultFontStyle("Regular",17);Font.OutlineSettings.OutlineSize=2;Font.OutlineSettings.OutlineColor=BBSBPaper::Ink();
  Label->SetFont(Font);Label->SetColorAndOpacity(BBSBPaper::Paper());
  auto* LabelSlot=Root->AddChildToCanvas(Label);LabelSlot->SetAnchors(FAnchors(1,1));LabelSlot->SetAlignment(FVector2D(1,1));LabelSlot->SetPosition(FVector2D(-38,-32));LabelSlot->SetAutoSize(true);
+ HoldBar=WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(),TEXT("SkipHoldProgress"));
+ FProgressBarStyle Style;
+ Style.SetBackgroundImage(FSlateColorBrush(BBSBPaper::Ink().CopyWithNewOpacity(.8f)));
+ Style.SetFillImage(FSlateColorBrush(BBSBPaper::Paper()));
+ HoldBar->SetWidgetStyle(Style);
+ HoldBar->SetFillColorAndOpacity(FLinearColor::White);
+ HoldBar->SetBorderPadding(FVector2D::ZeroVector);
+ auto* BarSlot=Root->AddChildToCanvas(HoldBar);
+ BarSlot->SetAnchors(FAnchors(1,1));
+ BarSlot->SetAlignment(FVector2D(1,1));
+ BarSlot->SetPosition(FVector2D(-38,-22));
+ BarSlot->SetSize(FVector2D(208,4));
+ SetHoldProgress(0.f);
  return Super::RebuildWidget();
+}
+
+void UBBSBOpeningSkipPrompt::SetHoldProgress(float Progress)
+{
+ if(!HoldBar)return;
+ HoldBar->SetPercent(Progress);
+ HoldBar->SetVisibility(Progress>0.f ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
 }
 
 ABBSBStage01Opening::ABBSBStage01Opening()
 {
- PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.TickGroup=TG_PostUpdateWork;
+ PrimaryActorTick.bCanEverTick=true;PrimaryActorTick.bTickEvenWhenPaused=true;PrimaryActorTick.TickGroup=TG_PostUpdateWork;
  SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("OpeningOrigin")));SetActorEnableCollision(false);
 }
 UStaticMeshComponent* ABBSBStage01Opening::Prop(FName Name,FVector Position,FVector Scale,const TCHAR* Material,const TCHAR* Shape)
@@ -65,7 +94,7 @@ bool ABBSBStage01Opening::Start(ABBSBStage01Director* Story,ABBSBCharacter* Char
  bActive=true;Squeaks=0;bBandageApplied=false;Director->Caption.Empty();
  if(auto* G=UBBSBGuideSubsystem::Get(this))G->bOpeningActive=true;
  // The authored bookstand is 155 cm above this carriage's floor.
- DeskOrigin=Director->BookstandPose.GetLocation()-FVector(0,0,155);
+ DeskOrigin=Director->WorldBookstandPose().GetLocation()-FVector(0,0,155);
  PreviousView=PC->GetViewTarget();bSavedCursor=PC->bShowMouseCursor;PC->bShowMouseCursor=false;
  if(auto* HUD=PC->GetHUD()) { bSavedHUD=HUD->bShowHUD;HUD->bShowHUD=false; }
  PC->SetIgnoreMoveInput(true);PC->SetIgnoreLookInput(true);bOwnMoveIgnore=bOwnLookIgnore=true;PC->RotationInput=FRotator::ZeroRotator;
@@ -81,7 +110,12 @@ bool ABBSBStage01Opening::Start(ABBSBStage01Director* Story,ABBSBCharacter* Char
  SceneCamera=GetWorld()->SpawnActor<ACameraActor>();SceneCamera->GetCameraComponent()->SetFieldOfView(Presentation->CameraFOV);SceneCamera->GetCameraComponent()->bConstrainAspectRatio=false;UpdateCamera(0);PC->SetViewTarget(SceneCamera);PC->PlayerCameraManager->StartCameraFade(1,0,.45f,FLinearColor::Black,false,false);
  Controls=NewObject<UInputComponent>(this,TEXT("OpeningClickControls"));Controls->RegisterComponent();Controls->Priority=100;Controls->bBlockInput=true;
  Controls->BindKey(EKeys::LeftMouseButton,IE_Pressed,this,&ABBSBStage01Opening::Squeak);Controls->BindKey(EKeys::LeftMouseButton,IE_DoubleClick,this,&ABBSBStage01Opening::Squeak);
- Controls->BindKey(EKeys::Enter,IE_Pressed,this,&ABBSBStage01Opening::Skip);Controls->BindKey(EKeys::Gamepad_Special_Right,IE_Pressed,this,&ABBSBStage01Opening::Skip);PC->PushInputComponent(Controls);
+ for(const FKey& Key:{EKeys::SpaceBar,EKeys::Gamepad_Special_Right})
+ {
+  Controls->BindKey(Key,IE_Pressed,this,&ABBSBStage01Opening::BeginSkipHold);
+  Controls->BindKey(Key,IE_Released,this,&ABBSBStage01Opening::EndSkipHold).bExecuteWhenPaused=true;
+ }
+ PC->PushInputComponent(Controls);
  SkipPrompt=CreateWidget<UBBSBOpeningSkipPrompt>(PC,UBBSBOpeningSkipPrompt::StaticClass());if(SkipPrompt)SkipPrompt->AddToViewport(1000);
  // Capture Escape above the scene blocker so the ordinary pause menu remains available.
  auto& Pause=Controls->BindKey(EKeys::Escape,IE_Pressed,UBBSBSessionSubsystem::Get(this),&UBBSBSessionSubsystem::OpenMenu);Pause.bExecuteWhenPaused=true;
@@ -89,7 +123,7 @@ bool ABBSBStage01Opening::Start(ABBSBStage01Director* Story,ABBSBCharacter* Char
  Prop(TEXT("NotebookSpine"),DeskOrigin+FVector(34,-50,86),FVector(.018,.42,.014),TEXT("/Game/BBSB/Stage01/Materials/MI_Rose.MI_Rose"));
  for(int I=0;I<6;++I)Prop(FName(*FString::Printf(TEXT("InkLine%d"),I)),DeskOrigin+FVector(42,-64+I*4,86),FVector(.25,.006,.002),TEXT("/Game/BBSB/Stage01/Materials/MI_Dark.MI_Dark"));
  Pen=Prop(TEXT("WritingPen"),DeskOrigin+FVector(30,-55,92),FVector(.018,.018,.14),TEXT("/Game/BBSB/Stage01/Materials/MI_Dark.MI_Dark"),TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
- FTransform Rest=Director->BookstandPose;Rest.SetLocation(DeskOrigin+Presentation->BunniarOffset);Rest.SetScale3D(FVector(.12));Buddy->BeginOpeningRest(Rest);Buddy->SetOpeningBandaged(false);
+ FTransform Rest=Director->WorldBookstandPose();Rest.SetLocation(DeskOrigin+Presentation->BunniarOffset);Rest.SetScale3D(FVector(.12));Buddy->BeginOpeningRest(Rest);Buddy->SetOpeningBandaged(false);
  ChangeBeat(EBBSBOpeningBeat::Writing);return true;
 }
 void ABBSBStage01Opening::ChangeBeat(EBBSBOpeningBeat Next)
@@ -103,6 +137,41 @@ void ABBSBStage01Opening::Squeak()
  if(!bActive || Beat!=EBBSBOpeningBeat::Writing || !bWritingReady || GetWorld()->IsPaused())return;
  ++Squeaks;PlaySoundCue(0);ChangeBeat(Squeaks==1 ? EBBSBOpeningBeat::Tap:Squeaks==2 ? EBBSBOpeningBeat::Bandage:EBBSBOpeningBeat::Stand);
 }
+void ABBSBStage01Opening::BeginSkipHold(FKey Key)
+{
+ if(!bActive || SkipHoldKey.IsValid() || GetWorld()->IsPaused())return;
+ SkipHoldKey=Key;
+ SkipHoldStarted=GetWorld()->GetRealTimeSeconds();
+}
+
+void ABBSBStage01Opening::EndSkipHold(FKey Key)
+{
+ if(SkipHoldKey==Key)CancelSkipHold();
+}
+
+void ABBSBStage01Opening::CancelSkipHold()
+{
+ if(!SkipHoldKey.IsValid())return;
+ SkipHoldKey=FKey();
+ if(SkipPrompt)SkipPrompt->SetHoldProgress(0.f);
+}
+
+bool ABBSBStage01Opening::UpdateSkipHold(const APlayerController* PC)
+{
+ if(!SkipHoldKey.IsValid())return false;
+ const auto* ViewportClient=GetWorld()->GetGameViewport();
+ if(!PC || !PC->IsInputKeyDown(SkipHoldKey) || (ViewportClient && ViewportClient->Viewport && !ViewportClient->Viewport->HasFocus()))
+ {
+  CancelSkipHold();
+  return false;
+ }
+ const double HeldSeconds=GetWorld()->GetRealTimeSeconds()-SkipHoldStarted;
+ if(SkipPrompt)SkipPrompt->SetHoldProgress(float(FMath::Clamp(HeldSeconds/SkipHoldSeconds,0.,1.)));
+ if(HeldSeconds<SkipHoldSeconds)return false;
+ Skip();
+ return true;
+}
+
 void ABBSBStage01Opening::Skip()
 {
  if(!bActive || !Player || !Presentation || GetWorld()->IsPaused())return;
@@ -113,9 +182,12 @@ void ABBSBStage01Opening::Skip()
 }
 void ABBSBStage01Opening::Tick(float DT)
 {
+ if(GetWorld()->IsPaused()) { CancelSkipHold();return; }
  Super::Tick(DT);if(!bActive || !Player || !Buddy || !Presentation)return;
+ const auto* PC=Cast<APlayerController>(Player->GetController());
+ if(UpdateSkipHold(PC))return;
  const float Age=GetWorld()->GetTimeSeconds()-BeatStarted;UpdateCamera(Age);UpdateBuddy(Age);
- if(auto* PC=Cast<APlayerController>(Player->GetController()))if(auto* HUD=PC->GetHUD())HUD->bShowHUD=false;
+ if(PC)if(auto* HUD=PC->GetHUD())HUD->bShowHUD=false;
  Player->ConsumeMovementInputVector();
  if(Pen && !(Beat==EBBSBOpeningBeat::Stand && Age>.62f))
  {
@@ -150,7 +222,7 @@ void ABBSBStage01Opening::Tick(float DT)
 }
 void ABBSBStage01Opening::UpdateBuddy(float Age)
 {
- FTransform Pose=Director->BookstandPose;Pose.SetScale3D(FVector(.12));Pose.SetRotation(FRotator(0,Presentation->BunniarYaw,0).Quaternion());FVector At=DeskOrigin+Presentation->BunniarOffset;
+ FTransform Pose=Director->WorldBookstandPose();Pose.SetScale3D(FVector(.12));Pose.SetRotation(FRotator(0,Presentation->BunniarYaw,0).Quaternion());FVector At=DeskOrigin+Presentation->BunniarOffset;
  // The little involuntary hop is retained even after the mouth is taped shut.
  if(Beat!=EBBSBOpeningBeat::Writing)At.Z+=FMath::Sin(FMath::Clamp(Age/.22f,0.f,1.f)*PI)*4;
  if(Beat==EBBSBOpeningBeat::Tap)At.Z+=FMath::Sin(FMath::Clamp((Age-.32f)/.5f,0.f,1.f)*2*PI)*2;
@@ -190,6 +262,7 @@ void ABBSBStage01Opening::PlaySoundCue(int Kind)
 }
 void ABBSBStage01Opening::Finish(bool Completed)
 {
+ CancelSkipHold();
  if(SkipPrompt) { SkipPrompt->RemoveFromParent();SkipPrompt=nullptr; }
  if(!bActive)return;bActive=false;Beat=EBBSBOpeningBeat::Complete;
  if(auto* G=UBBSBGuideSubsystem::Get(this))G->bOpeningActive=false;

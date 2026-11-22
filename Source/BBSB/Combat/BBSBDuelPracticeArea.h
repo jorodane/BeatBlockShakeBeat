@@ -6,7 +6,7 @@
 class UMaterialInterface;
 
 /** Spacious, editable duel pockets. Each opponent owns an isolated encounter. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBDuelPracticeArea : public ABBSBCombatPracticeArea
 {
  GENERATED_BODY()

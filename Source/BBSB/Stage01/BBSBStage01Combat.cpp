@@ -24,8 +24,33 @@ ABBSBStage01Singer::ABBSBStage01Singer()
  SingerMesh->SetSkeletalMeshAsset(LoadObject<USkeletalMesh>(nullptr,TEXT("/Game/Meshes/Characters/Bunniar/Bunniar_Normal.Bunniar_Normal")));
  SingerMesh->SetAnimInstanceClass(UBBSBBunniarAnimInstance::StaticClass());SingerMesh->SetRelativeScale3D(FVector(.68));SingerMesh->SetRelativeLocation(FVector(0,0,-45));SingerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
+#if WITH_EDITOR
+void ABBSBStage01Singer::PostDuplicate(EDuplicateMode::Type Mode)
+{
+ Super::PostDuplicate(Mode);if(Mode!=EDuplicateMode::PIE && !IsTemplate())
+ { SingerId=GetFName();Carrier=nullptr;bSpawnCarrierIfMissing=Voice!=EBBSBStage01Voice::Captain;SingerMesh->SetVisibility(true); }
+}
+void ABBSBStage01Singer::PostEditImport()
+{
+ Super::PostEditImport();if(IsTemplate())return;
+ SingerId=GetFName();Carrier=nullptr;bSpawnCarrierIfMissing=Voice!=EBBSBStage01Voice::Captain;
+ TArray<AActor*> AttachedBodies;GetAttachedActors(AttachedBodies,false,false);
+ for(auto* Child:AttachedBodies)if(auto* CarryBody=Cast<ABBSBStage01CarrySinger>(Child)) { Carrier=CarryBody;CarryBody->Singer=this;break; }
+ SingerMesh->SetVisibility(Carrier==nullptr);
+}
+#endif
 void ABBSBStage01Singer::BeginPlay()
 {
+ if(SingerId.IsNone())SingerId=GetFName();
+ if(!Director && !SequentialEncounter)for(TActorIterator<ABBSBStage01Director> It(GetWorld());It;++It) { Director=*It;break; }
+ if(!Carrier && bSpawnCarrierIfMissing)
+ {
+  UClass* Class=UBBSBPlacementAuthoringTools::ResolvePlacementClass(CarrierClass ? CarrierClass.Get():ABBSBStage01CarrySinger::StaticClass());
+  FActorSpawnParameters P;P.Owner=this;P.SpawnCollisionHandlingOverride=ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+  Carrier=GetWorld()->SpawnActor<ABBSBStage01CarrySinger>(Class,CarrierOffset*GetActorTransform(),P);
+ }
+ if(Carrier)Carrier->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+ if(Director && !SequentialEncounter)Director->RegisterSinger(this);
  Super::BeginPlay();MeshRest=SingerMesh->GetRelativeTransform();GetCharacterMovement()->DisableMovement();GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Pawn,ECR_Ignore);
  if(Carrier)
  {
@@ -44,10 +69,22 @@ void ABBSBStage01Singer::BeginPlay()
  Visual->bEnableUpdateRateOptimizations=false;
  TArray<UStaticMeshComponent*> Parts;GetComponents(Parts);for(auto* C:Parts)C->SetVisibility(false);
 }
+void ABBSBStage01Singer::EndPlay(EEndPlayReason::Type Reason)
+{
+ if(Reason==EEndPlayReason::Destroyed && SequentialEncounter && IsValid(Carrier) && Carrier->GetOwner()==this)Carrier->Destroy();
+ Super::EndPlay(Reason);
+}
+ABBSBCharacter* ABBSBStage01Singer::SongPlayer() const
+{
+ return SequentialEncounter ? Cast<ABBSBCharacter>(UGameplayStatics::GetPlayerCharacter(this,0)):
+  Director ? Director->PlayerCharacter():nullptr;
+}
 bool ABBSBStage01Singer::IsSongEnabled() const
 {
- if(!Director || bDefeated || bConcertoSuspended || bSilenced || IsSpawnWarmingUp() || !Director->PlayerCharacter())return false;
- const auto* P=Director->PlayerCharacter();if(P->Combat->bDead || P->Respawn->IsSequenceActive() || P->Interaction->bDialogueActive || Director->bGrabActive)return false;
+ if(bDefeated || bConcertoSuspended || bSilenced || IsSpawnWarmingUp())return false;
+ const auto* P=SongPlayer();
+ if(!P || P->Combat->bDead || P->Respawn->IsSequenceActive() || P->Interaction->bDialogueActive || (Director && Director->bGrabActive))return false;
+ if(SequentialEncounter)return true;
  const auto Phase=Director->Phase;
  switch(Voice)
  {
@@ -68,14 +105,15 @@ void ABBSBStage01Singer::Tick(float DT)
  bFieldBulletHell=false;Super::Tick(DT);bFieldBulletHell=true;
  TArray<UStaticMeshComponent*> Parts;GetComponents(Parts);for(auto* C:Parts)C->SetVisibility(false);
  const double Now=GetWorld()->GetTimeSeconds();bSilenced=Now<QuietUntil || (Carrier && Carrier->bCarried);
- const bool CaptainVisible=Voice!=EBBSBStage01Voice::Captain || (Director && Director->Phase>=EBBSBStage01Phase::ReturnForReady);
+ const bool CaptainVisible=Voice!=EBBSBStage01Voice::Captain || SequentialEncounter || (Director && Director->Phase>=EBBSBStage01Phase::ReturnForReady);
  if(Voice==EBBSBStage01Voice::Captain) { SetActorHiddenInGame(!CaptainVisible);SetActorEnableCollision(CaptainVisible && !bDefeated); }
  SingerMesh->SetVisibility(!Carrier && CaptainVisible);
  if(bDefeated) { UpdateSongPresentation();SetActorHiddenInGame(false);if(bParticipatesInStory && !bReportedQuiet && Director) { bReportedQuiet=true;if(!Director->Quieted.Contains(SingerId))Director->ReportQuiet(this); }return; }
  UpdateSongPresentation();
- if(!bSongAttached)return;auto* P=Director->PlayerCharacter();if(FVector::DistSquared(GetActorLocation(),P->GetActorLocation())>FMath::Square(HearingRadius))return;
+ if(!bSongAttached)return;auto* P=SongPlayer();if(!P || FVector::DistSquared(GetActorLocation(),P->GetActorLocation())>FMath::Square(HearingRadius))return;
  AlertFieldPlayer(P);
- const float BPM=Voice==EBBSBStage01Voice::Trio ? Director->TrioBPM:Voice==EBBSBStage01Voice::Captain ? Director->CaptainBPM:SongBPM;
+ const float BPM=Director && !SequentialEncounter && Voice==EBBSBStage01Voice::Trio ? Director->TrioBPM:
+  Director && !SequentialEncounter && Voice==EBBSBStage01Voice::Captain ? Director->CaptainBPM:SongBPM;
  const int64 Beat=FMath::FloorToInt64(Now*BPM/60.);if(Beat==LastBeat)return;LastBeat=Beat;
  const FVector Aim=P->GetActorTransform().TransformPosition(P->Combat->FieldProjectileHurtOffset);
  switch(Voice)
@@ -108,10 +146,15 @@ void ABBSBStage01Singer::FireAt(FVector Point,float Speed,float Damage,int32 Cou
 }
 float ABBSBStage01Singer::TakeDamage(float Amount,const FDamageEvent& Event,AController* C,AActor* Causer)
 {
- if(!Director || !Director->HasTool())return 0;
- if((Voice==EBBSBStage01Voice::Utility && Director->Phase<EBBSBStage01Phase::ShopBattle) || (Voice==EBBSBStage01Voice::Trio && Director->Phase!=EBBSBStage01Phase::Trio) || (Voice==EBBSBStage01Voice::Captain && Director->Phase!=EBBSBStage01Phase::Captain))return 0;
+ if(!SequentialEncounter)
+ {
+  if(!Director || !Director->HasTool())return 0;
+  if((Voice==EBBSBStage01Voice::Utility && Director->Phase<EBBSBStage01Phase::ShopBattle) ||
+   (Voice==EBBSBStage01Voice::Trio && Director->Phase!=EBBSBStage01Phase::Trio) ||
+   (Voice==EBBSBStage01Voice::Captain && Director->Phase!=EBBSBStage01Phase::Captain))return 0;
+ }
  const float Applied=Super::TakeDamage(Amount,Event,C,Causer);
- if(bParticipatesInStory && bDefeated && !bReportedQuiet) { bReportedQuiet=true;Director->ReportQuiet(this); }return Applied;
+ if(bParticipatesInStory && Director && bDefeated && !bReportedQuiet) { bReportedQuiet=true;Director->ReportQuiet(this); }return Applied;
 }
 void ABBSBStage01Singer::SilenceFor(float Seconds) { QuietUntil=GetWorld()->GetTimeSeconds()+FMath::Max(0.f,Seconds);bSilenced=true; }
 void ABBSBStage01Singer::Rearm() { bDefeated=bReportedQuiet=false;bSilenced=false;QuietUntil=-100;Health=MaximumHealth;ResetHealthFeedback();GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);LastBeat=MIN_int64; }
@@ -129,11 +172,11 @@ void ABBSBStage01Director::TickCombat(float DT)
   }
   if(!bLaneWarning && Now>=NextLaneAt)
   { WarningLane=FMath::FloorToInt(Now*TrioBPM/480.f)%3;bLaneWarning=true;LaneImpactAt=Now+1.1;NextLaneAt=Now+5.45; }
-  LaneWarningMesh->SetWorldLocationAndRotation(TrioCenter+TrioFrame.RotateVector(FVector((WarningLane-1)*250,-150,-96)),TrioFrame);
+  LaneWarningMesh->SetWorldLocationAndRotation(WorldTrioCenter()+WorldTrioFrame().RotateVector(FVector((WarningLane-1)*250,-150,-96)),WorldTrioFrame());
   LaneWarningMesh->SetWorldScale3D(FVector(2.05f,22.f,.025f));LaneWarningMesh->SetVisibility(bLaneWarning);
   if(bLaneWarning && Now>=LaneImpactAt)
   {
-   const FVector Local=TrioFrame.UnrotateVector(Player->GetActorLocation()-TrioCenter);
+   const FVector Local=WorldTrioFrame().UnrotateVector(Player->GetActorLocation()-WorldTrioCenter());
    if(FMath::Abs(Local.X-(WarningLane-1)*250)<115 && FMath::Abs(Local.Y+150)<1100 && FMath::Abs(Local.Z)<180 && !Player->FieldActions->IsDodgeInvulnerable())
     for(ABBSBStage01Singer* S:Singers)if(S && S->Voice==EBBSBStage01Voice::Trio && !S->bDefeated) { Player->Combat->TakeCombatDamage(8,S,false);break; }
    bLaneWarning=false;LaneWarningMesh->SetVisibility(false);

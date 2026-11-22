@@ -1,4 +1,5 @@
 #include "Hunting/BBSBHunting.h"
+#include "World/BBSBPlacement.h"
 #include "Hunting/BBSBEquipmentGrowth.h"
 #include "Hunting/BBSBLootPickup.h"
 #include "BBSBCharacter.h"
@@ -123,7 +124,7 @@ int32 UBBSBHuntingComponent::SpawnResourceAmount(ABBSBInkEnemy* Enemy,EBBSBRewar
   if(GetWorld()->LineTraceSingleByObjectType(Hit,Ground+FVector::UpVector*120,Ground-FVector::UpVector*1200,BBSBCombatVisuals::GeometryTypes(),FCollisionQueryParams(SCENE_QUERY_STAT(BBSBResourceGround),true,Enemy)))Ground=Hit.ImpactPoint;
   else Ground.Z=Origin.Z-Enemy->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
   const FTransform Transform(FRotator::ZeroRotator,Origin+FVector::UpVector*35);
-  auto* Loot=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(ABBSBLootPickup::StaticClass(),Transform,Enemy,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+  auto* Loot=GetWorld()->SpawnActorDeferred<ABBSBLootPickup>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBLootPickup::StaticClass()),Transform,Enemy,nullptr,ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
   if(!Loot)break;
   Loot->Item=Definition;Loot->Quantity=Quantity;Loot->bConcertoReward=Concerto;
   Loot->DropSeconds=FinalBurst ? .64f:.50f;Loot->DropArcHeight=FinalBurst ? 230.f:75.f;

@@ -25,7 +25,7 @@ enum class EBBSBPuzzleKind : uint8
 };
 
 /** Each station owns a different input rule and a physical result; shared recognizers remain authoritative. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBPuzzleStation : public AActor, public IBBSBBunniarSurface
 {
  GENERATED_BODY()
@@ -85,7 +85,7 @@ private:
 };
 
 /** The natural test field has a soft return boundary and no dependency on the caravan quest. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBPuzzleField : public AActor
 {
  GENERATED_BODY()

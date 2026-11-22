@@ -35,7 +35,7 @@ public:
  UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly) bool bRibbonOwned=false;
 };
 
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBBunniarDevice : public AActor, public IBBSBBunniarSurface
 {
  GENERATED_BODY()
@@ -62,7 +62,7 @@ public:
  void SetFocused(bool bFocused);
 };
 
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBBunniarCompanion : public AActor
 {
  GENERATED_BODY()
@@ -182,7 +182,7 @@ private:
  void LockSurfaceView(APlayerController* Controller);
 };
 
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBCaravanPerformer : public ABBSBInkEnemy
 {
  GENERATED_BODY()
@@ -197,7 +197,7 @@ public:
 };
 
 /** Self-contained, editable blockout. Existing maps, character assets and combat rules are untouched. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBCaravanStage : public AActor
 {
  GENERATED_BODY()
@@ -254,7 +254,7 @@ private:
  double StartedAt=0, DeathAt=-1;
  bool bBound=false,bIntroCue=false;
  bool bShopLookOwned=false,bShopMoveOwned=false;
- FVector P(FVector Local) const { return GetActorLocation()+Local; }
+ FVector P(FVector Local) const { return GetActorTransform().TransformPosition(Local); }
  UStaticMeshComponent* Shape(const FString& Name,FVector Position,FVector Size,FLinearColor Color,const TCHAR* Mesh=TEXT("Cube"),FRotator Rotation=FRotator::ZeroRotator,bool bSolid=true);
  void Text(const FString& Value,FVector Position,float Size=34.f,FColor Color=FColor(225,194,130),FRotator Rotation=FRotator(0,-90,0));
  void BuildLayout();

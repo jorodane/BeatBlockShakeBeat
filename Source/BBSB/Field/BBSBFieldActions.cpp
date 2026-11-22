@@ -1,4 +1,6 @@
 #include "BBSBFieldActions.h"
+#include "World/BBSBPlacement.h"
+#include "Interaction/BBSBClimbable.h"
 #include "HAL/PlatformTime.h"
 #include "UI/BBSBPaperTheme.h"
 #include "UI/BBSBGuides.h"
@@ -265,15 +267,22 @@ void UBBSBFieldActionComponent::QuickBunniarDown()
  auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>();FHitResult LootHit;
  const bool HasTarget=I->FindQuickInteraction(LootHit);
  // Mounting is performed by Reparado; it does not borrow or redirect Bunniar.
- if(auto* Ladder=Cast<ABBSBStage01Device>(BBSBBunniarSurface::Resolve(LootHit.GetActor()));
-    Ladder && (Ladder->Kind==EBBSBStage01Node::ClimbLadder || Ladder->Kind==EBBSBStage01Node::LowerLadder) && Ladder->MountLadder())return;
+ AActor* Handler = BBSBBunniarSurface::Resolve(LootHit.GetActor());
+ auto* Player = Cast<ABBSBCharacter>(Character);
+ if (Handler)
+ {
+  if (!BBSBBunniarSurface::CanUse(Handler, Player)) return;
+  if (auto* Climbable = Handler->FindComponentByClass<UBBSBClimbable>())
+  {
+   if (Climbable->TryMount(Player) || Climbable->bPrimaryInteraction) return;
+  }
+ }
  if(!BunniarPrimarySources)
  {
   auto* Loot=Cast<ABBSBLootPickup>(LootHit.GetActor());
   if(!HasTarget)return;
   if(Loot) { if(Hunting)Hunting->TryBeginQuickCollection(Loot);return; }
-  if(auto* Target=BBSBBunniarSurface::Resolve(LootHit.GetActor());Target &&
-     IBBSBBunniarSurface::Execute_BunniarQuickUse(Target,Cast<ABBSBBunniarCompanion>(BunniarEquipment)))return;
+  if (BBSBBunniarSurface::TryQuickUse(Handler, Player, Cast<ABBSBBunniarCompanion>(BunniarEquipment), LootHit)) return;
  }
  if(Hunting && Hunting->bCollectionHeld)return;
  if(Channels[0].bHeld && !IsBunniarControlActive())return;
@@ -362,6 +371,15 @@ void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
  }
  if (PendingEquipmentId!=INDEX_NONE) return;
 	if (!Character || bDodging || Channel < 0 || Channel > 1 || Channels[Channel].bHeld) return;
+ if (Channel == 1)
+ {
+  if (CarryThrowTarget.IsValid()) return;
+  if (auto* Object = HeldBunniarCarry(); Object && IsGestureChannelHeld(0))
+  {
+   CarryThrowTarget = Object;
+   return;
+  }
+ }
  if(Channel==0)
   if(auto* Hunting=Character->FindComponentByClass<UBBSBHuntingComponent>();Hunting && Hunting->TryBeginCollection())
   { if(Hunting->bCollectionHeld)Channels[0].Begin(GetWorld()->GetTimeSeconds());return; }
@@ -370,6 +388,13 @@ void UBBSBFieldActionComponent::BeginGesture(int32 Channel)
 
 void UBBSBFieldActionComponent::EndGesture(int32 Channel)
 {
+ if (Channel == 1 && CarryThrowTarget.IsValid())
+ {
+  auto* Object = PreparedCarryThrow();
+  CarryThrowTarget.Reset();
+  if (Object) Object->ThrowForward();
+  return;
+ }
  if(Channel==0)if(auto* Hunting=Character ? Character->FindComponentByClass<UBBSBHuntingComponent>():nullptr;Hunting && Hunting->bCollectionHeld && !Hunting->bQuickCollection)
  { Hunting->StopCollection();return; }
  if(Channel==1 && bBunniarZoomHeld) { bBunniarZoomHeld=false;return; }
@@ -421,6 +446,8 @@ void UBBSBFieldActionComponent::TickComponent(float DT, ELevelTick TickType, FAc
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
 	if (!PC) { BoundInput.Reset(); return; }
 	BindControls();
+ if (CarryThrowTarget.IsValid() &&
+     (!PreparedCarryThrow() || (!bSyntheticInput && !PC->IsInputKeyDown(EKeys::RightMouseButton)))) CarryThrowTarget.Reset();
  if(bDeathEquipmentFrozen || bStoryPresentationHidden) { ClearHover();return; }
 
  if(bBunniarZoomHeld && (!CanUseBunniarZoom() || (!bSyntheticInput && !PC->IsInputKeyDown(EKeys::RightMouseButton)) ||
@@ -1349,7 +1376,7 @@ void ABBSBFieldPracticeArea::BeginPlay()
 		if (!GetWorld()->LineTraceSingleByChannel(Ground,Location+FVector(0,0,1200),Location-FVector(0,0,2000),ECC_WorldStatic,Query)) continue;
 		Location.Z=Ground.ImpactPoint.Z+1;
 		const FTransform Transform(GetActorRotation()+FRotator(0,180,0),Location);
-		ABBSBBreakableProp* Prop=GetWorld()->SpawnActorDeferred<ABBSBBreakableProp>(ABBSBBreakableProp::StaticClass(),Transform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+		ABBSBBreakableProp* Prop=GetWorld()->SpawnActorDeferred<ABBSBBreakableProp>(UBBSBPlacementAuthoringTools::ResolvePlacementClass(ABBSBBreakableProp::StaticClass()),Transform,this,nullptr,ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 		if (!Prop) continue;
 		Prop->Size=FVector(45+Index*5,45+Index*4,55+Index*8);
 		Prop->MaximumHealth=30.f+Index*8.f;
@@ -1386,6 +1413,7 @@ void ABBSBFieldPracticeHUD::DrawHUD()
 	const float Scale=FMath::Clamp(Canvas->SizeX/1280.f,0.7f,1.35f);
 	const float W=Canvas->SizeX, H=Canvas->SizeY;
 	const float CX=W*0.5f, CY=H*0.5f;
+ Actions->DrawCarryThrowPreview(this, Canvas);
 	Actions->DrawContextAim(this,Canvas);
 	Actions->DrawAimFeedback(this);
  // The compact clockwise ring reports dash recovery even without a wire module.

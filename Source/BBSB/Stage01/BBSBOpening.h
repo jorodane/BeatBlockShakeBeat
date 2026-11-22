@@ -3,8 +3,9 @@
 #include "GameFramework/Actor.h"
 #include "Engine/DataAsset.h"
 #include "Blueprint/UserWidget.h"
+#include "InputCoreTypes.h"
 #include "BBSBOpening.generated.h"
-class ABBSBCharacter;class ABBSBStage01Director;class ABBSBBunniarCompanion;class UAnimSequence;class ULevelSequence;class ACameraActor;class UInputComponent;class UStaticMeshComponent;class UAudioComponent;class UAnimInstance;
+class ABBSBCharacter;class ABBSBStage01Director;class ABBSBBunniarCompanion;class UAnimSequence;class ULevelSequence;class ACameraActor;class UInputComponent;class UStaticMeshComponent;class UAudioComponent;class UAnimInstance;class UProgressBar;class APlayerController;
 
 UENUM(BlueprintType)
 enum class EBBSBOpeningBeat : uint8 { Writing, Tap, Bandage, Stand, Complete };
@@ -35,11 +36,15 @@ UCLASS()
 class BBSB_API UBBSBOpeningSkipPrompt : public UUserWidget
 {
  GENERATED_BODY()
+public:
+ void SetHoldProgress(float Progress);
 protected:
  virtual TSharedRef<SWidget> RebuildWidget() override;
+private:
+ UPROPERTY(Transient) TObjectPtr<UProgressBar> HoldBar;
 };
 
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBStage01Opening : public AActor
 {
  GENERATED_BODY()
@@ -74,7 +79,13 @@ private:
  uint8 SavedAnimationMode=0,SavedRootMotionMode=0;
  bool bSavedRootMotionMode=false;
  double BeatStarted=0,NextScribble=0;
+ FKey SkipHoldKey;
+ double SkipHoldStarted=0.;
  uint8 TapCueCount=0;
+ void BeginSkipHold(FKey Key);
+ void EndSkipHold(FKey Key);
+ void CancelSkipHold();
+ bool UpdateSkipHold(const APlayerController* PC);
  void ChangeBeat(EBBSBOpeningBeat Next);
  void Finish(bool Completed);
  void UpdateBuddy(float Age);

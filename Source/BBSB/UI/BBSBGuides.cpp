@@ -1,4 +1,6 @@
 #include "UI/BBSBGuides.h"
+#include "Interaction/BBSBDraggable.h"
+#include "Interaction/BBSBInteractable.h"
 #include "UI/BBSBPaperTheme.h"
 #include "Save/BBSBSession.h"
 #include "BBSBCharacter.h"
@@ -36,7 +38,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/Canvas.h"
 #include "CanvasItem.h"
-#include "UI/BBSBOutlinedPaths.h"
+#include "Engine/Texture2D.h"
 #include "Engine/Engine.h"
 #include "GameFramework/HUD.h"
 
@@ -124,6 +126,11 @@ void UBBSBGuideSubsystem::TickHints(ABBSBCharacter* P,float DT)
    }
    DragHintText=FText::FromString(Caption);
   }
+  else if (const auto* Drag = Cast<UBBSBDraggable>(UBBSBInteractable::Find(BBSBBunniarSurface::Resolve(C->GetOwner()))))
+  {
+   Supported = Drag->GetDragHint(DragHintAxis, DragHintText);
+   bDragBothWays = true;
+  }
   else if(const auto* Object=Cast<ABBSBCarryObject>(C->GetOwner());Object && Object->bCarried)
   { Supported=true;bCarryHint=true;bDragBothWays=false;DragHintAxis=FVector2D(1,0);DragHintText=FText::FromString(TEXT("[앞으로 던지기]")); }
  }
@@ -135,6 +142,8 @@ bool UBBSBGuideSubsystem::Open(FName Id,bool Notes)
  auto* S=UBBSBSessionSubsystem::Get(this);auto* PC=UGameplayStatics::GetPlayerController(this,0);
  if(!S || !S->bGameStarted || S->bLoading || bOpeningActive || !PC || bGuideOpen)return false;
  if(!Notes && !Definition(Id))return false;
+ if (!Notebook) Notebook = CreateWidget<UBBSBGuideNotebook>(PC, UBBSBGuideNotebook::StaticClass());
+ if (!Notebook) return false;
  if(const auto* P=Cast<ABBSBCharacter>(PC->GetPawn()))
  { bPausedPrimary=P->FieldActions->IsGestureChannelHeld(0);bPausedShortcut=P->FieldActions->bBunniarShortcutActive; }
  bReleasedPrimary=bReleasedShortcut=false;bHintsVisible=false;
@@ -145,18 +154,22 @@ bool UBBSBGuideSubsystem::Open(FName Id,bool Notes)
   bOwnPause=!GetWorld()->IsPaused() && UGameplayStatics::SetGamePaused(this,true);
  }
  else if(S->Menu)S->Menu->SetVisibility(ESlateVisibility::Collapsed);
- if(!Notebook)Notebook=CreateWidget<UBBSBGuideNotebook>(PC,UBBSBGuideNotebook::StaticClass());Notebook->Guides=this;
- if(!Notebook->IsInViewport())Notebook->AddToViewport(2100);Notebook->SetVisibility(ESlateVisibility::Visible);Notebook->OpenPaper(EBBSBPaperEntrance::Center);bGuideOpen=true;
+ Notebook->Guides = this;
+ Notebook->SetNotesMode(Notes);
+ if (!Notebook->IsInViewport()) Notebook->AddToViewport(2100);
+ Notebook->SetVisibility(ESlateVisibility::Visible);
+ Notebook->OpenPaper(EBBSBPaperEntrance::Center);
+ bGuideOpen = true;
  PC->bShowMouseCursor=true;FInputModeUIOnly Input;Input.SetWidgetToFocus(Notebook->TakeWidget());Input.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);PC->SetInputMode(Input);Notebook->Refresh();return true;
 }
 bool UBBSBGuideSubsystem::UnlockAndShow(FName Id)
 {
  if(SeenGuides.Contains(Id) || !Definition(Id))return false;
- if(!Open(Id,false))return false;SeenGuides.Add(Id);Notebook->Refresh();
+ if(!Open(Id,false))return false;SeenGuides.Add(Id);
  if(auto* S=UBBSBSessionSubsystem::Get(this))S->RequestAutoSave(TEXT("가이드 기록"));return true;
 }
 void UBBSBGuideSubsystem::OpenNotes() { const auto Known=KnownGuides();Open(Known.IsEmpty() ? NAME_None:Known[0],true); }
-void UBBSBGuideSubsystem::SelectGuide(FName Id) { if(bGuideOpen && SeenGuides.Contains(Id) && Definition(Id)) { SelectedGuide=Id;Notebook->Refresh(); } }
+void UBBSBGuideSubsystem::SelectGuide(FName Id) { if(bGuideOpen && Notebook && Notebook->IsNotesMode() && SeenGuides.Contains(Id) && Definition(Id)) { SelectedGuide=Id;Notebook->Refresh(); } }
 void UBBSBGuideSubsystem::CloseGuide()
 {
  if(!bGuideOpen)return;if(Notebook)Notebook->ClosePaper();
@@ -189,168 +202,273 @@ void UBBSBGuideSubsystem::ResetForNewGame()
 void UBBSBGuideSubsystem::GuideInputReleased(FKey Key)
 { if(Key==EKeys::LeftMouseButton)bReleasedPrimary=true;if(Key==EKeys::F)bReleasedShortcut=true; }
 
-
 namespace
 {
- UTextBlock* Label(UWidgetTree* T,const FString& Value,int32 Size,FLinearColor Color)
- { auto* L=T->ConstructWidget<UTextBlock>();L->SetText(FText::FromString(Value));L->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"),Size));L->SetColorAndOpacity(Color);L->SetAutoWrapText(true);return L; }
- UButton* Button(UWidgetTree* T,const FString& Text)
+ UTextBlock* GuideLabel(UWidgetTree* Tree, const FText& Text, int32 Size, FLinearColor Color, FName Name = NAME_None)
  {
-  auto* B=T->ConstructWidget<UButton>();FButtonStyle S;S.SetNormal(FSlateColorBrush(BBSBPaper::Cell())).SetHovered(FSlateColorBrush(BBSBPaper::Hover())).SetPressed(FSlateColorBrush(FLinearColor(.73f,.58f,.60f)));
-  B->SetStyle(S);auto* L=Label(T,Text,18,BBSBPaper::Ink());Cast<UButtonSlot>(B->AddChild(L))->SetPadding(FMargin(14,12));return B;
+  auto* Label = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
+  Label->SetText(Text);
+  Label->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), Size));
+  Label->SetColorAndOpacity(Color);
+  Label->SetAutoWrapText(true);
+  return Label;
+ }
+
+ UButton* GuideButton(UWidgetTree* Tree, const FText& Text, bool bPrimary, FName Name = NAME_None)
+ {
+  auto* Button = Tree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+  FButtonStyle Style;
+  Style.SetNormal(FSlateColorBrush(bPrimary ? BBSBPaper::Ink() : BBSBPaper::Cell()));
+  Style.SetHovered(FSlateColorBrush(bPrimary ? BBSBPaper::Rose() : BBSBPaper::Hover()));
+  Style.SetPressed(FSlateColorBrush(FLinearColor(.73f, .58f, .60f)));
+  Button->SetStyle(Style);
+  auto* Label = GuideLabel(Tree, Text, 18, bPrimary ? BBSBPaper::Paper() : BBSBPaper::Ink());
+  if (bPrimary) Label->SetJustification(ETextJustify::Center);
+  auto* Slot = CastChecked<UButtonSlot>(Button->AddChild(Label));
+  Slot->SetPadding(FMargin(16, 11));
+  Slot->SetHorizontalAlignment(HAlign_Fill);
+  return Button;
  }
 }
+
 TSharedRef<SWidget> UBBSBGuideNotebook::RebuildWidget()
 {
- if(!WidgetTree->RootWidget)
+ if (!WidgetTree->RootWidget)
  {
-  SetIsFocusable(true);auto* Root=WidgetTree->ConstructWidget<UCanvasPanel>();WidgetTree->RootWidget=Root;
-  auto* Shade=WidgetTree->ConstructWidget<UBorder>();Shade->SetBrushColor(FLinearColor(.035f,.026f,.035f,.72f));auto* Full=Root->AddChildToCanvas(Shade);Full->SetAnchors(FAnchors(0,0,1,1));Full->SetOffsets(FMargin(0));
-  auto* Fit=WidgetTree->ConstructWidget<UScaleBox>();Fit->SetStretch(EStretch::ScaleToFit);auto* FitSlot=Root->AddChildToCanvas(Fit);FitSlot->SetAnchors(FAnchors(0,0,1,1));FitSlot->SetOffsets(FMargin(40,35,40,35));
-  auto* Size=WidgetTree->ConstructWidget<USizeBox>();Size->SetWidthOverride(1100);Size->SetHeightOverride(670);Fit->AddChild(Size);PaperAnimationTarget=Size;
-  auto* Layers=WidgetTree->ConstructWidget<UOverlay>();Size->AddChild(Layers);
-  auto* Shadow=WidgetTree->ConstructWidget<UBorder>();Shadow->SetBrushColor(BBSBPaper::Shadow());auto* Sh=Layers->AddChildToOverlay(Shadow);Sh->SetPadding(FMargin(10,12,-10,-12));Sh->SetHorizontalAlignment(HAlign_Fill);Sh->SetVerticalAlignment(VAlign_Fill);
-  auto* Ink=WidgetTree->ConstructWidget<UBorder>();Ink->SetBrushColor(BBSBPaper::Ink());Ink->SetPadding(FMargin(2));auto* InkSlot=Layers->AddChildToOverlay(Ink);InkSlot->SetHorizontalAlignment(HAlign_Fill);InkSlot->SetVerticalAlignment(VAlign_Fill);
-  auto* Paper=WidgetTree->ConstructWidget<UBorder>();Paper->SetBrushColor(BBSBPaper::Paper());Paper->SetPadding(FMargin(28,24));Ink->AddChild(Paper);
-  auto* Content=WidgetTree->ConstructWidget<UVerticalBox>();Paper->AddChild(Content);
-  auto* Top=WidgetTree->ConstructWidget<UHorizontalBox>();Content->AddChildToVerticalBox(Top)->SetPadding(FMargin(0,0,0,18));
-  Top->AddChildToHorizontalBox(Label(WidgetTree,TEXT("여행의 기록"),13,BBSBPaper::Rose()))->SetVerticalAlignment(VAlign_Center);
-  auto* Heading=Label(WidgetTree,TEXT("  여행 가이드"),30,BBSBPaper::Ink());Top->AddChildToHorizontalBox(Heading)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-  Count=Label(WidgetTree,TEXT(""),16,BBSBPaper::Muted());Count->SetAutoWrapText(false);Top->AddChildToHorizontalBox(Count)->SetVerticalAlignment(VAlign_Center);
-  CloseButton=Button(WidgetTree,TEXT("닫기  ×"));Cast<UTextBlock>(CloseButton->GetChildAt(0))->SetAutoWrapText(false);Top->AddChildToHorizontalBox(CloseButton)->SetPadding(FMargin(22,0,0,0));CloseButton->OnClicked.AddDynamic(this,&UBBSBGuideNotebook::Dismiss);
-  auto* Body=WidgetTree->ConstructWidget<UHorizontalBox>();Content->AddChildToVerticalBox(Body)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-  auto* Left=WidgetTree->ConstructWidget<USizeBox>();Left->SetWidthOverride(245);Body->AddChildToHorizontalBox(Left)->SetPadding(FMargin(0,0,24,0));
-  auto* Scroll=WidgetTree->ConstructWidget<UScrollBox>();Left->AddChild(Scroll);List=WidgetTree->ConstructWidget<UVerticalBox>();Scroll->AddChild(List);
-  auto* Right=WidgetTree->ConstructWidget<UVerticalBox>();Body->AddChildToHorizontalBox(Right)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-  Category=Label(WidgetTree,TEXT(""),14,BBSBPaper::Rose());Right->AddChildToVerticalBox(Category);
-  Title=Label(WidgetTree,TEXT(""),26,BBSBPaper::Ink());Right->AddChildToVerticalBox(Title)->SetPadding(FMargin(0,2,0,8));
-  auto* ArtSize=WidgetTree->ConstructWidget<USizeBox>();ArtSize->SetHeightOverride(180);Right->AddChildToVerticalBox(ArtSize);
-  auto* Art=WidgetTree->ConstructWidget<UOverlay>();ArtSize->AddChild(Art);
-  Diagram=WidgetTree->ConstructWidget<UBBSBGuideIllustration>();auto* DS=Art->AddChildToOverlay(Diagram);DS->SetHorizontalAlignment(HAlign_Fill);DS->SetVerticalAlignment(VAlign_Fill);
-  Artwork=WidgetTree->ConstructWidget<UImage>();auto* AS=Art->AddChildToOverlay(Artwork);AS->SetHorizontalAlignment(HAlign_Fill);AS->SetVerticalAlignment(VAlign_Fill);
-  Description=Label(WidgetTree,TEXT(""),17,BBSBPaper::Ink());Right->AddChildToVerticalBox(Description)->SetPadding(FMargin(0,10,0,10));
-  auto* StepScroll=WidgetTree->ConstructWidget<UScrollBox>();Right->AddChildToVerticalBox(StepScroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));Steps=WidgetTree->ConstructWidget<UVerticalBox>();StepScroll->AddChild(Steps);
-  Content->AddChildToVerticalBox(Label(WidgetTree,TEXT("[Enter] 확인     [Esc] 닫기     본 안내는 메뉴의 ‘여행 가이드’에서 다시 볼 수 있어요."),14,BBSBPaper::Muted()))->SetPadding(FMargin(0,15,0,0));
+  SetIsFocusable(true);
+  auto* Root = WidgetTree->ConstructWidget<UCanvasPanel>();
+  WidgetTree->RootWidget = Root;
+
+  auto* Shade = WidgetTree->ConstructWidget<UBorder>();
+  Shade->SetBrushColor(FLinearColor(.035f, .026f, .035f, .72f));
+  auto* Full = Root->AddChildToCanvas(Shade);
+  Full->SetAnchors(FAnchors(0, 0, 1, 1));
+  Full->SetOffsets(FMargin(0));
+
+  auto* Fit = WidgetTree->ConstructWidget<UScaleBox>();
+  Fit->SetStretch(EStretch::ScaleToFit);
+  Fit->SetStretchDirection(EStretchDirection::DownOnly);
+  auto* FitSlot = Root->AddChildToCanvas(Fit);
+  FitSlot->SetAnchors(FAnchors(0, 0, 1, 1));
+  FitSlot->SetOffsets(FMargin(32, 24, 32, 26));
+
+  PanelSize = WidgetTree->ConstructWidget<USizeBox>();
+  Fit->AddChild(PanelSize);
+  PaperAnimationTarget = PanelSize;
+
+  auto* Layers = WidgetTree->ConstructWidget<UOverlay>();
+  PanelSize->AddChild(Layers);
+  auto* Shadow = WidgetTree->ConstructWidget<UBorder>();
+  Shadow->SetBrushColor(BBSBPaper::Shadow());
+  auto* ShadowSlot = Layers->AddChildToOverlay(Shadow);
+  ShadowSlot->SetPadding(FMargin(10, 12, -10, -12));
+  ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
+  ShadowSlot->SetVerticalAlignment(VAlign_Fill);
+
+  auto* Ink = WidgetTree->ConstructWidget<UBorder>();
+  Ink->SetBrushColor(BBSBPaper::Ink());
+  Ink->SetPadding(FMargin(2));
+  auto* InkSlot = Layers->AddChildToOverlay(Ink);
+  InkSlot->SetHorizontalAlignment(HAlign_Fill);
+  InkSlot->SetVerticalAlignment(VAlign_Fill);
+  auto* Paper = WidgetTree->ConstructWidget<UBorder>();
+  Paper->SetBrushColor(BBSBPaper::Paper());
+  Paper->SetPadding(FMargin(26, 22, 26, 20));
+  Ink->AddChild(Paper);
+
+  auto* Content = WidgetTree->ConstructWidget<UVerticalBox>();
+  Paper->AddChild(Content);
+  JournalHeader = GuideLabel(WidgetTree, NSLOCTEXT("BBSBGuide", "JournalTitle", "여행 가이드"), 29,
+                             BBSBPaper::Ink(), TEXT("GuideJournalHeader"));
+  Content->AddChildToVerticalBox(JournalHeader)->SetPadding(FMargin(0, 0, 0, 12));
+
+  auto* Body = WidgetTree->ConstructWidget<UHorizontalBox>();
+  Content->AddChildToVerticalBox(Body)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+  JournalNavigation = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("GuideJournalNavigation"));
+  JournalNavigation->SetWidthOverride(224);
+  Body->AddChildToHorizontalBox(JournalNavigation)->SetPadding(FMargin(0, 0, 22, 0));
+  auto* ListScroll = WidgetTree->ConstructWidget<UScrollBox>();
+  JournalNavigation->AddChild(ListScroll);
+  List = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("GuideList"));
+  ListScroll->AddChild(List);
+
+  auto* Detail = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("GuideDetail"));
+  Body->AddChildToHorizontalBox(Detail)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+  Title = GuideLabel(WidgetTree, FText(), 27, BBSBPaper::Ink(), TEXT("GuideTitle"));
+  Detail->AddChildToVerticalBox(Title)->SetPadding(FMargin(0, 0, 0, 10));
+
+  ArtFrame = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("GuideArtFrame"));
+  Detail->AddChildToVerticalBox(ArtFrame)->SetPadding(FMargin(0, 0, 0, 12));
+  auto* ArtFit = WidgetTree->ConstructWidget<UScaleBox>();
+  ArtFit->SetStretch(EStretch::ScaleToFit);
+  ArtFrame->AddChild(ArtFit);
+  Artwork = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("GuideArtwork"));
+  Artwork->SetVisibility(ESlateVisibility::HitTestInvisible);
+  ArtFit->AddChild(Artwork);
+
+  DetailScroll = WidgetTree->ConstructWidget<UScrollBox>();
+  Detail->AddChildToVerticalBox(DetailScroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+  auto* Copy = WidgetTree->ConstructWidget<UVerticalBox>();
+  DetailScroll->AddChild(Copy);
+  Description = GuideLabel(WidgetTree, FText(), 17, BBSBPaper::Ink(), TEXT("GuideDescription"));
+  Copy->AddChildToVerticalBox(Description)->SetPadding(FMargin(0, 0, 9, 10));
+  Steps = WidgetTree->ConstructWidget<UVerticalBox>();
+  Copy->AddChildToVerticalBox(Steps);
+
+  auto* Close = GuideButton(WidgetTree, NSLOCTEXT("BBSBGuide", "CloseGuide", "닫기"), true, TEXT("GuideCloseButton"));
+  Detail->AddChildToVerticalBox(Close)->SetPadding(FMargin(0, 13, 0, 0));
+  Close->OnClicked.AddDynamic(this, &UBBSBGuideNotebook::Dismiss);
  }
  return Super::RebuildWidget();
 }
+
 void UBBSBGuideNotebook::Refresh()
 {
- if(!List || !Guides)return;List->ClearChildren();Steps->ClearChildren();Clicks.Reset();const auto Known=Guides->KnownGuides();Count->SetText(FText::FromString(FString::Printf(TEXT("발견한 안내 %d"),Known.Num())));
- for(FName Id:Known)if(auto* D=Guides->Definition(Id))
+ if (!List || !Guides) return;
+ PanelSize->SetWidthOverride(bNotesMode ? 1050.f : 710.f);
+ PanelSize->SetHeightOverride(bNotesMode ? 712.f : 694.f);
+ JournalHeader->SetVisibility(bNotesMode ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+ JournalNavigation->SetVisibility(bNotesMode ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+ List->ClearChildren();
+ Clicks.Reset();
+ if (bNotesMode)
  {
-  auto* B=Button(WidgetTree,(Id==Guides->SelectedGuide ? TEXT("●  "):TEXT("    "))+D->Title.ToString());Cast<UTextBlock>(B->GetChildAt(0))->SetAutoWrapText(false);List->AddChildToVerticalBox(B)->SetPadding(FMargin(0,0,0,8));
-  auto* C=NewObject<UBBSBGuideClick>(this);C->Owner=Guides;C->Id=Id;B->OnClicked.AddDynamic(C,&UBBSBGuideClick::Click);Clicks.Add(C);
+  for (FName Id : Guides->KnownGuides())
+  {
+   const auto* Guide = Guides->Definition(Id);
+   if (!Guide) continue;
+   auto* Button = GuideButton(WidgetTree, Guide->Title, Id == Guides->SelectedGuide);
+   List->AddChildToVerticalBox(Button)->SetPadding(FMargin(0, 0, 0, 8));
+   auto* Click = NewObject<UBBSBGuideClick>(this);
+   Click->Owner = Guides;
+   Click->Id = Id;
+   Button->OnClicked.AddDynamic(Click, &UBBSBGuideClick::Click);
+   Clicks.Add(Click);
+  }
  }
- auto* D=Guides->Definition(Guides->SelectedGuide);
- Title->SetText(D ? D->Title:FText::FromString(TEXT("아직 비어 있는 페이지")));Category->SetText(D ? D->Category:FText::FromString(TEXT("탐험 기록")));
- Description->SetText(D ? D->Description:FText::FromString(TEXT("여행 중 새로 본 사용법이 여기에 기록돼요.")));
- Artwork->SetVisibility(D && D->Illustration ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);if(D && D->Illustration)Artwork->SetBrushFromTexture(D->Illustration);
- Diagram->GuideId=Guides->SelectedGuide;Diagram->SetVisibility(D && !D->Illustration ? ESlateVisibility::HitTestInvisible:ESlateVisibility::Collapsed);
- if(D)for(int32 I=0;I<D->Steps.Num();++I)
+
+ const auto* Guide = Guides->Definition(Guides->SelectedGuide);
+ Title->SetText(Guide ? Guide->Title : NSLOCTEXT("BBSBGuide", "EmptyGuide", "아직 본 가이드가 없어요"));
+ Description->SetText(Guide ? Guide->Description : NSLOCTEXT("BBSBGuide", "EmptyGuideDescription", "여행 중에 본 사용법을 여기에 기록해요."));
+ ArtFrame->SetHeightOverride(bNotesMode ? 270.f : 290.f);
+ ArtFrame->SetVisibility(Guide && Guide->Illustration ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+ Artwork->SetBrushFromTexture(Guide ? Guide->Illustration.Get() : nullptr, true);
+ Steps->ClearChildren();
+ if (Guide)
  {
-  auto* Line=WidgetTree->ConstructWidget<UHorizontalBox>();Steps->AddChildToVerticalBox(Line)->SetPadding(FMargin(0,0,0,9));
-  auto* N=Label(WidgetTree,FString::Printf(TEXT("%02d  "),I+1),20,BBSBPaper::Rose());Line->AddChildToHorizontalBox(N);
-  auto* Words=WidgetTree->ConstructWidget<UVerticalBox>();Line->AddChildToHorizontalBox(Words)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));Words->AddChildToVerticalBox(Label(WidgetTree,D->Steps[I].Name.ToString(),18,BBSBPaper::Ink()));Words->AddChildToVerticalBox(Label(WidgetTree,D->Steps[I].Description.ToString(),16,BBSBPaper::Muted()));
+  for (const auto& Step : Guide->Steps)
+  {
+   auto* Words = WidgetTree->ConstructWidget<UVerticalBox>();
+   Steps->AddChildToVerticalBox(Words)->SetPadding(FMargin(0, 0, 9, 7));
+   Words->AddChildToVerticalBox(GuideLabel(WidgetTree, Step.Name, 17, BBSBPaper::Ink()));
+   Words->AddChildToVerticalBox(GuideLabel(WidgetTree, Step.Description, 15, BBSBPaper::Muted()));
+  }
  }
- CloseButton->SetKeyboardFocus();
-}
-void UBBSBGuideClick::Click() { if(Owner)Owner->SelectGuide(Id); }
-void UBBSBGuideNotebook::Dismiss() { if(Guides)Guides->CloseGuide(); }
-FReply UBBSBGuideNotebook::NativeOnKeyDown(const FGeometry& G,const FKeyEvent& E)
-{
- if(E.GetKey()==EKeys::Escape || E.GetKey()==EKeys::Enter || E.GetKey()==EKeys::Gamepad_FaceButton_Right) { Dismiss();return FReply::Handled(); }
- return Super::NativeOnKeyDown(G,E);
-}
-FReply UBBSBGuideNotebook::NativeOnKeyUp(const FGeometry& G,const FKeyEvent& E)
-{ if(Guides)Guides->GuideInputReleased(E.GetKey());return Super::NativeOnKeyUp(G,E); }
-FReply UBBSBGuideNotebook::NativeOnMouseButtonUp(const FGeometry& G,const FPointerEvent& E)
-{ if(Guides)Guides->GuideInputReleased(E.GetEffectingButton());return Super::NativeOnMouseButtonUp(G,E); }
-int32 UBBSBGuideIllustration::NativePaint(const FPaintArgs& Args,const FGeometry& G,const FSlateRect& Culling,FSlateWindowElementList& E,int32 L,const FWidgetStyle& Style,bool Enabled) const
-{
- L=Super::NativePaint(Args,G,Culling,E,L,Style,Enabled);const FVector2D S=G.GetLocalSize();const float X=S.X/720.f,Y=S.Y/240.f;
- auto P=[&](float A,float B){return FVector2D(A*X,B*Y);};
- auto Box=[&](FVector2D At,FVector2D Size,FLinearColor Color){BBSBPaper::SlatePolygon(G,E,L+1,{At,At+FVector2D(Size.X,0),At+Size,At+FVector2D(0,Size.Y)},Color);};
- auto Line=[&](TArray<FVector2D> Points,FLinearColor C,float Width=2.f){FSlateDrawElement::MakeLines(E,L+3,G.ToPaintGeometry(),Points,ESlateDrawEffect::None,C,true,Width);};
- auto Circle=[&](FVector2D At,float R,FLinearColor C,bool Fill)
- {TArray<FVector2D> V;for(int I=0;I<=48;++I)V.Add(At+P(FMath::Cos(I*PI/24)*R,FMath::Sin(I*PI/24)*R));if(Fill)BBSBPaper::SlatePolygon(G,E,L+2,V,C);else Line(V,C);};
- auto Text=[&](const FString& T,float A,float B,int Size,FLinearColor C){FSlateDrawElement::MakeText(E,L+4,G.ToPaintGeometry(FVector2D(1,1),FSlateLayoutTransform(P(A,B))),T,FCoreStyle::GetDefaultFontStyle(TEXT("Regular"),Size),ESlateDrawEffect::None,C);};
- Box(P(0,0),S,FLinearColor(.85f,.81f,.73f));
- // A book illustration: split sliding door, Bunniar's back on a leaf, and the actual drag direction.
- Box(P(292,20),P(310,176),BBSBPaper::Ink());Box(P(300,28),P(140,160),FLinearColor(.45f,.56f,.53f));Box(P(452,28),P(142,160),FLinearColor(.56f,.65f,.60f));
- Line({P(323,48),P(415,48),P(415,166),P(323,166),P(323,48)},BBSBPaper::Paper());Line({P(477,48),P(570,48),P(570,166),P(477,166),P(477,48)},BBSBPaper::Paper());
- Circle(P(382,102),28,BBSBPaper::Paper(),true);Circle(P(382,102),28,BBSBPaper::Ink(),false);
- Line({P(365,84),P(355,58),P(347,81),P(356,100)},BBSBPaper::Ink(),5);Line({P(396,82),P(407,57),P(414,80),P(406,102)},BBSBPaper::Ink(),5);
- Circle(P(373,100),3,BBSBPaper::Rose(),true);Circle(P(390,100),3,BBSBPaper::Rose(),true);Line({P(377,113),P(384,117),P(391,112)},BBSBPaper::Rose());
- Line({P(235,103),P(312,103)},BBSBPaper::Rose(),4);Line({P(295,90),P(312,103),P(295,116)},BBSBPaper::Rose(),4);
- if(GuideId==TEXT("BunniarMove"))
- {
- Line({P(350,158),P(244,158),P(260,145)},BBSBPaper::Rose(),4);Line({P(492,158),P(648,158),P(632,145)},BBSBPaper::Rose(),4);
- }
- Box(P(87,66),P(62,86),BBSBPaper::Ink());Box(P(91,70),P(54,78),BBSBPaper::Paper());Line({P(118,70),P(118,101)},BBSBPaper::Ink());Circle(P(118,84),5,BBSBPaper::Rose(),true);
- const bool Move=GuideId==TEXT("BunniarMove");
- Text(Move ? TEXT("위치 조정"):TEXT("버니아 부착"),30,20,13,BBSBPaper::Rose());Text(TEXT("좌클릭 유지"),46,170,18,BBSBPaper::Ink());
- Text(Move ? TEXT("←  마우스를 좌우로  →"):TEXT("대상을 조준하고 버니아 보내기"),293,208,18,BBSBPaper::Rose());
- return L+5;
+ DetailScroll->ScrollToStart();
 }
 
-void UBBSBGuideSubsystem::DrawHints(AHUD* HUD,UCanvas* C) const
+void UBBSBGuideClick::Click()
 {
- if(!bHintsVisible || !HUD || !C)return;
- const float S=FMath::Clamp(C->SizeX/1280.f,.65f,1.4f),W=C->SizeX,H=C->SizeY;
- auto Color=[](FLinearColor V,float A){V.A*=A;return V;};
- auto Text=[&](const FString& T,FVector2D P,float A,float Scale=1.f)
- {
-  FCanvasTextItem Item(P,FText::FromString(T),GEngine->GetMediumFont(),Color(BBSBPaper::Paper(),A));
-  Item.Scale=FVector2D(S*Scale);Item.bOutlined=true;Item.OutlineColor=Color(BBSBPaper::Ink(),A);C->DrawItem(Item);
- };
- TArray<BBSBOutlinedPaths::FPath> Paths;
- auto Path=[&](TArray<FVector2D> Points,float Opacity,float Width,bool Closed=false)
- { BBSBOutlinedPaths::FPath P;P.Points=MoveTemp(Points);P.Color=Color(BBSBPaper::Paper(),Opacity);P.Width=Width*S;P.Border=2.2f*S;P.bClosed=Closed;Paths.Add(MoveTemp(P)); };
- auto Line=[&](FVector2D A,FVector2D B,float Opacity,float Width=2.f) { Path({A,B},Opacity,Width); };
- auto Keycap=[&](FVector2D P,float A)
- {
-  const FVector2D Size(23*S);Path({P,P+FVector2D(Size.X,0),P+Size,P+FVector2D(0,Size.Y)},A,1.8f,true);
- };
- auto Mouse=[&](FVector2D P,float A,bool Right)
- {
-  TArray<FVector2D> Outer;
-  // Two continuous semicircles joined by straight sides; no midpoint step.
-  for(int32 I=0;I<=24;++I) { const float T=PI+I*PI/24.f;Outer.Add(P+FVector2D(11.5f+FMath::Cos(T)*11.5f,11.5f+FMath::Sin(T)*11.5f)*S); }
-  for(int32 I=0;I<=24;++I) { const float T=I*PI/24.f;Outer.Add(P+FVector2D(11.5f+FMath::Cos(T)*11.5f,22.5f+FMath::Sin(T)*11.5f)*S); }
-  Path(MoveTemp(Outer),A,2.6f,true);
-  const FVector2D Pressed=P+FVector2D(Right ? 16:7,6)*S;
-  Line(Pressed,Pressed+FVector2D(0,7)*S,A,3);
-  Line(P+FVector2D(11.5f,0)*S,P+FVector2D(11.5f,13)*S,A,1);
- };
- const float Time=GetWorld()->GetTimeSeconds();
- if(MoveHintAlpha>.01f)
- {
-  const FVector2D P(W*.5f-242*S,H-245*S);
-  const FVector2D Base=P+FVector2D(20,34)*S;
-  const FVector2D Keys[]={FVector2D(27,-25),FVector2D(0,0),FVector2D(27,0),FVector2D(54,0)};const TCHAR* Names[]={TEXT("W"),TEXT("A"),TEXT("S"),TEXT("D")};
-  for(int I=0;I<4;++I){const FVector2D K=Base+Keys[I]*S;Keycap(K,MoveHintAlpha);Text(Names[I],K+FVector2D(5,1)*S,MoveHintAlpha,.75f);}
-  Text(TEXT("이동하기"),P+FVector2D(116,26)*S,MoveHintAlpha,.85f);
- }
- if(LookHintAlpha>.01f)
- {
-  const FVector2D P(W*.5f+10*S,H-245*S);
-  Mouse(P+FVector2D(30+FMath::Sin(Time*3)*8,20)*S,LookHintAlpha,false);
-  Line(P+FVector2D(17,39)*S,P+FVector2D(12,39)*S,LookHintAlpha);Line(P+FVector2D(70,39)*S,P+FVector2D(76,39)*S,LookHintAlpha);
-  Text(TEXT("마우스로 둘러보기"),P+FVector2D(88,27)*S,LookHintAlpha,.77f);
- }
- if(DragHintAlpha>.01f && HintSurface.IsValid())
- {
-  FVector2D At;const auto* PC=HUD->GetOwningPlayerController();
-  if(!PC || !PC->ProjectWorldLocationToScreen(HintPoint,At,true))return;
-  At.X=FMath::Clamp(At.X,156*S,W-156*S);At.Y=FMath::Clamp(At.Y+88*S,85*S,H-150*S);
-  const FVector2D Centre=At-FVector2D(0,17)*S,Axis=DragHintAxis.GetSafeNormal(),Perp(-Axis.Y,Axis.X);
-  auto Arrow=[&](FVector2D D)
-  { const FVector2D Tip=Centre+D*66*S,Tail=Centre+D*26*S;Line(Tail,Tip,DragHintAlpha,3.5f);Path({Tip-D*12*S+Perp*8*S,Tip,Tip-D*12*S-Perp*8*S},DragHintAlpha,3.5f); };
-  if(!bCarryHint) { Arrow(Axis);if(bDragBothWays)Arrow(-Axis); }
-  Mouse(Centre-FVector2D(11.5f,17)*S+(bCarryHint ? FVector2D::ZeroVector:Axis*(FMath::Sin(Time*3.4f)*9*S)),DragHintAlpha,bCarryHint);
-  const FString Caption=DragHintText.ToString();float TW,TH;HUD->GetTextSize(Caption,TW,TH,GEngine->GetMediumFont(),S*.9f);
-  Text(Caption,FVector2D(At.X-TW*.5f,At.Y+10*S),DragHintAlpha,.9f);
- }
- BBSBOutlinedPaths::Draw(C,Paths,BBSBPaper::Ink());
+ if (Owner) Owner->SelectGuide(Id);
 }
+
+void UBBSBGuideNotebook::Dismiss()
+{
+ if (Guides) Guides->CloseGuide();
+}
+
+FReply UBBSBGuideNotebook::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& Event)
+{
+ const FKey Key = Event.GetKey();
+ if (Key == EKeys::Escape || Key == EKeys::Enter || Key == EKeys::Gamepad_FaceButton_Right)
+ {
+  if (!Event.IsRepeat()) Dismiss();
+  return FReply::Handled();
+ }
+ return Super::NativeOnPreviewKeyDown(Geometry, Event);
+}
+
+FReply UBBSBGuideNotebook::NativeOnKeyUp(const FGeometry& Geometry, const FKeyEvent& Event)
+{
+ if (Guides) Guides->GuideInputReleased(Event.GetKey());
+ return Super::NativeOnKeyUp(Geometry, Event);
+}
+
+FReply UBBSBGuideNotebook::NativeOnMouseButtonUp(const FGeometry& Geometry, const FPointerEvent& Event)
+{
+ if (Guides) Guides->GuideInputReleased(Event.GetEffectingButton());
+ return Super::NativeOnMouseButtonUp(Geometry, Event);
+}
+
+void UBBSBGuideSubsystem::DrawHints(AHUD* HUD, UCanvas* Canvas) const
+{
+ if (!bHintsVisible || !HUD || !Canvas) return;
+ const float Scale = FMath::Clamp(Canvas->SizeX / 1280.f, .65f, 1.4f);
+ const float Width = Canvas->SizeX, Height = Canvas->SizeY;
+ const auto* Catalog = UBBSBInteractTypes::DefaultCatalog();
+ auto Icon = [&](FName Name, FVector2D Centre, float Size, float Alpha, float Angle = 0.f)
+ {
+  auto* Texture = Catalog ? Catalog->HintIcons.FindRef(Name).Get() : nullptr;
+  if (!Texture) return;
+  const float Aspect = float(Texture->GetSizeX()) / FMath::Max(1, Texture->GetSizeY());
+  const FVector2D Pixels(FMath::Min(1.f, Aspect) * Size * Scale, FMath::Min(1.f, 1.f / Aspect) * Size * Scale);
+  const FVector2D TopLeft = Centre - Pixels * .5f;
+  HUD->DrawTexture(Texture, TopLeft.X, TopLeft.Y, Pixels.X, Pixels.Y, 0, 0, 1, 1,
+                   FLinearColor::White.CopyWithNewOpacity(Alpha), BLEND_Translucent, 1.f, false, Angle, FVector2D(.5));
+ };
+ auto Text = [&](const FString& Value, FVector2D Position, float Alpha, float Size, bool bKey = false)
+ {
+  const FLinearColor Foreground = bKey ? BBSBPaper::Ink() : BBSBPaper::Paper();
+  FCanvasTextItem Item(Position, FText::FromString(Value), GEngine->GetMediumFont(), Foreground.CopyWithNewOpacity(Alpha));
+  Item.Scale = FVector2D(Scale * Size);
+  Item.bOutlined = !bKey;
+  Item.OutlineColor = BBSBPaper::Ink().CopyWithNewOpacity(Alpha);
+  Canvas->DrawItem(Item);
+ };
+
+ const float Time = GetWorld()->GetTimeSeconds();
+ if (MoveHintAlpha > .01f)
+ {
+  const FVector2D Position(Width * .5f - 242 * Scale, Height - 245 * Scale);
+  const FVector2D Keys[] = {FVector2D(59, 17), FVector2D(31, 45), FVector2D(59, 45), FVector2D(87, 45)};
+  const TCHAR* Names[] = {TEXT("W"), TEXT("A"), TEXT("S"), TEXT("D")};
+  for (int32 Index = 0; Index < UE_ARRAY_COUNT(Keys); ++Index)
+  {
+   const FVector2D Centre = Position + Keys[Index] * Scale;
+   Icon(TEXT("Keycap"), Centre, 25, MoveHintAlpha);
+   float TextWidth, TextHeight;
+   HUD->GetTextSize(Names[Index], TextWidth, TextHeight, GEngine->GetMediumFont(), Scale * .7f);
+   Text(Names[Index], Centre - FVector2D(TextWidth, TextHeight) * .5f, MoveHintAlpha, .7f);
+  }
+  Text(TEXT("이동하기"), Position + FVector2D(113, 26) * Scale, MoveHintAlpha, .85f);
+ }
+ if (LookHintAlpha > .01f)
+ {
+  const FVector2D Position(Width * .5f + 10 * Scale, Height - 245 * Scale);
+  Icon(TEXT("MouseLook"), Position + FVector2D(43 + FMath::Sin(Time * 3) * 8, 36) * Scale, 42, LookHintAlpha);
+  Text(TEXT("마우스로 둘러보기"), Position + FVector2D(88, 27) * Scale, LookHintAlpha, .77f);
+ }
+ if (DragHintAlpha > .01f && HintSurface.IsValid())
+ {
+  FVector2D Anchor;
+  const auto* PC = HUD->GetOwningPlayerController();
+  if (!PC || !PC->ProjectWorldLocationToScreen(HintPoint, Anchor, true)) return;
+  Anchor.X = FMath::Clamp(Anchor.X, 156 * Scale, Width - 156 * Scale);
+  Anchor.Y = FMath::Clamp(Anchor.Y + 88 * Scale, 85 * Scale, Height - 150 * Scale);
+  const FVector2D Centre = Anchor - FVector2D(0, 17) * Scale;
+  const FVector2D Axis = DragHintAxis.GetSafeNormal();
+  if (!bCarryHint)
+  {
+   const float Angle = FMath::RadiansToDegrees(FMath::Atan2(Axis.Y, Axis.X));
+   Icon(TEXT("Arrow"), Centre + Axis * (48 * Scale), 37, DragHintAlpha, Angle);
+   if (bDragBothWays) Icon(TEXT("Arrow"), Centre - Axis * (48 * Scale), 37, DragHintAlpha, Angle + 180.f);
+  }
+  const FVector2D MouseNudge = bCarryHint ? FVector2D::ZeroVector : Axis * (FMath::Sin(Time * 3.4f) * 9 * Scale);
+  Icon(bCarryHint ? TEXT("MouseRight") : TEXT("MouseLeft"), Centre + MouseNudge, 43, DragHintAlpha);
+  const FString Caption = DragHintText.ToString();
+  float TextWidth, TextHeight;
+  HUD->GetTextSize(Caption, TextWidth, TextHeight, GEngine->GetMediumFont(), Scale * .9f);
+  Text(Caption, Anchor + FVector2D(-TextWidth * .5f, 10 * Scale), DragHintAlpha, .9f);
+ }
+}
+

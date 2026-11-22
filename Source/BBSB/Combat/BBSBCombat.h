@@ -271,7 +271,7 @@ private:
 };
 
 /** Placeholder ink creature: replace its visual component without changing stage/pattern logic. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBInkEnemy : public ACharacter
 {
 	GENERATED_BODY()
@@ -421,7 +421,7 @@ private:
 };
 
 /** All enemies share this impact schedule; individual AI never starts independent rhythm timers. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBCombatStage : public AActor
 {
 	GENERATED_BODY()
@@ -561,7 +561,7 @@ private:
 };
 
 /** A reversible encounter marker. F2 goes here; F3 selects an isolated practice experiment. */
-UCLASS()
+UCLASS(Blueprintable)
 class BBSB_API ABBSBCombatPracticeArea : public AActor
 {
 	GENERATED_BODY()

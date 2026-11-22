@@ -20,7 +20,7 @@ void ABBSBStage01Device::RegisterPhysicalSurfaces()
 }
 void ABBSBStage01Device::RebuildPhysicalPresentation()
 {
- Tags.AddUnique(TEXT("BBSBPhysicalInteraction"));bSurfacesRegistered=false;Label->SetHiddenInGame(true);
+ Tags.AddUnique(TEXT("BBSBPhysicalInteraction"));bSurfacesRegistered=false;Label->SetHiddenInGame(true);BuildPlacementSurfaces();CaptureSurfaceHomes();
  auto Empty=[](UStaticMeshComponent* C)
  { C->SetStaticMesh(nullptr);C->SetCollisionEnabled(ECollisionEnabled::NoCollision);C->SetVisibility(false); };
  Empty(Body);Empty(DoorLeft);Empty(DoorRight);for(UStaticMeshComponent* C:DeviceDetails)Empty(C);
@@ -34,12 +34,13 @@ void ABBSBStage01Device::RebuildPhysicalPresentation()
  };
  const TCHAR* Cylinder=TEXT("/Engine/BasicShapes/Cylinder.Cylinder"),*Sphere=TEXT("/Engine/BasicShapes/Sphere.Sphere"),*Cone=TEXT("/Engine/BasicShapes/Cone.Cone"),*Plane=TEXT("/Engine/BasicShapes/Plane.Plane");
  const FLinearColor Brass(.55f,.39f,.23f),Wood(.22f,.16f,.12f),Paper(.86f,.81f,.71f);
- if(Kind==EBBSBStage01Node::CabinDoor && Targets.Num()>0)
+ const auto Frames=SurfaceFrames();
+ if(Kind==EBBSBStage01Node::CabinDoor && !Frames.IsEmpty())
  {
-  auto* Template=Cast<AStaticMeshActor>(Targets[0]);auto* Source=Template ? Template->GetStaticMeshComponent():nullptr;
+  auto* Source=Cast<UStaticMeshComponent>(Frames[0]);
   if(Source && Source->GetStaticMesh())
   {
-   DoorFrame=Closed.Num()>0 ? Closed[0]:Template->GetActorTransform();DoorAxis=DoorFrame.GetUnitAxis(EAxis::Y);
+   DoorFrame=Closed.Num()>0 ? SurfaceHome(0):Source->GetComponentTransform();DoorAxis=DoorFrame.GetUnitAxis(EAxis::Y);
    const float Width=Source->GetStaticMesh()->GetBoundingBox().GetSize().Y*FMath::Abs(DoorFrame.GetScale3D().Y);DoorTravel=Width*.5f+30.f;
    for(auto* Leaf:{DoorLeft.Get(),DoorRight.Get()})
    {
@@ -80,7 +81,7 @@ void ABBSBStage01Device::RebuildPhysicalPresentation()
   Part(DeviceDetails[0],Cylinder,FVector(0,0,10),FVector(.13f,.13f,.19f),FRotator::ZeroRotator,Wood);
  }
  else if(Kind==EBBSBStage01Node::TuneReward)Part(Body,Sphere,FVector::ZeroVector,FVector(.32f),FRotator::ZeroRotator,FLinearColor(.72f,.63f,.82f));
- else if(Targets.IsEmpty() && Kind!=EBBSBStage01Node::LowerLadder && Kind!=EBBSBStage01Node::ClimbLadder)
+ else if(Frames.IsEmpty() && Kind!=EBBSBStage01Node::LowerLadder && Kind!=EBBSBStage01Node::ClimbLadder)
  {
   // Notes and departure tickets are the actual readable paper, not a separate control handle.
   Part(Body,Plane,FVector::ZeroVector,FVector(.55f,.4f,1),FRotator(20,0,0),Paper);
@@ -96,6 +97,12 @@ void ABBSBStage01Device::UpdatePhysicalPresentation(bool bSweepMotion,float Prev
  // rather than an invisible device handle, must receive cursor and F traces.
  if(Kind==EBBSBStage01Node::ToolCache)
  {
+  for(UStaticMeshComponent* Surface:PlacementSurfaces)if(IsValid(Surface))
+  {
+   Surface->SetHiddenInGame(bSolved);Surface->SetVisibility(!bSolved);
+   Surface->SetCollisionEnabled(bSolved ? ECollisionEnabled::NoCollision:ECollisionEnabled::QueryOnly);
+   Surface->SetCollisionResponseToAllChannels(ECR_Ignore);Surface->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block);
+  }
   FCollisionResponseContainer SelectionOnly(ECR_Ignore);SelectionOnly.SetResponse(ECC_Visibility,ECR_Block);
   for(AActor* Target:Targets)if(IsValid(Target))
   {
@@ -128,7 +135,7 @@ void ABBSBStage01Device::UpdatePhysicalPresentation(bool bSweepMotion,float Prev
  else
  {
   const float T=IsDirectDrag() ? Painted:FMath::SmoothStep(0.f,1.f,Painted);
-  for(int32 I=0;I<Targets.Num();++I)if(IsValid(Targets[I]) && Closed.IsValidIndex(I))Queue(Targets[I]->GetRootComponent(),Closed[I].GetLocation()+OpenOffset*T);
+  const auto Frames=SurfaceFrames();for(int32 I=0;I<Frames.Num();++I)if(Closed.IsValidIndex(I))Queue(Frames[I],SurfaceHome(I).GetLocation()+MotionOffset()*T);
  }
  if(bSweepMotion && GetWorld() && GetWorld()->IsGameWorld())
  {
@@ -164,4 +171,5 @@ void ABBSBStage01Device::UpdatePhysicalPresentation(bool bSweepMotion,float Prev
 void ABBSBStage01Device::RestoreSessionState(float Value,bool Solved)
 {
  bHeld=false;Progress=Painted=FMath::Clamp(Value,0.f,1.f);bSolved=Solved;UpdatePhysicalPresentation(false);
+ UpdateClimbAvailability();
 }
